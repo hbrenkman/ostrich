@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base theme variables */
+:root {
+  --background: 60 17% 95%; /* #F5F5F0 */
+  --foreground: 214 14% 27%; /* #374151 */
+  --muted: 215 16% 77%; /* #D1D5DB */
+  --muted-foreground: 215 5% 46%; /* #6B7280 */
+  --popover: 0 0% 100%; /* #FFFFFF */
+  --popover-foreground: 214 14% 27%; /* #374151 */
+  --card: 0 0% 100%; /* #FFFFFF */
+  --card-foreground: 214 14% 27%; /* #374151 */
+  --border: 215 16% 77%; /* #D1D5DB */
+  --input: 214 14% 27%; /* #374151 */
+  --primary: 178 58% 44%; /* #2C7A7B */
+  --primary-foreground: 0 0% 100%; /* #FFFFFF */
+  --secondary: 24 68% 47%; /* #C05621 */
+  --secondary-foreground: 0 0% 100%; /* #FFFFFF */
+  --accent: 178 58% 44%; /* #2C7A7B */
+  --accent-foreground: 0 0% 0%; /* #000000 */
+  --destructive: 346 87% 48%; /* #E11D48 */
+  --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+  --ring: 178 58% 44%; /* #2C7A7B */
+  --radius: 0.5rem;
+  --placeholder-text: 215 5% 64%; /* #9CA3AF */
+}
+
+.dark {
+  --background: 215 28% 17%; /* #1F2937 */
+  --foreground: 214 7% 91%; /* #E5E7EB */
+  --muted: 215 10% 30%; /* #4B5563 */
+  --muted-foreground: 215 5% 64%; /* #9CA3AF */
+  --popover: 215 28% 17%; /* #1F2937 */
+  --popover-foreground: 214 7% 91%; /* #E5E7EB */
+  --card: 215 28% 17%; /* #1F2937 */
+  --card-foreground: 214 7% 91%; /* #E5E7EB */
+  --border: 215 10% 30%; /* #4B5563 */
+  --input: 214 7% 91%; /* #E5E7EB */
+  --primary: 175 47% 55%; /* #4DB6AC */
+  --primary-foreground: 0 0% 0%; /* #000000 */
+  --secondary: 24 68% 47%; /* #C05621 */
+  --secondary-foreground: 0 0% 100%; /* #FFFFFF */
+  --accent: 175 47% 55%; /* #4DB6AC */
+  --accent-foreground: 0 0% 0%; /* #000000 */
+  --destructive: 346 87% 48%; /* #E11D48 */
+  --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+  --ring: 175 47% 55%; /* #4DB6AC */
+  --placeholder-text: 215 5% 46%; /* #6B7280 */
+}
+
+/* Improve hover contrast for tables */
+tr.hover\:bg-gray-50:hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+.dark tr.hover\:bg-gray-50:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* TipTap Editor Styles */
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror p {
+  margin-bottom: 0.75em;
+}
+
+.ProseMirror h1 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.25em;
+  font-weight: bold;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+.ProseMirror li {
+  margin-bottom: 0.25em;
+}
+
+.ProseMirror strong {
+  font-weight: bold;
+}
+
+.ProseMirror em {
+  font-style: italic;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #adb5bd;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Image resizing in rich text editor */
+.ProseMirror .resize-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 0.5em 0;
+}
+
+.ProseMirror .resize-image-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 2px solid #ddd;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.ProseMirror .resize-image-wrapper:hover img {
+  border-color: rgba(77, 182, 172, 0.8);
+}
+
+.ProseMirror .resize-image-wrapper.ProseMirror-selectednode img {
+  outline: 3px solid rgba(77, 182, 172, 0.8);
+  border-radius: 2px;
+}
+
+.ProseMirror .resize-image-wrapper .resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(77, 182, 172, 0.8);
+  background-color: white;
+  z-index: 10;
+}
+
+.ProseMirror .resize-image-wrapper .resize-handle.top-left {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+
+.ProseMirror .resize-image-wrapper .resize-handle.top-right {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+
+.ProseMirror .resize-image-wrapper .resize-handle.bottom-left {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+
+.ProseMirror .resize-image-wrapper .resize-handle.bottom-right {
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+}
+
+.ProseMirror .resize-image-wrapper .resize-info {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 20;
+}
+
+/* Component styles */
+.dialog-content {
+  @apply fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg;
+}
+
+.dialog-header {
+  @apply flex flex-col space-y-1.5 text-center sm:text-left;
+}
+
+.dialog-footer {
+  @apply flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2;
+}
+
+.card-border {
+  @apply border border-[#4DB6AC] dark:border-[#4DB6AC];
+}
+
+.header-border {
+  @apply border-b border-[#4DB6AC] dark:border-[#4DB6AC];
+}
+
+.toolbar-border {
+  @apply border-b border-[#4DB6AC] dark:border-[#4DB6AC];
+}
+
+/* Ensure form elements have consistent styling */
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="tel"],
+input[type="date"],
+input[type="password"],
+select,
+textarea {
+  @apply border-[#4DB6AC] dark:border-[#4DB6AC] bg-background text-foreground placeholder:text-muted-foreground dark:placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-primary/20;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+  h1 {
+    @apply text-h1;
+  }
+  h2 {
+    @apply text-h2;
+  }
+  p {
+    @apply text-body;
+  }
+  button {
+    @apply text-button;
+  }
+}
