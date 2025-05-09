@@ -17,7 +17,40 @@ export function Pagination({
   totalItems,
   onItemsPerPageChange
 }: PaginationProps) {
-  const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+  const getPageNumbers = () => {
+    const pages = [];
+    
+    // Always show first page
+    pages.push(1);
+    
+    // Calculate range around current page
+    let start = Math.max(2, currentPage - 1);
+    let end = Math.min(totalPages - 1, currentPage + 1);
+    
+    // Add ellipsis after first page if needed
+    if (start > 2) {
+      pages.push('...');
+    }
+    
+    // Add pages around current page
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    
+    // Add ellipsis before last page if needed
+    if (end < totalPages - 1) {
+      pages.push('...');
+    }
+    
+    // Always show last page if there is more than one page
+    if (totalPages > 1) {
+      pages.push(totalPages);
+    }
+    
+    return pages;
+  };
+
+  const pages = getPageNumbers();
   const startItem = (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
@@ -65,15 +98,16 @@ export function Pagination({
         </button>
 
         <div className="flex items-center gap-1">
-          {pages.map((page) => (
+          {pages.map((page, index) => (
             <button
-              key={page}
-              onClick={() => onPageChange(page)}
+              key={index}
+              onClick={() => typeof page === 'number' ? onPageChange(page) : null}
+              disabled={page === '...'}
               className={`px-3 py-1 rounded-md transition-colors ${
                 currentPage === page
                   ? 'bg-primary text-primary-foreground'
                   : 'hover:bg-gray-100'
-              }`}
+              } ${page === '...' ? 'cursor-default' : ''}`}
             >
               {page}
             </button>

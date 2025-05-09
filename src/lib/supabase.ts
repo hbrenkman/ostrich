@@ -1,8 +1,55 @@
 import { createClient } from '@supabase/supabase-js';
+import { Database } from '@/types/supabase';
 
-// Initialize the Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Initialize the public Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+// Add detailed debug logging for public client
+console.log('Supabase Public Environment Variables (Detailed):', {
+  url: {
+    value: supabaseUrl,
+    type: typeof supabaseUrl,
+    length: supabaseUrl?.length
+  },
+  anonKey: {
+    value: supabaseAnonKey ? `${supabaseAnonKey.substring(0, 10)}...` : 'missing',
+    type: typeof supabaseAnonKey,
+    length: supabaseAnonKey?.length
+  }
+});
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase public credentials:', {
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey ? 'present' : 'missing'
+  });
+  throw new Error('Missing required Supabase public credentials. Please check your .env.local file.');
+}
 
 // Create a single supabase client for the entire app
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient<Database>(
+  supabaseUrl,
+  supabaseAnonKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: 'ostrich-auth-token'
+    },
+    db: {
+      schema: 'public'
+    },
+    global: {
+      headers: {
+        'x-application-name': 'ostrich'
+      }
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      }
+    }
+  }
+);

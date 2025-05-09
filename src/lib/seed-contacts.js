@@ -1,4 +1,4 @@
-import { supabase } from './supabaseUtils.js';
+import { supabase, supabaseAdmin } from './supabaseUtils.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -61,13 +61,18 @@ async function seedContacts() {
     console.log('Supabase URL:', process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
     console.log('Supabase Key (first 10 chars):', (process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)?.substring(0, 10) + '...');
     
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client is not available');
+      return false;
+    }
+    
     // Approach 1: Try to execute the migration file directly
     console.log('\nApproach 1: Executing migration file directly...');
     try {
       const migrationPath = path.join(process.cwd(), 'supabase', 'migrations', '20250424160000_final_contacts_fix.sql');
       if (fs.existsSync(migrationPath)) {
         const sql = fs.readFileSync(migrationPath, 'utf8');
-        const { error: sqlError } = await supabase.sql(sql);
+        const { error: sqlError } = await supabaseAdmin.rpc('exec_sql', { query: sql });
         
         if (sqlError) {
           console.error('Error executing migration file:', sqlError);
@@ -113,7 +118,7 @@ async function seedContacts() {
         `;
         
         console.log('Creating contacts table...');
-        const { error: createError } = await supabase.sql(createTableSQL);
+        const { error: createError } = await supabaseAdmin.rpc('exec_sql', { query: createTableSQL });
         
         if (createError) {
           console.error('Error creating contacts table:', createError);
@@ -127,7 +132,7 @@ async function seedContacts() {
       // Step 2: Clear existing data
       try {
         console.log('Clearing existing contacts...');
-        const { error: clearError } = await supabase.sql('DELETE FROM contacts;');
+        const { error: clearError } = await supabaseAdmin.rpc('exec_sql', { query: 'DELETE FROM contacts;' });
         
         if (clearError) {
           console.error('Error clearing contacts:', clearError);
@@ -188,7 +193,7 @@ async function seedContacts() {
           ('David', 'Wilson', 'david.wilson@globaldynamics.com', '+1 (555) 567-8901', '+1 (555) 543-2109', '${globalId}', 'Engineer');
       `;
       
-      const { error: insertError } = await supabase.sql(insertSQL);
+      const { error: insertError } = await supabaseAdmin.rpc('exec_sql', { query: insertSQL });
       
       if (insertError) {
         console.error('Error inserting contacts via SQL:', insertError);
@@ -274,13 +279,18 @@ async function insertContact(firstName, lastName, email, phone, mobile, clientId
 }
 
 // Run the function if this file is executed directly
-if (require.main === module) {
-  seedContacts().then(success => {
-    console.log(`Contacts seeding ${success ? 'succeeded' : 'failed'}.`);
-    if (!success) {
+if (import.meta.url === new URL(import.meta.url).href) {
+  seedContacts()
+    .then(success => {
+      console.log(`Contact seeding ${success ? 'succeeded' : 'failed'}.`);
+      if (!success) {
+        process.exit(1);
+      }
+    })
+    .catch(err => {
+      console.error('Unexpected error:', err);
       process.exit(1);
-    }
-  });
+    });
 }
 
 export { seedContacts };

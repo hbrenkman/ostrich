@@ -1,4 +1,4 @@
-import { supabase } from './supabaseUtils.js';
+import { supabaseAdmin } from './supabaseUtils.js';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -15,6 +15,11 @@ async function createExecSqlFunction() {
     console.log('Creating exec_sql function...');
     console.log('Supabase URL:', process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
     console.log('Supabase Key (first 10 chars):', (process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)?.substring(0, 10) + '...');
+    
+    if (!supabaseAdmin) {
+      console.error('Supabase admin client is not available');
+      return false;
+    }
     
     // Read the SQL file
     let sql;
@@ -43,7 +48,7 @@ async function createExecSqlFunction() {
     
     // Try to execute the SQL directly
     console.log('Executing SQL directly...');
-    const { error: sqlError } = await supabase.sql(sql);
+    const { error: sqlError } = await supabaseAdmin.rpc('exec_sql', { query: sql });
     
     if (sqlError) {
       console.error('Error executing SQL directly:', sqlError);
@@ -66,7 +71,7 @@ async function createExecSqlFunction() {
       $$;
       `;
       
-      const { error: simpleError } = await supabase.sql(simpleSql);
+      const { error: simpleError } = await supabaseAdmin.rpc('exec_sql', { query: simpleSql });
       
       if (simpleError) {
         console.error('Error with simpler SQL:', simpleError);
@@ -86,7 +91,7 @@ async function createExecSqlFunction() {
 }
 
 // Run the function if this file is executed directly
-if (require.main === module) {
+if (import.meta.url === new URL(import.meta.url).href) {
   createExecSqlFunction()
     .then(success => {
       console.log(`exec_sql function creation ${success ? 'succeeded' : 'failed'}.`);

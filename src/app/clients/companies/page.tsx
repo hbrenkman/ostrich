@@ -1,132 +1,218 @@
-"use client";
+'use client';
 
-import { Building2, Search, Plus, ChevronDown, ChevronRight, Phone, Mail, MapPin } from 'lucide-react';
-import { useState } from 'react';
+import { Building2, Search, Plus, ChevronRight, ChevronDown, MapPin, Phone, Pencil } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from '@/components/ui/data-table';
 import { Pagination } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { usePagination } from '@/hooks/usePagination';
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
+import { Database } from '@/types/supabase';
+import { useRouter } from 'next/navigation';
 
-interface Company {
+type Industry = Database['public']['Tables']['industries']['Row'];
+type Company = Database['public']['Tables']['companies']['Row'];
+
+interface Location {
+  id: string;
   name: string;
-  type: string;
-  status: string;
-  contacts: {
-    name: string;
-    officeNumber: string;
-    mobileNumber: string;
-    officeAddress: string;
-    email: string;
-  }[];
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone?: string;
 }
 
-const generateCompanies = () => {
-  const baseCompanies = [
-    {
-      name: "Acme Corporation",
-      type: "Enterprise",
-      status: "Active",
-      contacts: [
-        {
-          name: "John Smith",
-          officeNumber: "+1 (555) 123-4567",
-          mobileNumber: "+1 (555) 987-6543",
-          officeAddress: "123 Business Ave, Suite 100, New York, NY 10001",
-          email: "john.smith@acme.com"
-        },
-        {
-          name: "Sarah Johnson",
-          officeNumber: "+1 (555) 234-5678",
-          mobileNumber: "+1 (555) 876-5432",
-          officeAddress: "123 Business Ave, Suite 100, New York, NY 10001",
-          email: "sarah.johnson@acme.com"
-        }
-      ]
-    },
-    {
-      name: "Stellar Solutions",
-      type: "SMB",
-      status: "Pending",
-      contacts: [
-        {
-          name: "Michael Brown",
-          officeNumber: "+1 (555) 345-6789",
-          mobileNumber: "+1 (555) 765-4321",
-          officeAddress: "456 Tech Park, Suite 200, San Francisco, CA 94105",
-          email: "michael.brown@stellar.com"
-        }
-      ]
-    },
-    {
-      name: "Global Dynamics",
-      type: "Enterprise",
-      status: "Inactive",
-      contacts: [
-        {
-          name: "Emily Davis",
-          officeNumber: "+1 (555) 456-7890",
-          mobileNumber: "+1 (555) 654-3210",
-          officeAddress: "789 Corporate Drive, Chicago, IL 60601",
-          email: "emily.davis@globaldynamics.com"
-        },
-        {
-          name: "David Wilson",
-          officeNumber: "+1 (555) 567-8901",
-          mobileNumber: "+1 (555) 543-2109",
-          officeAddress: "789 Corporate Drive, Chicago, IL 60601",
-          email: "david.wilson@globaldynamics.com"
-        }
-      ]
-    }
-  ];
-
-  return Array.from({ length: 250 }, (_, index) => {
-    const baseCompany = baseCompanies[index % baseCompanies.length];
-    return {
-      ...baseCompany,
-      name: `${baseCompany.name} ${Math.floor(index / baseCompanies.length) + 1}`,
-    };
-  });
-};
-
-// Export companies for use in other components
-export const companies = generateCompanies();
+interface CompanyWithRelations extends Company {
+  locations?: Location[];
+  industry?: Industry;
+}
 
 export default function Companies() {
-  const { user } = useAuth();
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const { user, isAdmin, loading: authLoading } = useAuth();
+  const [companies, setCompanies] = useState<CompanyWithRelations[]>([]);
+  const [industries, setIndustries] = useState<Industry[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const itemsPerPage = 10;
   const [isNewCompanyDialogOpen, setIsNewCompanyDialogOpen] = useState(false);
   const [newCompany, setNewCompany] = useState<Partial<Company>>({
     name: '',
-    type: 'SMB',
-    status: 'Active',
-    contacts: []
+    industry_id: '',
+    status: 'Active'
   });
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<number>>(new Set());
+  const router = useRouter();
 
-  const canCreateCompany = user?.role === 'admin' || user?.role === 'project_management';
+  // Single auth check on mount
+  useEffect(() => {
+    if (authLoading) return; // Wait for auth to initialize
 
-  const {
-    currentPage,
-    setCurrentPage,
-    itemsPerPage,
-    setItemsPerPage,
-    currentItems: paginatedCompanies,
-    totalPages,
-    totalItems
-  } = usePagination({
-    items: companies,
-    itemsPerPage: 100
-  });
-
-  const toggleRow = (index: number) => {
-    const newExpandedRows = new Set(expandedRows);
-    if (expandedRows.has(index)) {
-      newExpandedRows.delete(index);
-    } else {
-      newExpandedRows.add(index);
+    if (!user) {
+      console.log('No user found, redirecting to login');
+      router.push('/auth/login');
+      return;
     }
-    setExpandedRows(newExpandedRows);
-  };
+    
+    if (!isAdmin()) {
+      console.log('User is not admin, redirecting to dashboard');
+      router.push('/dashboard');
+      return;
+    }
+  }, [user, router, isAdmin, authLoading]);
+
+  // Show loading state while checking permissions
+  if (authLoading || !user || !isAdmin()) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  const canCreateCompany = true; // Since we already check isAdmin above
+
+  const columns = [
+    {
+      header: 'Name',
+      accessor: (company: CompanyWithRelations) => (
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4" />
+          <span>{company.name}</span>
+        </div>
+      )
+    },
+    {
+      header: 'Industry',
+      accessor: (company: CompanyWithRelations) => company.industry?.name || 'N/A'
+    },
+    {
+      header: 'Status',
+      accessor: (company: CompanyWithRelations) => (
+        <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(company.status)}`}>
+          {company.status}
+        </span>
+      )
+    },
+    {
+      header: 'Actions',
+      accessor: (company: CompanyWithRelations) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCompanyClick(company);
+          }}
+          className="p-1 hover:bg-muted/20 rounded-full"
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
+      )
+    }
+  ];
+
+  // Only fetch data when we have a user and they are an admin
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchDataIfNeeded = async () => {
+      if (!user || !isAdmin()) return;
+      
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Check if we have a valid session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          throw new Error(`Session error: ${sessionError.message}`);
+        }
+        
+        if (!session) {
+          console.error('No valid session found');
+          throw new Error('No valid session found. Please log in again.');
+        }
+
+        // Fetch industries from the industries table
+        const { data: industriesData, error: industriesError } = await supabase
+          .from('industries')
+          .select('*')
+          .order('name');
+
+        if (industriesError) {
+          console.error('Error fetching industries:', industriesError);
+          throw new Error(`Failed to fetch industries: ${industriesError.message}`);
+        }
+
+        if (mounted) {
+          setIndustries(industriesData || []);
+        }
+
+        // Fetch companies with their industries
+        const { data: companiesData, error: companiesError } = await supabase
+          .from('companies')
+          .select('*, industry:industries(*)')
+          .order('name', { ascending: true });
+
+        if (companiesError) {
+          console.error('Error fetching companies:', companiesError);
+          throw new Error(`Failed to fetch companies: ${companiesError.message}`);
+        }
+
+        if (mounted) {
+          setCompanies(companiesData || []);
+        }
+      } catch (err: any) {
+        console.error('Error in fetchData:', err);
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load data');
+          if (err.message.includes('session')) {
+            router.push('/auth/login');
+          }
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchDataIfNeeded();
+
+    // Add a focus event listener to refresh data when returning to the page
+    const handleFocus = () => {
+      fetchDataIfNeeded();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      mounted = false;
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [user, isAdmin, router]);
+
+  const filteredCompanies = companies.filter(company => {
+    if (!searchTerm) return true;
+    
+    const search = searchTerm.toLowerCase().trim();
+    
+    return (
+      (company?.name?.toLowerCase()?.includes(search) ?? false) ||
+      (company?.industry?.name?.toLowerCase()?.includes(search) ?? false) ||
+      (company?.status?.toLowerCase()?.includes(search) ?? false)
+    );
+  });
+
+  const totalPages = Math.ceil(filteredCompanies.length / itemsPerPage);
+  const paginatedCompanies = filteredCompanies.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -141,195 +227,185 @@ export default function Companies() {
     }
   };
 
-  const handleAddCompany = () => {
-    if (newCompany.name) {
-      // In a real app, this would be an API call to create the company
+  const handleAddCompany = async () => {
+    if (!newCompany.name || !newCompany.industry_id) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .insert([{
+          name: newCompany.name,
+          industry_id: newCompany.industry_id,
+          status: newCompany.status
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Fetch the industry data for the new company
+      const { data: industryData } = await supabase
+        .from('industries')
+        .select('*')
+        .eq('id', newCompany.industry_id)
+        .single();
+
+      const newCompanyWithIndustry = {
+        ...data,
+        industry: industryData
+      };
+
+      setCompanies([...companies, newCompanyWithIndustry]);
       setIsNewCompanyDialogOpen(false);
       setNewCompany({
         name: '',
-        type: 'SMB',
-        status: 'Active',
-        contacts: []
+        industry_id: '',
+        status: 'Active'
       });
+    } catch (err) {
+      console.error('Error adding company:', err);
+      setError('Failed to add company');
     }
   };
 
+  const handleCompanyClick = (company: CompanyWithRelations) => {
+    router.push(`/clients/companies/${company.id}/edit`);
+  };
+
+  const toggleRow = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newExpandedRows = new Set(expandedCompanies);
+    if (expandedCompanies.has(index)) {
+      newExpandedRows.delete(index);
+    } else {
+      newExpandedRows.add(index);
+    }
+    setExpandedCompanies(newExpandedRows);
+  };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  if (error) {
+    return <div className="text-red-500">Error: {error}</div>;
+  }
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Building2 className="w-6 h-6 text-primary" />
-          <h1 className="text-h1">Companies</h1>
-        </div>
+    <div className="container mx-auto py-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Companies</h1>
         {canCreateCompany && (
-          <button 
+          <button
             onClick={() => setIsNewCompanyDialogOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
           >
-            <Plus className="w-4 h-4" />
-            <span>New Company</span>
+            <Plus className="h-4 w-4" />
+            Add Company
           </button>
         )}
       </div>
 
-      <div className="mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted w-5 h-5" />
-          <input
-            type="text"
-            placeholder="Search companies..."
-            className="w-full pl-10 pr-4 py-2 border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground placeholder:text-card-muted"
-          />
-        </div>
-      </div>
-
-      <div className="bg-card text-card-foreground rounded-lg shadow">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-muted text-muted-foreground">
-                <th className="w-10 px-4 py-2"></th>
-                <th className="px-4 py-2 text-left text-button">Name</th>
-                <th className="px-4 py-2 text-left text-button">Type</th>
-                <th className="px-4 py-2 text-left text-button">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {paginatedCompanies.map((company, index) => (
-                <>
-                  <tr
-                    key={`company-${index}`}
-                    className="hover:bg-muted/5 transition-colors duration-150"
-                  >
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => toggleRow(index)}
-                        className="icon-button"
-                      >
-                        {expandedRows.has(index) ? (
-                          <ChevronDown className="w-4 h-4 text-foreground" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-foreground" />
-                        )}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-body font-medium">
-                      {company.name}
-                    </td>
-                    <td className="px-4 py-2 text-foreground">
-                      {company.type}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(company.status)}`}>
-                        {company.status}
-                      </span>
-                    </td>
-                  </tr>
-                  {expandedRows.has(index) && (
-                    <tr key={`contacts-${index}`} className="bg-muted/10">
-                      <td colSpan={4} className="px-4 py-2">
-                        <div className="ml-4 space-y-2">
-                          <h3 className="text-sm font-semibold text-foreground">Contacts</h3>
-                          <div className="space-y-2">
-                            {company.contacts.map((contact, contactIndex) => (
-                              <div
-                                key={contactIndex}
-                                className="bg-card p-3 rounded-lg border border-border"
-                              >
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="font-medium">{contact.name}</span>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-1 text-sm">
-                                  <div className="flex items-center gap-2">
-                                    <Phone className="w-4 h-4 text-muted-foreground" />
-                                    <span className="text-foreground">Office: {contact.officeNumber}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Phone className="w-4 h-4 text-muted-foreground" />
-                                    <span className="text-foreground">Mobile: {contact.mobileNumber}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 md:col-span-2">
-                                    <MapPin className="w-4 h-4 text-muted-foreground" />
-                                    <span className="text-foreground">{contact.officeAddress}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 md:col-span-2">
-                                    <Mail className="w-4 h-4 text-muted-foreground" />
-                                    <a
-                                      href={`mailto:${contact.email}`}
-                                      className="text-primary hover:underline"
-                                    >
-                                      {contact.email}
-                                    </a>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4" />
+            <input
+              type="text"
+              placeholder="Search companies..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1 px-2 py-1 border rounded-md"
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DataTable
+            columns={columns}
+            data={paginatedCompanies}
+            expandedContent={(company: CompanyWithRelations) => (
+              <div className="p-4 space-y-4">
+                {company.locations?.map((location) => (
+                  <div key={location.id} className="flex items-start gap-4">
+                    <div className="flex-1">
+                      <div className="font-medium">{location.name}</div>
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+                          {location.address_line1}
+                          {location.address_line2 && <>, {location.address_line2}</>}
+                          <br />
+                          {location.city}, {location.state} {location.zip}
                         </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        
-        <div className="px-4">
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-            itemsPerPage={itemsPerPage}
-            onItemsPerPageChange={setItemsPerPage}
-            totalItems={totalItems}
+                        {location.phone && (
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4" />
+                            {location.phone}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            expandedRows={expandedCompanies}
+            onExpandRow={toggleRow}
           />
-        </div>
-      </div>
-
-      {/* New Company Dialog */}
-      <Dialog open={isNewCompanyDialogOpen} onOpenChange={setIsNewCompanyDialogOpen}>
-        <DialogContent className="bg-card text-card-foreground">
-          <DialogHeader>
-            <DialogTitle className="text-lg">New Company</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">
-                Company Name
-              </label>
-              <input
-                type="text"
-                value={newCompany.name || ''}
-                onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground placeholder:text-card-muted"
-                placeholder="Enter company name"
+          {totalPages > 1 && (
+            <div className="mt-4">
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredCompanies.length}
+                onPageChange={setCurrentPage}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">
-                Company Type
-              </label>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={isNewCompanyDialogOpen} onOpenChange={setIsNewCompanyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Company</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <label htmlFor="name">Company Name</label>
+              <input
+                id="name"
+                value={newCompany.name}
+                onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
+                className="px-3 py-2 border rounded-md"
+              />
+            </div>
+            <div className="grid gap-2">
+              <label htmlFor="industry">Industry</label>
               <select
-                value={newCompany.type || 'SMB'}
-                onChange={(e) => setNewCompany({ ...newCompany, type: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground"
+                id="industry"
+                value={newCompany.industry_id || ''}
+                onChange={(e) => setNewCompany({ ...newCompany, industry_id: e.target.value })}
+                className="px-3 py-2 border rounded-md"
               >
-                <option value="Enterprise">Enterprise</option>
-                <option value="SMB">SMB</option>
-                <option value="Startup">Startup</option>
-                <option value="Government">Government</option>
-                <option value="Non-Profit">Non-Profit</option>
+                <option value="">Select Industry</option>
+                {industries.map((industry) => (
+                  <option key={industry.id} value={industry.id}>
+                    {industry.name}
+                  </option>
+                ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">
-                Status
-              </label>
+            <div className="grid gap-2">
+              <label htmlFor="status">Status</label>
               <select
-                value={newCompany.status || 'Active'}
+                id="status"
+                value={newCompany.status}
                 onChange={(e) => setNewCompany({ ...newCompany, status: e.target.value })}
-                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground"
+                className="px-3 py-2 border rounded-md"
               >
                 <option value="Active">Active</option>
                 <option value="Pending">Pending</option>
@@ -340,13 +416,13 @@ export default function Companies() {
           <DialogFooter>
             <button
               onClick={() => setIsNewCompanyDialogOpen(false)}
-              className="px-4 py-2 text-sm font-medium bg-muted/10 hover:bg-muted/20 rounded-md transition-colors text-foreground"
+              className="px-4 py-2 border rounded-md"
             >
               Cancel
             </button>
             <button
               onClick={handleAddCompany}
-              className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors ml-2"
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
             >
               Add Company
             </button>

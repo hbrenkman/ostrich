@@ -1,96 +1,163 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { User, AuthContextType } from '../types';
 import { getStoredUser, setStoredUser } from '../utils/auth';
+import { supabase } from '@/lib/supabase';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+  const router = useRouter();
 
-  const isAdmin = () => {
-    return user?.role === 'admin';
-  };
+  const isAdmin = useCallback(() => {
+    return user?.role === 'admin' || user?.role === 'project_management';
+  }, [user?.role]);
 
-  useEffect(() => {
-    const storedUser = getStoredUser();
-    if (storedUser) {
-      setUser(storedUser);
-    }
-    setLoading(false);
+  const processUserData = useCallback((session: any) => {
+    if (!session?.user) return null;
+    
+    const userData = {
+      id: session.user.id,
+      email: session.user.email!,
+      name: session.user.user_metadata.name || '',
+      // Check both user_metadata and app_metadata for role
+      role: session.user.user_metadata.role || 
+            session.user.app_metadata?.role ||
+            'user'
+    };
+
+    return userData;
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      console.log('AuthProvider: Signing in with email:', email);
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: email, // Will be normalized in the API
-          password: password
-        })
+      setLoading(true);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        console.error('AuthProvider: Sign in failed:', data.error);
-        throw new Error(data.error || 'Invalid credentials');
+      if (error) throw error;
+
+      if (data.user) {
+        const userData = processUserData(data);
+        if (userData) {
+          setUser(userData);
+          setStoredUser(userData);
+        }
       }
 
-      const data = await response.json();
-      console.log('AuthProvider: Sign in response:', data);
       return data;
     } catch (error) {
       console.error('Sign in failed:', error);
       throw error;
-    }
-  };
-
-  const verifyCode = async (username: string, code: string) => {
-    try {
-      console.log('AuthProvider: Verifying code for:', username);
-      const response = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, code })
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        console.error('AuthProvider: Verification failed:', data.error);
-        throw new Error(data.error || 'Invalid verification code');
-      }
-
-      const { user: userData } = await response.json();
-      console.log('AuthProvider: User data after verification:', userData);
-      setUser(userData);
-      setStoredUser(userData);
-      return userData;
-    } catch (error) {
-      console.error('Verification failed:', error);
-      throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
   const signOut = async () => {
     try {
-      // Implement sign out
+      setLoading(true);
       setUser(null);
-      setStoredUser(null);
+      await supabase.auth.signOut();
+      router.push('/auth/login');
     } catch (error) {
       console.error('Sign out failed:', error);
       throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      try {
+        // Check for existing Supabase session
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error getting session:', error);
+          throw error;
+        }
+        
+        if (mounted) {
+          if (session) {
+            const userData = processUserData(session);
+            if (userData) {
+              setUser(userData);
+              setStoredUser(userData);
+            }
+          }
+          setInitialized(true);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        if (mounted) {
+          setInitialized(true);
+          setLoading(false);
+        }
+      }
+    };
+
+    initializeAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
+      console.log('Auth state changed:', event, session?.user?.email);
+
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        router.push('/auth/login');
+        return;
+      }
+
+      if (session) {
+        const userData = processUserData(session);
+        if (userData) {
+          setUser(userData);
+          setStoredUser(userData);
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router, processUserData]);
+
+  // Show loading state only during initial auth check
+  if (!initialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, isAdmin, verifyCode }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export { AuthContext }
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
+
+export { AuthContext };

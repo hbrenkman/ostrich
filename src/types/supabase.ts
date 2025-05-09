@@ -9,62 +9,57 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
-      reference_tables: {
+      industries: {
         Row: {
           id: string
           name: string
-          category: string
+          code: string
           description: string | null
-          entries: Json
           created_at: string | null
           updated_at: string | null
         }
         Insert: {
           id?: string
           name: string
-          category: string
+          code: string
           description?: string | null
-          entries?: Json
           created_at?: string | null
           updated_at?: string | null
         }
         Update: {
           id?: string
           name?: string
-          category?: string
+          code?: string
           description?: string | null
-          entries?: Json
           created_at?: string | null
           updated_at?: string | null
         }
-        Relationships: []
       }
-      state_cost_index: {
+      companies: {
         Row: {
           id: string
-          state: string
-          metro_area: string
-          cost_index: number
+          name: string
+          industry_id: string | null
+          status: string
           created_at: string | null
           updated_at: string | null
         }
         Insert: {
           id?: string
-          state: string
-          metro_area: string
-          cost_index: number
+          name: string
+          industry_id?: string | null
+          status: string
           created_at?: string | null
           updated_at?: string | null
         }
         Update: {
           id?: string
-          state?: string
-          metro_area?: string
-          cost_index?: number
+          name?: string
+          industry_id?: string | null
+          status?: string
           created_at?: string | null
           updated_at?: string | null
         }
-        Relationships: []
       }
     }
     Views: {

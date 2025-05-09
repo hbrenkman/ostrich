@@ -3,39 +3,41 @@
 import { useContext, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AuthContext } from '../components/AuthProvider';
-import { isPublicRoute, getStoredUser } from '../utils/auth';
+import { isPublicRoute } from '../utils/auth';
+
+// Cache for auth check results
+const authCheckCache = new Map<string, boolean>();
 
 export function useAuth() {
   const context = useContext(AuthContext);
   const router = useRouter();
   const pathname = usePathname();
-  const [storedUser, setStoredUser] = useState(getStoredUser());
+  const [isChecking, setIsChecking] = useState(true);
   
-  // Refresh stored user on mount
-  useEffect(() => {
-    setStoredUser(getStoredUser());
-  }, []);
-
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
 
   useEffect(() => {
+    if (!context.loading) {
+      setIsChecking(false);
+    }
+  }, [context.loading]);
+
+  useEffect(() => {
+    if (isChecking || !pathname) return;
+
     console.log('Auth check - pathname:', pathname);
     console.log('Auth check - context user:', context.user);
-    console.log('Auth check - stored user:', storedUser);
     
-    // Check both context user and stored user
-    const isAuthenticated = context.user || storedUser;
-    
-    if (!isPublicRoute(pathname) && !isAuthenticated) {
+    if (!isPublicRoute(pathname) && !context.user) {
       console.log('Not authenticated, redirecting to login');
       router.push('/auth/login');
-    } else if (isAuthenticated && pathname === '/auth/login') {
+    } else if (context.user && pathname === '/auth/login') {
       console.log('Already authenticated, redirecting to dashboard');
       router.push('/dashboard');
     }
-  }, [context.user, storedUser, pathname, router]);
+  }, [context.user, pathname, router, isChecking]);
 
   return context;
 }

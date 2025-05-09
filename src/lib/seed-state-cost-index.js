@@ -119,14 +119,10 @@ async function seedStateCostIndex() {
   }
 }
 
-// Run the seed function
-if (require.main === module) {
-  seedStateCostIndex().then(success => {
-    console.log(`State cost index seeding ${success ? 'succeeded' : 'failed'}.`);
-    if (!success) {
-      process.exit(1);
-    }
-  });
+// Replace CommonJS check with ES modules check
+if (import.meta.url === new URL(import.meta.url).href) {
+  console.log('Running seed-state-cost-index.js directly');
+  // Add any direct execution code here
 }
 
 export { seedStateCostIndex };

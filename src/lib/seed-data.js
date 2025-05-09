@@ -9,6 +9,30 @@ dotenv.config();
 // Sample data for reference tables
 const referenceTablesData = [
   {
+    name: 'Industries',
+    category: 'Project Types',
+    description: 'List of industry types for companies',
+    entries: [
+      { id: '1', key: 'Architecture', value: 'ARCH', description: 'Architecture firms and practices' },
+      { id: '2', key: 'Engineering', value: 'ENG', description: 'Engineering firms and practices' },
+      { id: '3', key: 'Construction', value: 'CON', description: 'Construction companies and contractors' },
+      { id: '4', key: 'Real Estate', value: 'RE', description: 'Real estate development and management' },
+      { id: '5', key: 'Technology', value: 'TECH', description: 'Technology companies and IT services' },
+      { id: '6', key: 'Healthcare', value: 'HC', description: 'Healthcare providers and facilities' },
+      { id: '7', key: 'Manufacturing', value: 'MFG', description: 'Manufacturing companies' },
+      { id: '8', key: 'Retail', value: 'RET', description: 'Retail businesses' },
+      { id: '9', key: 'Financial Services', value: 'FIN', description: 'Financial institutions and services' },
+      { id: '10', key: 'Education', value: 'EDU', description: 'Educational institutions' },
+      { id: '11', key: 'Government', value: 'GOV', description: 'Government agencies and departments' },
+      { id: '12', key: 'Non-Profit', value: 'NP', description: 'Non-profit organizations' },
+      { id: '13', key: 'Transportation', value: 'TRANS', description: 'Transportation and logistics' },
+      { id: '14', key: 'Energy', value: 'NRG', description: 'Energy companies and utilities' },
+      { id: '15', key: 'Telecommunications', value: 'TELECOM', description: 'Telecommunications providers' },
+      { id: '16', key: 'Professional Services', value: 'PRO', description: 'Professional service providers' },
+      { id: '17', key: 'Other', value: 'OTHER', description: 'Other industry types' }
+    ]
+  },
+  {
     name: 'Fee Multipliers',
     category: 'Fee Calculation',
     description: 'Base multipliers for calculating project fees based on complexity',
@@ -41,15 +65,6 @@ const referenceTablesData = [
       { id: '16', key: 'Residential', value: 'RSD', description: 'Single-family homes and dwellings - $205/sq.ft' }
     ]
   }
-];
-
-// US States with major metro areas and cost index values
-const states_with_metro_areas = [
-  { state: "Alabama", metros: [{ name: "Birmingham", index: 87.2 }, { name: "Mobile", index: 85.6 }, { name: "Other", index: 86.0 }] },
-  { state: "Alaska", metros: [{ name: "Anchorage", index: 128.4 }, { name: "Other", index: 125.0 }] },
-  { state: "Arizona", metros: [{ name: "Phoenix", index: 102.1 }, { name: "Tucson", index: 98.7 }, { name: "Other", index: 99.5 }] },
-  { state: "Arkansas", metros: [{ name: "Little Rock", index: 88.5 }, { name: "Other", index: 86.2 }] },
-  { state: "California", metros: [{ name: "Los Angeles", index: 148.6 }, { name: "San Francisco", index: 186.4 }, { name: "San Diego", index: 142.3 }, { name: "Other", index: 138.5 }] }
 ];
 
 // Sample clients data
@@ -430,8 +445,7 @@ async function seedAllData() {
       await seedStateCostIndex(),
       await seedClients(),
       await seedProjects(),
-      await seedAssets(),
-      await seedContacts()
+      await seedAssets()
     ]);
     
     const succeeded = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
@@ -447,13 +461,18 @@ async function seedAllData() {
 }
 
 // Run the function if this file is executed directly
-if (require.main === module) {
-  seedAllData().then(success => {
-    console.log(`Data seeding ${success ? 'succeeded' : 'failed'}.`);
-    if (!success) {
+if (import.meta.url === new URL(import.meta.url).href) {
+  seedAllData()
+    .then(success => {
+      console.log(`Data seeding ${success ? 'succeeded' : 'failed'}.`);
+      if (!success) {
+        process.exit(1);
+      }
+    })
+    .catch(err => {
+      console.error('Unexpected error:', err);
       process.exit(1);
-    }
-  });
+    });
 }
 
 export { 
@@ -462,8 +481,7 @@ export {
   seedClients, 
   seedProjects, 
   seedAssets,
-  seedAllData,
-  seedContacts
+  seedAllData
 };
 
 export { states_with_metro_areas };

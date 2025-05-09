@@ -16,6 +16,7 @@ import { usePagination } from '@/hooks/usePagination';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useProjectSearch } from '@/modules/projects/frontend/hooks/useProjectSearch';
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
+import { DataTable } from '@/components/ui/data-table';
 
 interface FeeProposal {
   number: string;
@@ -37,7 +38,7 @@ interface Project {
 export default function Projects() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -46,15 +47,21 @@ export default function Projects() {
       return;
     }
     
-    // Only production role is restricted
-    if (user.role === 'production') {
+    // Log the user data for debugging
+    console.log('Current user:', user);
+    console.log('Is admin:', isAdmin());
+    
+    // Allow access only to admin and project_management roles
+    if (!isAdmin()) {
+      console.log('Access denied, redirecting to dashboard');
       router.push('/dashboard');
+      return;
     }
-  }, [user, router]);
+  }, [user, router, isAdmin]);
 
-  // Show nothing while checking auth
-  if (!user) {
-    return null;
+  // Show loading state while checking permissions
+  if (!user || !isAdmin()) {
+    return <div>Loading...</div>;
   }
 
   const filter = searchParams.get('filter');
@@ -206,8 +213,12 @@ export default function Projects() {
     }
   };
 
-  const handleProjectClick = (projectNumber: string) => {
-    router.push(`/projects/${projectNumber}`);
+  const handleProjectClick = (project: Project) => {
+    // Prevent navigation if clicking the expand button
+    if (event?.target?.closest('button')) {
+      return;
+    }
+    router.push(`/projects/${project.number}`);
   };
 
   const getFilterDescription = () => {
@@ -221,262 +232,136 @@ export default function Projects() {
     }
   };
 
-  const renderProjectTable = (projects: Project[], title?: string) => (
-    <>
-      {title && (
-        <h2 className="text-lg font-semibold mb-4">{title}</h2>
-      )}
-      <table className="w-full">
-        <thead>
-          <tr className="bg-muted text-muted-foreground">
-            <th className="w-10 px-4 py-2"></th>
-            <th className="px-4 py-2 text-left text-button">Number</th>
-            <th className="px-4 py-2 text-left text-button">Name</th>
-            <th className="px-4 py-2 text-left text-button">Client</th>
-            <th className="px-4 py-2 text-left text-button">Type</th>
-            <th className="px-4 py-2 text-left text-button">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {projects.map((project, projectIndex) => (
-            <>
-              <tr
-                key={`project-${project.number}`}
-                className="hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150 cursor-pointer border-b border-[#4DB6AC] dark:border-[#4DB6AC]"
-                onClick={() => handleProjectClick(project.number)}
-              >
-                <td className="px-4 py-2">
-                  <button
-                    onClick={(e) => toggleRow(projectIndex, e)}
-                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                  >
-                    {expandedRows.has(projectIndex) ? (
-                      <ChevronDown className="w-4 h-4 text-gray-500" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-gray-500" />
-                    )}
-                  </button>
-                </td>
-                <td className="px-4 py-2 text-body">{project.number}</td>
-                <td className="px-4 py-2 text-body font-medium">
-                  {project.name}
-                </td>
-                <td className="px-4 py-2 text-body">
-                  {project.client}
-                </td>
-                <td className="px-4 py-2 text-body">
-                  {project.type}
-                </td>
-                <td className="px-4 py-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-                      {project.status}
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        updateProjectStatus(projectIndex, 'Pending');
-                      }}>
-                        Pending
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        updateProjectStatus(projectIndex, 'Design');
-                      }}>
-                        Design
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        updateProjectStatus(projectIndex, 'Construction');
-                      }}>
-                        Construction
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        updateProjectStatus(projectIndex, 'Hold');
-                      }}>
-                        Hold
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        updateProjectStatus(projectIndex, 'Cancelled');
-                      }}>
-                        Cancelled
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </td>
-              </tr>
-              {expandedRows.has(projectIndex) && (
-                <tr key={`proposals-${project.number}`} className="bg-muted/5">
-                  <td colSpan={6} className="px-4 py-2">
-                    <div className="ml-4 dark:text-[#E5E7EB]">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-sm font-semibold dark:text-[#E5E7EB]">Fee Proposals</h3>
-                        <Link
-                          href={`/projects/${project.number}/proposals/new`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add Proposal</span>
-                        </Link>
-                      </div>
-                      <div className="space-y-2">
-                        {project.feeProposals.map((proposal, proposalIndex) => (
-                          <div
-                            key={proposal.number}
-                            className="bg-card text-card-foreground p-3 rounded-lg border border-border"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-3">
-                                <span className="font-medium dark:text-[#E5E7EB]">{proposal.number}</span>
-                                <span className="text-sm text-muted-foreground">|</span>
-                                <span className="text-sm dark:text-[#E5E7EB]">{proposal.overview}</span>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-muted-foreground">
-                                    {proposal.status === 'Active' ? 'Active' : 'Inactive'}
-                                  </span>
-                                  <Switch
-                                    checked={proposal.status === 'Active'}
-                                    onCheckedChange={(checked) => {
-                                      updateProposalStatus(
-                                        projectIndex,
-                                        proposalIndex,
-                                        checked ? 'Active' : 'Inactive'
-                                      );
-                                    }}
-                                  />
-                                </div>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <button className="p-1 hover:bg-muted/10 rounded-full transition-colors">
-                                      <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                                    </button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem asChild>
-                                      <Link href={`/projects/${project.number}/proposals/${proposal.number}`}>
-                                        Edit Proposal
-                                      </Link>
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="font-medium dark:text-[#E5E7EB]">Design Budget: </span>
-                                <span className="text-muted-foreground">{formatCurrency(proposal.designBudget)}</span>
-                              </div>
-                              <div>
-                                <span className="font-medium dark:text-[#E5E7EB]">Construction Support: </span>
-                                <span className="text-muted-foreground">{formatCurrency(proposal.constructionSupportBudget)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </>
-          ))}
-        </tbody>
-      </table>
-    </>
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
+
+  const renderExpandedContent = (project: Project) => (
+    <div className="py-4">
+      <h4 className="text-sm font-medium mb-2">Fee Proposals</h4>
+      <div className="space-y-4">
+        {project.feeProposals.map((proposal, index) => (
+          <div key={proposal.number} className="bg-card p-4 rounded-md border border-border">
+            <div className="flex justify-between items-start">
+              <div>
+                <h5 className="font-medium">{proposal.number}</h5>
+                <p className="text-sm text-muted-foreground">{proposal.overview}</p>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                proposal.status === 'Active' 
+                  ? 'bg-primary text-primary-foreground' 
+                  : 'bg-muted text-muted-foreground'
+              }`}>
+                {proposal.status}
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Design Budget</p>
+                <p className="font-medium">{formatCurrency(proposal.designBudget)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Construction Support Budget</p>
+                <p className="font-medium">{formatCurrency(proposal.constructionSupportBudget)}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 
+  const columns = [
+    {
+      header: 'Number',
+      accessor: 'number',
+      className: 'font-medium'
+    },
+    {
+      header: 'Name',
+      accessor: 'name'
+    },
+    {
+      header: 'Client',
+      accessor: 'client'
+    },
+    {
+      header: 'Type',
+      accessor: 'type'
+    },
+    {
+      header: 'Status',
+      accessor: (project: Project) => (
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
+          {project.status}
+        </span>
+      )
+    }
+  ];
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-4">
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Projects</h1>
           {filter && (
-            <Link
-              href="/dashboard/performance"
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </Link>
+            <p className="text-sm text-muted-foreground mt-1">
+              {filter === 'active' ? 'Showing Design and Construction Projects' : 'Showing Projects with Pending Status'}
+            </p>
           )}
-          <div className="flex items-center gap-2">
-            <FolderKanban className="w-6 h-6 text-primary" />
-            <h1 className="text-h1">Project Admin</h1>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
           </div>
-        </div>
-        <Link
-          href="/projects/new"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Project</span>
-        </Link>
-      </div>
-
-      <div className="mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted w-5 h-5" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search projects..."
-            className="w-full pl-10 pr-4 py-2 border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:text-[#E5E7EB] placeholder:text-muted-foreground"
-          />
-        </div>
-      </div>
-
-      {filter && (
-        <div className="mb-4 flex items-center justify-between bg-muted/5 px-4 py-2 rounded-lg border border-[#4DB6AC] dark:border-[#4DB6AC]">
-          <span className="text-sm text-muted-foreground dark:text-[#E5E7EB]">
-            {getFilterDescription()}
-          </span>
-          <button
-            onClick={() => router.push('/projects')}
-            className="text-sm text-muted-foreground hover:text-foreground dark:text-[#E5E7EB] dark:hover:text-[#FFFFFF]"
+          
+          <Link
+            href="/projects/new"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
           >
-            Clear Filter
-          </button>
+            <Plus className="h-4 w-4" />
+            New Project
+          </Link>
         </div>
-      )}
+      </div>
 
-      <div className="space-y-8">
-        {filter === 'active' ? (
-          <>
-            <div className="bg-card text-card-foreground rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-              {renderProjectTable(designProjects, 'Design Projects')}
-            </div>
-            <div className="bg-card text-card-foreground rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-              {renderProjectTable(constructionProjects, 'Construction Projects')}
-            </div>
-          </>
-        ) : (
-          <div className="bg-card text-card-foreground rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-            {renderProjectTable(paginatedProjects)}
-            <div className="px-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Project List</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DataTable
+            data={paginatedProjects}
+            columns={columns}
+            emptyMessage="No projects found."
+            expandedContent={renderExpandedContent}
+            expandedRows={expandedRows}
+            onRowClick={handleProjectClick}
+            onExpandRow={toggleRow}
+          />
+          
+          {totalPages > 1 && (
+            <div className="mt-4">
               <Pagination
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={setCurrentPage}
-                itemsPerPage={itemsPerPage}
-                onItemsPerPageChange={setItemsPerPage}
-                totalItems={totalItems}
               />
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
-}
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD'
-  }).format(amount);
 }

@@ -4,7 +4,7 @@ import React from 'react';
 import { useState, useEffect } from 'react';
 import { FolderKanban, Save, ArrowLeft, Plus, Trash2, MoreVertical, X, FileText, ClipboardList, MessageSquare, Eye, FileEdit } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { companies } from '@/modules/clients/frontend/data/companies';
@@ -45,10 +45,11 @@ interface ProjectDocument {
   status: 'Draft' | 'Issued' | 'Responded' | 'Closed';
 }
 
-export default function ProjectDetails({ params }: { params: Promise<{ id: string }> }) {
+export default function ProjectDetail() {
   const router = useRouter();
+  const params = useParams();
   const { user } = useAuth();
-  const projectId = React.use(params).id;
+  const projectId = params?.id as string;
   const isNewProject = projectId === 'new';
 
   useEffect(() => {

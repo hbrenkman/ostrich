@@ -248,7 +248,6 @@ async function createTables() {
     
     console.log('Table creation process completed.');
     return true;
-    
   } catch (error) {
     console.error('Error creating tables:', error);
     return false;
@@ -256,53 +255,12 @@ async function createTables() {
 }
 
 /**
- * Create the exec_sql function in Supabase.
- */
-async function createExecSqlFunction() {
-  try {
-    console.log('Creating exec_sql function...');
-    
-    // SQL to create the exec_sql function
-    const sql = `
-    CREATE OR REPLACE FUNCTION exec_sql(query text)
-    RETURNS jsonb
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
-    DECLARE
-      result jsonb;
-    BEGIN
-      EXECUTE query;
-      result := '{"success": true}'::jsonb;
-      RETURN result;
-    END;
-    $$;
-    `;
-    
-    // Try to execute the SQL directly
-    const { error: sqlError } = await supabase.sql(sql);
-    
-    if (sqlError) {
-      console.error('Error creating exec_sql function via SQL:', sqlError);
-      return false;
-    }
-    
-    console.log('exec_sql function created successfully.');
-    return true;
-  } catch (error) {
-    console.error('Error creating exec_sql function:', error);
-    return false;
-  }
-}
-
-/**
- * Create the update_updated_at_column function in Supabase.
+ * Create the updated_at function if it doesn't exist
  */
 async function createUpdatedAtFunction() {
   try {
-    console.log('Creating update_updated_at_column function...');
+    console.log('Creating updated_at function...');
     
-    // SQL to create the function
     const sql = `
     CREATE OR REPLACE FUNCTION update_updated_at_column()
     RETURNS TRIGGER AS $$
@@ -310,47 +268,27 @@ async function createUpdatedAtFunction() {
       NEW.updated_at = now();
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql;
+    $$ language 'plpgsql';
     `;
     
-    // Try to execute the SQL directly
-    const { error: sqlError } = await supabase.sql(sql);
+    const { error } = await supabase.sql(sql);
     
-    if (sqlError) {
-      console.error('Error creating update_updated_at_column function via SQL:', sqlError);
-      
-      // Try using RPC if SQL fails
-      try {
-        const { error: rpcError } = await supabase.rpc('exec_sql', { query: sql });
-        
-        if (rpcError) {
-          console.error('Error creating update_updated_at_column function via RPC:', rpcError);
-          return false;
-        }
-      } catch (rpcErr) {
-        console.error('Exception creating update_updated_at_column function via RPC:', rpcErr);
-        return false;
-      }
+    if (error) {
+      console.error('Error creating updated_at function:', error);
+      return false;
     }
     
-    console.log('update_updated_at_column function created successfully.');
+    console.log('updated_at function created successfully.');
     return true;
   } catch (error) {
-    console.error('Error creating update_updated_at_column function:', error);
+    console.error('Error creating updated_at function:', error);
     return false;
   }
 }
 
 // Run the function if this file is executed directly
-if (require.main === module) {
-  createTables().then(success => {
-    console.log(`Table creation ${success ? 'succeeded' : 'failed'}.`);
-    if (success) {
-      process.exit(0);
-    } else {
-      process.exit(1);
-    }
-  });
+if (import.meta.url === new URL(import.meta.url).href) {
+  createTables();
 }
 
-export { createTables, createExecSqlFunction, createUpdatedAtFunction };
+export { createTables };

@@ -3,8 +3,6 @@ import { supabaseAdmin } from './supabaseUtils.js';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { createTables } from './create-tables.js';
-import { seedAllData } from './seed-data.js';
 
 // Load environment variables
 dotenv.config();
@@ -16,8 +14,8 @@ dotenv.config();
 async function runMigrations() {
   try {
     if (!supabaseAdmin) {
-      console.error('Supabase admin client is not available. Falling back to direct table creation.');
-      return await createTablesAndSeedData();
+      console.error('Supabase admin client is not available.');
+      return false;
     }
 
     console.log('Starting migrations...');
@@ -70,36 +68,23 @@ async function runMigrations() {
     return true;
   } catch (error) {
     console.error('Error running migrations:', error);
-    console.log('Falling back to direct table creation...');
-    return await createTablesAndSeedData();
-  }
-}
-
-/**
- * Create tables and seed data directly using the Supabase client.
- * @returns {Promise<boolean>} - Whether the operation was successful
- */
-async function createTablesAndSeedData() {
-  try {
-    console.log('Creating tables directly...');
-    const tablesCreated = await createTables();
-    
-    if (tablesCreated) {
-      console.log('Tables created successfully, seeding data...');
-      await seedAllData();
-      return true;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('Error creating tables and seeding data:', error);
     return false;
   }
 }
 
 // Run the migrations if this file is executed directly
 if (import.meta.url === new URL(import.meta.url).href) {
-  runMigrations();
+  runMigrations()
+    .then(success => {
+      if (!success) {
+        process.exit(1);
+      }
+    })
+    .catch(err => {
+      console.error('Unexpected error:', err);
+      process.exit(1);
+    });
 }
 
+export { runMigrations };
 export { runMigrations, createTablesAndSeedData };
