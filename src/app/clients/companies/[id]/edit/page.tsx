@@ -7,12 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Database } from '@/types/supabase';
-import { Building2, MapPin, Phone, Plus, Trash, ArrowLeft, Search, Tag } from 'lucide-react';
+import { Building2, MapPin, Phone, Plus, Trash, ArrowLeft, Search, Tag, Edit } from 'lucide-react';
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { updateContactLocation } from '@/lib/actions/updateContact';
 import React from 'react';
 import dynamic from 'next/dynamic';
+import { verifyAddress } from '@/lib/geocodio';
+import { toast } from 'react-hot-toast';
+import { createLocation, updateLocation, deleteLocation } from '@/lib/actions/locations';
+import { Toaster } from 'react-hot-toast';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -83,6 +87,9 @@ interface Location {
   is_headquarters: boolean;
   created_at: string;
   updated_at: string;
+  status: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 interface LocationType {
@@ -258,6 +265,26 @@ const UnassignedContacts = dynamic(() => Promise.resolve(({
 
 UnassignedContacts.displayName = 'UnassignedContacts';
 
+interface LocationsListProps {
+  locations: Location[];
+  locationTypes: LocationType[];
+  contacts: Contact[];
+  onDeleteLocation: (id: string) => void;
+  onAddLocation: () => void;
+  onLocationTypeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  onAddressChange: (address: string) => void;
+  onPhoneChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onStatusChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  onClearLocation: () => void;
+  newLocation: Partial<Location>;
+  addressInput: string;
+  onDropContact: (contactId: string, locationId: string) => Promise<void>;
+  onUnassignContact: (contactId: string) => Promise<void>;
+  isUpdatingContact: string | null;
+  onEditLocation: (location: Location) => void;
+  isEditing: boolean;
+}
+
 const LocationsList = dynamic(() => Promise.resolve(({ 
   locations,
   locationTypes,
@@ -267,28 +294,16 @@ const LocationsList = dynamic(() => Promise.resolve(({
   onLocationTypeChange,
   onAddressChange,
   onPhoneChange,
+  onStatusChange,
   onClearLocation,
   newLocation,
-  fullAddress,
+  addressInput,
   onDropContact,
   onUnassignContact,
-  isUpdatingContact
-}: { 
-  locations: Location[];
-  locationTypes: LocationType[];
-  contacts: Contact[];
-  onDeleteLocation: (id: string) => void;
-  onAddLocation: () => void;
-  onLocationTypeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-  onAddressChange: (address: string) => void;
-  onPhoneChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onClearLocation: () => void;
-  newLocation: Partial<Location>;
-  fullAddress: string;
-  onDropContact: (contactId: string, locationId: string) => Promise<void>;
-  onUnassignContact: (contactId: string) => Promise<void>;
-  isUpdatingContact: string | null;
-}) => {
+  isUpdatingContact,
+  onEditLocation,
+  isEditing
+}: LocationsListProps & { isEditing: boolean }) => {
   const formatPhoneNumber = (phone: string | undefined | null) => {
     if (!phone) return null;
     const cleaned = phone.replace(/\D/g, '');
@@ -363,14 +378,24 @@ const LocationsList = dynamic(() => Promise.resolve(({
                       <span>{location.phone || 'No phone number'}</span>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onDeleteLocation(location.id)}
-                    className="text-red-500 hover:text-red-600"
-                  >
-                    <Trash className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onEditLocation(location)}
+                      className="text-[#374151] dark:text-[#E5E7EB] hover:text-[#374151]/80 dark:hover:text-[#E5E7EB]/80"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onDeleteLocation(location.id)}
+                      className="text-[#374151] dark:text-[#E5E7EB] hover:text-[#374151]/80 dark:hover:text-[#E5E7EB]/80"
+                    >
+                      <Trash className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="mt-4 space-y-2">
                   {contacts
@@ -437,12 +462,28 @@ const LocationsList = dynamic(() => Promise.resolve(({
                 <Label htmlFor="address">Address</Label>
                 <Input
                   id="address"
-                  value={fullAddress}
+                  value={addressInput}
                   onChange={(e) => onAddressChange(e.target.value)}
-                  placeholder="Enter address"
+                  placeholder="Paste full address from Google Maps"
                   className="mt-1"
                 />
               </div>
+              {newLocation.address_line1 && (
+                <div className="space-y-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+                  <div className="flex items-start gap-2">
+                    <MapPin className="h-4 w-4 text-gray-500 mt-1" />
+                    <div className="space-y-1">
+                      <span className="font-medium">
+                        {newLocation.address_line1}
+                        {newLocation.address_line2 && `, ${newLocation.address_line2}`}
+                      </span>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {newLocation.city}, {newLocation.state} {newLocation.zip}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div>
                 <Label htmlFor="phone">Phone</Label>
                 <Input
@@ -452,6 +493,18 @@ const LocationsList = dynamic(() => Promise.resolve(({
                   placeholder="Enter phone number"
                   className="mt-1"
                 />
+              </div>
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <select
+                  id="status"
+                  value={newLocation.status || 'Active'}
+                  onChange={onStatusChange}
+                  className="w-full px-3 py-2 mt-1 border rounded-md"
+                >
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
               </div>
               <div className="flex justify-end gap-2">
                 <Button
@@ -464,7 +517,7 @@ const LocationsList = dynamic(() => Promise.resolve(({
                   onClick={onAddLocation}
                   disabled={!newLocation.location_type_id || !newLocation.address_line1}
                 >
-                  Add Location
+                  {isEditing ? 'Update Location' : 'Add Location'}
                 </Button>
               </div>
             </div>
@@ -573,8 +626,11 @@ export default function EditCompany() {
     state: '',
     zip: '',
     phone: '',
-    is_headquarters: false
+    is_headquarters: false,
+    status: 'Active'
   });
+  const [addressInput, setAddressInput] = useState('');
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
 
   useEffect(() => {
     setIsClient(true);
@@ -735,50 +791,243 @@ export default function EditCompany() {
   };
 
   const handleLocationTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedType = locationTypes.find(type => type.id === e.target.value);
+    const isHeadquarters = selectedType?.name.toLowerCase().includes('headquarters') || 
+                          selectedType?.name.toLowerCase().includes('main');
+
+    // If this is being set as headquarters, unset any existing headquarters
+    if (isHeadquarters && company?.locations) {
+      const updatedLocations = company.locations.map(loc => ({
+        ...loc,
+        is_headquarters: false
+      }));
+      setCompany(prev => prev ? { ...prev, locations: updatedLocations } : null);
+    }
+
     setNewLocation(prev => ({
       ...prev,
-      location_type_id: e.target.value
+      location_type_id: e.target.value,
+      is_headquarters: isHeadquarters
     }));
   };
 
-  const handleAddressChange = async (address: string) => {
-    try {
-      // Basic address parsing
-      const parts = address.split(',').map(part => part.trim());
-      
-      if (parts.length >= 3) {
-        const [addressLine1, cityState, zip] = parts;
-        const cityStateParts = cityState.split(' ').filter(Boolean);
-        const state = cityStateParts.pop() || '';
-        const city = cityStateParts.join(' ');
+  const stateMap: { [key: string]: string } = {
+    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
+    'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 'florida': 'FL', 'georgia': 'GA',
+    'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+    'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+    'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO',
+    'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+    'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+    'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+    'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 'vermont': 'VT',
+    'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+    'district of columbia': 'DC', 'american samoa': 'AS', 'guam': 'GU', 'northern mariana islands': 'MP',
+    'puerto rico': 'PR', 'united states virgin islands': 'VI', 'united states minor outlying islands': 'UM'
+  };
 
+  const validateAndFormatState = (state: string): string => {
+    // Clean and normalize the input
+    const normalizedState = state.toLowerCase().trim();
+    console.log('Validating state:', { input: state, normalized: normalizedState });
+
+    // If it's already a valid 2-letter code
+    if (state.length === 2) {
+      const upperState = state.toUpperCase();
+      if (Object.values(stateMap).includes(upperState)) {
+        console.log('Found valid 2-letter code:', upperState);
+        return upperState;
+      }
+    }
+
+    // Try exact match first
+    const exactMatch = stateMap[normalizedState];
+    if (exactMatch) {
+      console.log('Found exact match:', exactMatch);
+      return exactMatch;
+    }
+
+    // Try fuzzy matching with improved spelling tolerance
+    const fuzzyMatch = Object.keys(stateMap).find(key => {
+      // Remove all non-alphabetic characters and normalize spaces
+      const cleanKey = key.replace(/[^a-z\s]/gi, '').toLowerCase();
+      const cleanInput = normalizedState.replace(/[^a-z\s]/gi, '').toLowerCase();
+      
+      // If the input is very close to the key (allowing for one character difference)
+      if (cleanInput.length >= 3) {
+        // Check if the input is a subset of the key or vice versa
+        if (cleanKey.includes(cleanInput) || cleanInput.includes(cleanKey)) {
+          return true;
+        }
+        
+        // Check for common misspellings
+        const commonMisspellings: { [key: string]: string[] } = {
+          'idaho': ['idaaho', 'idahoe', 'idahow'],
+          'utah': ['uta', 'utahh'],
+          'nevada': ['nevadaa', 'neveda'],
+          'arizona': ['arizonaa', 'arizona'],
+          'california': ['californa', 'califonia'],
+          'florida': ['floridaa', 'florida'],
+          'texas': ['texass', 'texas'],
+          'new york': ['newyork', 'new yorkk'],
+          'washington': ['washinton', 'washingtonn'],
+          'oregon': ['oregonn', 'oregon'],
+          'colorado': ['coloradoo', 'colorado'],
+          'montana': ['montanaa', 'montana'],
+          'wyoming': ['wyomingg', 'wyoming'],
+          'alaska': ['alaskaa', 'alaska'],
+          'hawaii': ['hawai', 'hawaii'],
+          'alabama': ['alabam', 'alabamaa'],
+          'arkansas': ['arkansass', 'arkansas'],
+          'connecticut': ['connecticutt', 'connecticut'],
+          'delaware': ['delawar', 'delawaree'],
+          'georgia': ['georga', 'georgiaa'],
+          'illinois': ['illinoiss', 'illinois'],
+          'indiana': ['indianna', 'indiana'],
+          'iowa': ['iowaa', 'iowa'],
+          'kansas': ['kansass', 'kansas'],
+          'kentucky': ['kentuckey', 'kentuckyy'],
+          'louisiana': ['louisianna', 'louisiana'],
+          'maine': ['main', 'maine'],
+          'maryland': ['marylandd', 'maryland'],
+          'massachusetts': ['massachusets', 'massachusetts'],
+          'michigan': ['michigann', 'michigan'],
+          'minnesota': ['minnesotta', 'minnesota'],
+          'mississippi': ['missisippi', 'mississippi'],
+          'missouri': ['missourii', 'missouri'],
+          'nebraska': ['nebraskaa', 'nebraska'],
+          'new hampshire': ['newhampshire', 'new hampshire'],
+          'new jersey': ['newjersey', 'new jersey'],
+          'new mexico': ['newmexico', 'new mexico'],
+          'north carolina': ['northcarolina', 'north carolina'],
+          'north dakota': ['northdakota', 'north dakota'],
+          'ohio': ['ohioo', 'ohio'],
+          'oklahoma': ['oklahomaa', 'oklahoma'],
+          'pennsylvania': ['pennsylvannia', 'pennsylvania'],
+          'rhode island': ['rhodeisland', 'rhode island'],
+          'south carolina': ['southcarolina', 'south carolina'],
+          'south dakota': ['southdakota', 'south dakota'],
+          'tennessee': ['tennesse', 'tennessee'],
+          'vermont': ['vermontt', 'vermont'],
+          'virginia': ['virginiaa', 'virginia'],
+          'west virginia': ['westvirginia', 'west virginia'],
+          'wisconsin': ['wisconsinn', 'wisconsin']
+        };
+
+        // Check if the input matches any common misspelling
+        for (const [correctState, misspellings] of Object.entries(commonMisspellings)) {
+          if (misspellings.includes(cleanInput) || cleanInput.includes(correctState)) {
+            return key === correctState;
+          }
+        }
+
+        // Calculate similarity score
+        let similarity = 0;
+        const minLength = Math.min(cleanInput.length, cleanKey.length);
+        const maxLength = Math.max(cleanInput.length, cleanKey.length);
+        
+        for (let i = 0; i < minLength; i++) {
+          if (cleanInput[i] === cleanKey[i]) {
+            similarity++;
+          }
+        }
+        
+        // If similarity is high enough (80% or more), consider it a match
+        return (similarity / maxLength) >= 0.8;
+      }
+      
+      return false;
+    });
+
+    if (fuzzyMatch) {
+      console.log('Found fuzzy match:', { input: normalizedState, match: fuzzyMatch, result: stateMap[fuzzyMatch] });
+      return stateMap[fuzzyMatch];
+    }
+
+    console.log('No match found for state:', normalizedState);
+    return state;
+  };
+
+  const validateZipCode = (zip: string): string => {
+    // Remove all non-digits
+    const digits = zip.replace(/\D/g, '');
+    
+    // Check if it's a valid US zip code (5 digits or 9 digits with hyphen)
+    if (digits.length === 5) {
+      return digits;
+    } else if (digits.length === 9) {
+      return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+    }
+    
+    // If invalid, return the original input
+    return zip;
+  };
+
+  const handleAddressChange = async (address: string) => {
+    setAddressInput(address);
+    
+    // Only verify if the address is complete enough
+    if (address.length > 10) {
+      console.log('Attempting to verify address:', address);
+      const verifiedAddress = await verifyAddress(address);
+      console.log('Verification result:', verifiedAddress);
+      
+      if (verifiedAddress) {
         setNewLocation(prev => ({
           ...prev,
-          address_line1,
-          city,
-          state,
-          zip: zip.replace(/\D/g, '') // Remove non-digits from zip
-        }));
-      } else {
-        // If we don't have enough parts, just set the address line
-        setNewLocation(prev => ({
-          ...prev,
-          address_line1: address
+          address_line1: verifiedAddress.address_line1,
+          address_line2: verifiedAddress.address_line2,
+          city: verifiedAddress.city,
+          state: verifiedAddress.state,
+          zip: verifiedAddress.zip
         }));
       }
-    } catch (err) {
-      console.error('Error parsing address:', err);
     }
   };
 
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const phone = e.target.value.replace(/\D/g, '');
-    if (phone.length <= 10) {
-      setNewLocation(prev => ({
-        ...prev,
-        phone
-      }));
+  const validateAndFormatPhone = (phone: string): string => {
+    // Remove all non-digit characters
+    const digits = phone.replace(/\D/g, '');
+    
+    // Handle different phone number formats
+    if (digits.length === 10) {
+      // Standard US number: (XXX) XXX-XXXX
+      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    } else if (digits.length === 11 && digits[0] === '1') {
+      // US number with country code: +1 (XXX) XXX-XXXX
+      return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    } else if (digits.length > 10) {
+      // International number: +XX (XXX) XXX-XXXX
+      const countryCode = digits.slice(0, -10);
+      const number = digits.slice(-10);
+      return `+${countryCode} (${number.slice(0, 3)}) ${number.slice(3, 6)}-${number.slice(6)}`;
     }
+    
+    // If not a valid format, return the original input
+    return phone;
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const phone = e.target.value;
+    const formattedPhone = validateAndFormatPhone(phone);
+    
+    // Only update if the formatted number is different from the input
+    // This prevents cursor jumping while typing
+    if (formattedPhone !== phone) {
+      e.target.value = formattedPhone;
+    }
+    
+    setNewLocation(prev => ({
+      ...prev,
+      phone: formattedPhone
+    }));
+  };
+
+  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setNewLocation(prev => ({
+      ...prev,
+      status: e.target.value
+    }));
   };
 
   const handleClearLocation = () => {
@@ -790,53 +1039,141 @@ export default function EditCompany() {
       state: '',
       zip: '',
       phone: '',
-      is_headquarters: false
+      is_headquarters: false,
+      status: 'Active'
     });
+    setAddressInput('');
+    setEditingLocation(null);
   };
 
-  const handleAddLocation = async () => {
+  const handleDeleteLocation = async (locationId: string) => {
     try {
-      if (!newLocation.location_type_id || !newLocation.address_line1) {
-        setError('Location type and address are required');
+      // Check if there are any contacts assigned to this location
+      const assignedContacts = company?.contacts?.filter(contact => contact.location_id === locationId) || [];
+      
+      if (assignedContacts.length > 0) {
+        toast.error(`Cannot delete location. Please unassign ${assignedContacts.length} contact${assignedContacts.length > 1 ? 's' : ''} first.`);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('locations')
-        .insert({
-          company_id: params.id,
-          location_type_id: newLocation.location_type_id,
-          address_line1: newLocation.address_line1,
-          address_line2: newLocation.address_line2,
-          city: newLocation.city,
-          state: newLocation.state,
-          zip: newLocation.zip,
-          phone: newLocation.phone,
-          is_headquarters: newLocation.is_headquarters
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
+      await deleteLocation(locationId);
+      
+      // Update the company state to remove the deleted location
       setCompany(prev => {
         if (!prev) return null;
         return {
           ...prev,
-          locations: [...(prev.locations || []), data]
+          locations: prev.locations?.filter(loc => loc.id !== locationId) || []
         };
       });
+      
+      toast.success('Location deleted successfully');
+    } catch (error) {
+      console.error('Error deleting location:', error);
+      toast.error('Failed to delete location');
+    }
+  };
+
+  const handleEditLocation = (location: Location) => {
+    setEditingLocation(location);
+    setNewLocation({
+      location_type_id: location.location_type_id,
+      address_line1: location.address_line1,
+      address_line2: location.address_line2,
+      city: location.city,
+      state: location.state,
+      zip: location.zip,
+      phone: location.phone,
+      is_headquarters: location.is_headquarters,
+      status: location.status
+    });
+    setAddressInput(`${location.address_line1}, ${location.city}, ${location.state}, ${location.zip}`);
+  };
+
+  const handleAddLocation = async () => {
+    try {
+      if (!newLocation?.address_line1 || !newLocation?.city || !newLocation?.state || !newLocation?.zip) {
+        toast.error('Please enter a complete address');
+        return;
+      }
+
+      if (!params?.id) {
+        toast.error('Company ID is missing');
+        return;
+      }
+
+      if (!newLocation.location_type_id) {
+        toast.error('Please select a location type');
+        return;
+      }
+
+      // Create a name for the location based on the address
+      const locationName = `${newLocation.address_line1}, ${newLocation.city}`;
+
+      if (editingLocation) {
+        // Update existing location
+        const updatedLocation = await updateLocation(editingLocation.id, {
+          name: locationName,
+          address_line1: newLocation.address_line1,
+          address_line2: newLocation.address_line2 || '',
+          city: newLocation.city,
+          state: newLocation.state,
+          zip: newLocation.zip,
+          location_type_id: newLocation.location_type_id,
+          is_headquarters: newLocation.is_headquarters || false,
+          status: newLocation.status || 'Active',
+          phone: newLocation.phone || ''
+        });
+
+        setCompany(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            locations: prev.locations?.map(loc => 
+              loc.id === editingLocation.id ? updatedLocation : loc
+            ) || []
+          };
+        });
+
+        toast.success('Location updated successfully');
+      } else {
+        // Create new location
+        const location = await createLocation({
+          name: locationName,
+          company_id: params.id,
+          address_line1: newLocation.address_line1,
+          address_line2: newLocation.address_line2 || '',
+          city: newLocation.city,
+          state: newLocation.state,
+          zip: newLocation.zip,
+          location_type_id: newLocation.location_type_id,
+          is_headquarters: newLocation.is_headquarters || false,
+          status: newLocation.status || 'Active',
+          phone: newLocation.phone || ''
+        });
+
+        setCompany(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            locations: [...(prev.locations || []), location]
+          };
+        });
+
+        toast.success('Location added successfully');
+      }
 
       handleClearLocation();
-    } catch (err) {
-      console.error('Error adding location:', err);
-      setError(err instanceof Error ? err.message : 'Failed to add location');
+    } catch (error) {
+      console.error('Error saving location:', error);
+      toast.error('Failed to save location');
     }
   };
 
   return (
     <ErrorBoundary>
-      <div className="container mx-auto py-6">
+      <div className="container mx-auto px-4 py-8">
+        <Toaster position="top-right" />
         <div className="flex items-center gap-4 mb-6">
           <Button
             variant="outline"
@@ -862,17 +1199,20 @@ export default function EditCompany() {
               locations={company.locations || []}
               locationTypes={locationTypes}
               contacts={company.contacts || []}
-              onDeleteLocation={(id) => {}}
+              onDeleteLocation={handleDeleteLocation}
               onAddLocation={handleAddLocation}
               onLocationTypeChange={handleLocationTypeChange}
               onAddressChange={handleAddressChange}
               onPhoneChange={handlePhoneChange}
+              onStatusChange={handleStatusChange}
               onClearLocation={handleClearLocation}
               newLocation={newLocation}
-              fullAddress={`${newLocation.address_line1}${newLocation.address_line2 ? `, ${newLocation.address_line2}` : ''}${newLocation.city ? `, ${newLocation.city}` : ''}${newLocation.state ? `, ${newLocation.state}` : ''}${newLocation.zip ? ` ${newLocation.zip}` : ''}`}
+              addressInput={addressInput}
               onDropContact={handleDropContact}
               onUnassignContact={handleUnassignContact}
               isUpdatingContact={isUpdatingContact}
+              onEditLocation={handleEditLocation}
+              isEditing={!!editingLocation}
             />
           </div>
           <div className="col-span-1">

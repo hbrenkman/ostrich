@@ -241,6 +241,16 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
 
 /***/ }),
 
+/***/ "(ssr)/./node_modules/lucide-react/dist/esm/icons/pen-square.js":
+/*!****************************************************************!*\
+  !*** ./node_modules/lucide-react/dist/esm/icons/pen-square.js ***!
+  \****************************************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   \"default\": () => (/* binding */ PenSquare)\n/* harmony export */ });\n/* harmony import */ var _createLucideIcon_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../createLucideIcon.js */ \"(ssr)/./node_modules/lucide-react/dist/esm/createLucideIcon.js\");\n/**\n * @license lucide-react v0.294.0 - ISC\n *\n * This source code is licensed under the ISC license.\n * See the LICENSE file in the root directory of this source tree.\n */ \nconst PenSquare = (0,_createLucideIcon_js__WEBPACK_IMPORTED_MODULE_0__[\"default\"])(\"PenSquare\", [\n    [\n        \"path\",\n        {\n            d: \"M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7\",\n            key: \"1qinfi\"\n        }\n    ],\n    [\n        \"path\",\n        {\n            d: \"M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z\",\n            key: \"w2jsv5\"\n        }\n    ]\n]);\n //# sourceMappingURL=pen-square.js.map\n//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKHNzcikvLi9ub2RlX21vZHVsZXMvbHVjaWRlLXJlYWN0L2Rpc3QvZXNtL2ljb25zL3Blbi1zcXVhcmUuanMiLCJtYXBwaW5ncyI6Ijs7Ozs7QUFBQTs7Ozs7Q0FLQyxHQUVxRDtBQUV0RCxNQUFNQyxZQUFZRCxnRUFBZ0JBLENBQUMsYUFBYTtJQUM5QztRQUFDO1FBQVE7WUFBRUUsR0FBRztZQUE4REMsS0FBSztRQUFTO0tBQUU7SUFDNUY7UUFBQztRQUFRO1lBQUVELEdBQUc7WUFBaURDLEtBQUs7UUFBUztLQUFFO0NBQ2hGO0FBRStCLENBQ2hDLHNDQUFzQyIsInNvdXJjZXMiOlsid2VicGFjazovL29zdHJpY2gvLi9ub2RlX21vZHVsZXMvbHVjaWRlLXJlYWN0L2Rpc3QvZXNtL2ljb25zL3Blbi1zcXVhcmUuanM/NjQ0MSJdLCJzb3VyY2VzQ29udGVudCI6WyIvKipcbiAqIEBsaWNlbnNlIGx1Y2lkZS1yZWFjdCB2MC4yOTQuMCAtIElTQ1xuICpcbiAqIFRoaXMgc291cmNlIGNvZGUgaXMgbGljZW5zZWQgdW5kZXIgdGhlIElTQyBsaWNlbnNlLlxuICogU2VlIHRoZSBMSUNFTlNFIGZpbGUgaW4gdGhlIHJvb3QgZGlyZWN0b3J5IG9mIHRoaXMgc291cmNlIHRyZWUuXG4gKi9cblxuaW1wb3J0IGNyZWF0ZUx1Y2lkZUljb24gZnJvbSAnLi4vY3JlYXRlTHVjaWRlSWNvbi5qcyc7XG5cbmNvbnN0IFBlblNxdWFyZSA9IGNyZWF0ZUx1Y2lkZUljb24oXCJQZW5TcXVhcmVcIiwgW1xuICBbXCJwYXRoXCIsIHsgZDogXCJNMTEgNEg0YTIgMiAwIDAgMC0yIDJ2MTRhMiAyIDAgMCAwIDIgMmgxNGEyIDIgMCAwIDAgMi0ydi03XCIsIGtleTogXCIxcWluZmlcIiB9XSxcbiAgW1wicGF0aFwiLCB7IGQ6IFwiTTE4LjUgMi41YTIuMTIgMi4xMiAwIDAgMSAzIDNMMTIgMTVsLTQgMSAxLTRaXCIsIGtleTogXCJ3MmpzdjVcIiB9XVxuXSk7XG5cbmV4cG9ydCB7IFBlblNxdWFyZSBhcyBkZWZhdWx0IH07XG4vLyMgc291cmNlTWFwcGluZ1VSTD1wZW4tc3F1YXJlLmpzLm1hcFxuIl0sIm5hbWVzIjpbImNyZWF0ZUx1Y2lkZUljb24iLCJQZW5TcXVhcmUiLCJkIiwia2V5IiwiZGVmYXVsdCJdLCJzb3VyY2VSb290IjoiIn0=\n//# sourceURL=webpack-internal:///(ssr)/./node_modules/lucide-react/dist/esm/icons/pen-square.js\n");
+
+/***/ }),
+
 /***/ "(ssr)/./node_modules/lucide-react/dist/esm/icons/pencil.js":
 /*!************************************************************!*\
   !*** ./node_modules/lucide-react/dist/esm/icons/pencil.js ***!
