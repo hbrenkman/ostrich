@@ -200,15 +200,15 @@ tr.hover\:bg-gray-50:hover {
 }
 
 .card-border {
-  @apply border border-[#4DB6AC] dark:border-[#4DB6AC];
+  @apply border border-[#D1D5DB] dark:border-[#4DB6AC];
 }
 
 .header-border {
-  @apply border-b border-[#4DB6AC] dark:border-[#4DB6AC];
+  @apply border-b border-[#D1D5DB] dark:border-[#4DB6AC];
 }
 
 .toolbar-border {
-  @apply border-b border-[#4DB6AC] dark:border-[#4DB6AC];
+  @apply border-b border-[#D1D5DB] dark:border-[#4DB6AC];
 }
 
 /* Ensure form elements have consistent styling */
@@ -220,7 +220,7 @@ input[type="date"],
 input[type="password"],
 select,
 textarea {
-  @apply border-[#4DB6AC] dark:border-[#4DB6AC] bg-background text-foreground placeholder:text-muted-foreground dark:placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-primary/20;
+  @apply border-[#D1D5DB] dark:border-[#4DB6AC] bg-background text-foreground placeholder:text-muted-foreground dark:placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-primary/20;
 }
 
 @layer base {

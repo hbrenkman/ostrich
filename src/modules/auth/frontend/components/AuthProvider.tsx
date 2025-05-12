@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { User, AuthContextType } from '../types';
+import type { Subscription, Session } from '@supabase/supabase-js';
 import { getStoredUser, setStoredUser } from '../utils/auth';
 import { supabase } from '@/lib/supabase';
 
@@ -11,153 +12,123 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initialized, setInitialized] = useState(false);
   const router = useRouter();
+  const lastProcessedSession = useRef<string | null>(null);
 
-  const isAdmin = useCallback(() => {
-    return user?.role === 'admin' || user?.role === 'project_management';
-  }, [user?.role]);
+  const processUserData = useCallback(async (session: Session | null) => {
+    if (!session?.user) {
+      setUser(null);
+      setStoredUser(null);
+      return;
+    }
 
-  const processUserData = useCallback((session: any) => {
-    if (!session?.user) return null;
+    // Check if we've already processed this session
+    const sessionId = session.access_token;
+    if (lastProcessedSession.current === sessionId) {
+      return;
+    }
+    lastProcessedSession.current = sessionId;
     
-    const userData = {
+    // Get role from metadata, with admin taking precedence
+    const role = session.user.app_metadata?.role || 
+                 session.user.user_metadata?.role ||
+                 'user';
+
+    console.log('Current session:', session);
+    console.log('User metadata:', session.user.user_metadata);
+    console.log('App metadata:', session.user.app_metadata);
+    console.log('Detected role:', role);
+
+    // Always update JWT claims first
+    if (role) {
+      try {
+        console.log('Updating JWT claims with role:', role);
+        await supabase.auth.updateUser({
+          data: {
+            role,
+            app_metadata: {
+              role
+            }
+          }
+        });
+        
+        // Get fresh session after updating claims
+        const { data: { session: updatedSession } } = await supabase.auth.getSession();
+        if (updatedSession?.user) {
+          console.log('Updated session:', updatedSession);
+          console.log('Updated JWT claims:', updatedSession.user.app_metadata);
+          session = updatedSession;
+        }
+      } catch (error) {
+        console.error('Error updating user claims:', error);
+      }
+    }
+                 
+    const userData: User = {
       id: session.user.id,
       email: session.user.email!,
       name: session.user.user_metadata.name || '',
-      // Check both user_metadata and app_metadata for role
-      role: session.user.user_metadata.role || 
-            session.user.app_metadata?.role ||
-            'user'
+      role
     };
 
-    return userData;
+    console.log('Final user data being set:', userData);
+
+    // Update user state and storage
+    setUser(userData);
+    setStoredUser(userData);
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) throw error;
-
-      if (data.user) {
-        const userData = processUserData(data);
-        if (userData) {
-          setUser(userData);
-          setStoredUser(userData);
-        }
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Sign in failed:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const signOut = async () => {
-    try {
-      setLoading(true);
-      setUser(null);
-      await supabase.auth.signOut();
-      router.push('/auth/login');
-    } catch (error) {
-      console.error('Sign out failed:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    let mounted = true;
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      processUserData(session);
+      setLoading(false);
+    });
 
-    const initializeAuth = async () => {
-      try {
-        // Check for existing Supabase session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Error getting session:', error);
-          throw error;
-        }
-        
-        if (mounted) {
-          if (session) {
-            const userData = processUserData(session);
-            if (userData) {
-              setUser(userData);
-              setStoredUser(userData);
-            }
-          }
-          setInitialized(true);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error('Error initializing auth:', error);
-        if (mounted) {
-          setInitialized(true);
-          setLoading(false);
-        }
-      }
-    };
-
-    initializeAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-
-      console.log('Auth state changed:', event, session?.user?.email);
-
-      if (event === 'SIGNED_OUT') {
-        setUser(null);
-        router.push('/auth/login');
-        return;
-      }
-
-      if (session) {
-        const userData = processUserData(session);
-        if (userData) {
-          setUser(userData);
-          setStoredUser(userData);
-        }
-      }
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      processUserData(session);
     });
 
     return () => {
-      mounted = false;
       subscription.unsubscribe();
     };
-  }, [router, processUserData]);
+  }, [processUserData]);
 
-  // Show loading state only during initial auth check
-  if (!initialized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const value = {
+    user,
+    loading,
+    isAdmin: () => user?.role === 'admin',
+    isProjectManager: () => user?.role === 'project_management' || user?.role === 'admin',
+    signIn: async (email: string, password: string) => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      if (error) throw error;
+      return data;
+    },
+    signOut: async () => {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      setUser(null);
+      setStoredUser(null);
+    }
+  };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, isAdmin }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};
 
 export { AuthContext };

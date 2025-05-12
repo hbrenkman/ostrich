@@ -17,22 +17,40 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useProjectSearch } from '@/modules/projects/frontend/hooks/useProjectSearch';
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { DataTable } from '@/components/ui/data-table';
+import { supabase } from '@/lib/supabase';
+import { toast } from 'react-hot-toast';
 
 interface FeeProposal {
+  id: string;
   number: string;
   overview: string;
-  designBudget: number;
-  constructionSupportBudget: number;
-  status: 'Active' | 'Inactive';
+  design_budget: number;
+  construction_support_budget: number;
+  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';
 }
 
 interface Project {
+  id: string;
   number: string;
   name: string;
-  client: string;
   type: string;
   status: 'Pending' | 'Design' | 'Construction' | 'Hold' | 'Cancelled';
-  feeProposals: FeeProposal[];
+  company: {
+    id: string;
+    name: string;
+  } | null;
+  company_location: {
+    id: string;
+    address: string;
+    city: string;
+    state: string;
+  } | null;
+  company_contact: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+  fee_proposals: FeeProposal[];
 }
 
 export default function Projects() {
@@ -40,123 +58,9 @@ export default function Projects() {
   const searchParams = useSearchParams();
   const { user, isAdmin } = useAuth();
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    if (!user) {
-      router.push('/auth/login');
-      return;
-    }
-    
-    // Log the user data for debugging
-    console.log('Current user:', user);
-    console.log('Is admin:', isAdmin());
-    
-    // Allow access only to admin and project_management roles
-    if (!isAdmin()) {
-      console.log('Access denied, redirecting to dashboard');
-      router.push('/dashboard');
-      return;
-    }
-  }, [user, router, isAdmin]);
-
-  // Show loading state while checking permissions
-  if (!user || !isAdmin()) {
-    return <div>Loading...</div>;
-  }
-
-  const filter = searchParams.get('filter');
-
-  // Generate sample projects for pagination
-  const generateProjects = () => {
-    const baseProjects: Project[] = [
-      {
-        number: "PRJ-001",
-        name: "Website Redesign",
-        client: "Acme Corporation",
-        type: "Development",
-        status: "Design",
-        feeProposals: [
-          {
-            number: "PRJ-001.01",
-            overview: "Initial website design and development",
-            designBudget: 25000,
-            constructionSupportBudget: 15000,
-            status: "Active"
-          },
-          {
-            number: "PRJ-001.02",
-            overview: "Additional features and integrations",
-            designBudget: 15000,
-            constructionSupportBudget: 10000,
-            status: "Inactive"
-          }
-        ]
-      },
-      {
-        number: "PRJ-002",
-        name: "Mobile App Development",
-        client: "Stellar Solutions",
-        type: "Development",
-        status: "Construction",
-        feeProposals: [
-          {
-            number: "PRJ-002.01",
-            overview: "Mobile app MVP development",
-            designBudget: 35000,
-            constructionSupportBudget: 20000,
-            status: "Active"
-          }
-        ]
-      },
-      {
-        number: "PRJ-003",
-        name: "Database Migration",
-        client: "Global Dynamics",
-        type: "Infrastructure",
-        status: "Pending",
-        feeProposals: [
-          {
-            number: "PRJ-003.01",
-            overview: "Database architecture and migration",
-            designBudget: 45000,
-            constructionSupportBudget: 30000,
-            status: "Inactive"
-          }
-        ]
-      }
-    ];
-
-    // Generate more projects with different statuses
-    return Array.from({ length: 250 }, (_, index) => {
-      const baseProject = baseProjects[index % baseProjects.length];
-      const status = index % 5 === 0 ? 'Pending' : 
-                     index % 4 === 0 ? 'Design' :
-                     index % 3 === 0 ? 'Construction' :
-                     index % 2 === 0 ? 'Hold' : 'Cancelled';
-      
-      return {
-        ...baseProject,
-        number: `PRJ-${String(index + 1).padStart(3, '0')}`,
-        name: `${baseProject.name} ${Math.floor(index / baseProjects.length) + 1}`,
-        status: status as Project['status']
-      };
-    });
-  };
-
-  const allProjects = generateProjects();
-
-  const filteredProjects = allProjects.filter(project => {
-    if (filter === 'active') {
-      return project.status === 'Design' || project.status === 'Construction';
-    }
-    if (filter === 'pending-proposals') {
-      return project.status === 'Pending';
-    }
-    return true;
-  });
-
-  const { searchTerm, setSearchTerm, filteredItems: searchedProjects } = useProjectSearch(filteredProjects);
-
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { searchTerm, setSearchTerm, filteredItems: searchedProjects } = useProjectSearch(projects);
   const {
     currentPage,
     setCurrentPage,
@@ -166,12 +70,102 @@ export default function Projects() {
     totalPages,
     totalItems
   } = usePagination({
-    items: searchedProjects,
+    items: projects,
     itemsPerPage: 100
   });
 
-  const designProjects = paginatedProjects.filter(project => project.status === 'Design');
-  const constructionProjects = paginatedProjects.filter(project => project.status === 'Construction');
+  const filter = searchParams?.get('filter') || null;
+
+  // Move all effects to the top level
+  useEffect(() => {
+    if (!user) {
+      router.push('/auth/login');
+      return;
+    }
+    
+    if (!isAdmin()) {
+      console.log('Access denied, redirecting to dashboard');
+      router.push('/dashboard');
+      return;
+    }
+
+    fetchProjects();
+  }, [user, router, isAdmin]);
+
+  useEffect(() => {
+    setCurrentPage(1); // Reset to first page when filter changes
+  }, [filter, setCurrentPage]);
+
+  const fetchProjects = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('projects')
+        .select(`
+          id,
+          number,
+          name,
+          type,
+          status,
+          company:companies!inner(id, name),
+          company_location:locations!inner(id, address, city, state),
+          company_contact:contacts!inner(id, name, email),
+          fee_proposals(
+            id,
+            number,
+            overview,
+            design_budget,
+            construction_support_budget,
+            status
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Transform the data to match our Project type
+      const transformedData = (data || []).map(project => ({
+        ...project,
+        company: project.company?.[0] || null,
+        company_location: project.company_location?.[0] || null,
+        company_contact: project.company_contact?.[0] || null,
+      })) as Project[];
+      
+      setProjects(transformedData);
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+      toast.error('Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Show loading state while checking permissions or fetching data
+  if (!user || !isAdmin() || loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-muted-foreground">Loading projects...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredProjects = searchedProjects.filter(project => {
+    if (filter === 'active') {
+      return project.status === 'Design' || project.status === 'Construction';
+    }
+    if (filter === 'pending-proposals') {
+      return project.status === 'Pending';
+    }
+    return true;
+  });
+
+  const designProjects = filteredProjects.filter(project => project.status === 'Design');
+  const constructionProjects = filteredProjects.filter(project => project.status === 'Construction');
 
   const toggleRow = (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -185,14 +179,14 @@ export default function Projects() {
   };
 
   const updateProjectStatus = (projectIndex: number, newStatus: Project['status']) => {
-    const updatedProjects = [...allProjects];
+    const updatedProjects = [...projects];
     updatedProjects[projectIndex].status = newStatus;
     // In a real app, you would update the state and/or backend here
   };
 
   const updateProposalStatus = (projectIndex: number, proposalIndex: number, newStatus: FeeProposal['status']) => {
-    const updatedProjects = [...allProjects];
-    updatedProjects[projectIndex].feeProposals[proposalIndex].status = newStatus;
+    const updatedProjects = [...projects];
+    updatedProjects[projectIndex].fee_proposals[proposalIndex].status = newStatus;
     // In a real app, you would update the state and/or backend here
   };
 
@@ -213,9 +207,9 @@ export default function Projects() {
     }
   };
 
-  const handleProjectClick = (project: Project) => {
+  const handleProjectClick = (project: Project, event?: React.MouseEvent) => {
     // Prevent navigation if clicking the expand button
-    if (event?.target?.closest('button')) {
+    if (event?.target instanceof HTMLElement && event.target.closest('button')) {
       return;
     }
     router.push(`/projects/${project.number}`);
@@ -241,10 +235,20 @@ export default function Projects() {
 
   const renderExpandedContent = (project: Project) => (
     <div className="py-4">
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <h4 className="text-sm font-medium mb-2">Company Details</h4>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Location:</span> {project.company_location?.address}, {project.company_location?.city}, {project.company_location?.state}</p>
+            <p><span className="text-muted-foreground">Contact:</span> {project.company_contact?.name} ({project.company_contact?.email})</p>
+          </div>
+        </div>
+      </div>
+      
       <h4 className="text-sm font-medium mb-2">Fee Proposals</h4>
       <div className="space-y-4">
-        {project.feeProposals.map((proposal, index) => (
-          <div key={proposal.number} className="bg-card p-4 rounded-md border border-border">
+        {project.fee_proposals?.map((proposal) => (
+          <div key={proposal.id} className="bg-card p-4 rounded-md border border-border">
             <div className="flex justify-between items-start">
               <div>
                 <h5 className="font-medium">{proposal.number}</h5>
@@ -261,36 +265,43 @@ export default function Projects() {
             <div className="mt-2 grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Design Budget</p>
-                <p className="font-medium">{formatCurrency(proposal.designBudget)}</p>
+                <p className="font-medium">{formatCurrency(proposal.design_budget)}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Construction Support Budget</p>
-                <p className="font-medium">{formatCurrency(proposal.constructionSupportBudget)}</p>
+                <p className="font-medium">{formatCurrency(proposal.construction_support_budget)}</p>
               </div>
             </div>
           </div>
         ))}
+        {(!project.fee_proposals || project.fee_proposals.length === 0) && (
+          <p className="text-sm text-muted-foreground">No fee proposals yet.</p>
+        )}
       </div>
     </div>
   );
 
-  const columns = [
+  const columns: {
+    header: string;
+    accessor: (project: Project) => React.ReactNode;
+    className?: string;
+  }[] = [
     {
       header: 'Number',
-      accessor: 'number',
+      accessor: (project: Project) => project.number,
       className: 'font-medium'
     },
     {
       header: 'Name',
-      accessor: 'name'
+      accessor: (project: Project) => project.name
     },
     {
       header: 'Client',
-      accessor: 'client'
+      accessor: (project: Project) => project.company?.name || 'N/A'
     },
     {
       header: 'Type',
-      accessor: 'type'
+      accessor: (project: Project) => project.type
     },
     {
       header: 'Status',
@@ -342,7 +353,7 @@ export default function Projects() {
         </CardHeader>
         <CardContent>
           <DataTable
-            data={paginatedProjects}
+            data={filteredProjects.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)}
             columns={columns}
             emptyMessage="No projects found."
             expandedContent={renderExpandedContent}
@@ -351,11 +362,12 @@ export default function Projects() {
             onExpandRow={toggleRow}
           />
           
-          {totalPages > 1 && (
+          {Math.ceil(filteredProjects.length / itemsPerPage) > 1 && (
             <div className="mt-4">
               <Pagination
                 currentPage={currentPage}
-                totalPages={totalPages}
+                totalPages={Math.ceil(filteredProjects.length / itemsPerPage)}
+                totalItems={filteredProjects.length}
                 onPageChange={setCurrentPage}
               />
             </div>

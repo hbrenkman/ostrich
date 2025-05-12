@@ -14,6 +14,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { supabase } from '@/lib/supabase';
+import { toast } from 'react-hot-toast';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TeamMember {
   id: string;
@@ -24,8 +30,10 @@ interface TeamMember {
 interface Company {
   id: string;
   name: string;
-  type: string;
+  industry_id: string | null;
   status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface FeeProposal {
@@ -51,12 +59,38 @@ export default function ProjectDetail() {
   const { user } = useAuth();
   const projectId = params?.id as string;
   const isNewProject = projectId === 'new';
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [teamMemberOpen, setTeamMemberOpen] = useState(false);
+  const [projectTypeOpen, setProjectTypeOpen] = useState(false);
 
   useEffect(() => {
     if (user?.role === 'production') {
       router.push('/dashboard');
     }
   }, [user, router]);
+
+  useEffect(() => {
+    async function fetchCompanies() {
+      try {
+        const { data, error } = await supabase
+          .from('companies')
+          .select('*')
+          .order('name');
+
+        if (error) throw error;
+        setCompanies(data || []);
+      } catch (error) {
+        console.error('Error fetching companies:', error);
+        toast.error('Failed to load companies');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchCompanies();
+  }, []);
 
   // Example project data - in a real app, fetch this based on projectId
   const [project, setProject] = useState({
@@ -178,6 +212,21 @@ export default function ProjectDetail() {
     }
   };
 
+  const getProposalStatusColor = (status: FeeProposal['status']) => {
+    switch (status) {
+      case 'Pending':
+        return 'bg-muted text-muted-foreground';
+      case 'Active':
+        return 'bg-primary text-primary-foreground';
+      case 'On Hold':
+        return 'bg-accent text-accent-foreground';
+      case 'Cancelled':
+        return 'bg-destructive text-destructive-foreground';
+      default:
+        return 'bg-gray-200 text-gray-700';
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
@@ -198,7 +247,7 @@ export default function ProjectDetail() {
       <form onSubmit={handleSubmit} className="flex gap-6">
         {/* Main Content */}
         <div className="flex-1 max-w-3xl space-y-6">
-          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#D1D5DB] dark:border-[#4DB6AC]">
             <div className="space-y-6">
               <div className="flex items-center gap-4">
                 <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{project.number}</span>
@@ -212,65 +261,142 @@ export default function ProjectDetail() {
               </div>
 
               <div className="flex gap-4">
-                <select
-                  value={project.type}
-                  onChange={(e) => setProject({ ...project, type: e.target.value })}
-                  className="px-3 py-2 border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                >
-                  <option value="Development">Development</option>
-                  <option value="Infrastructure">Infrastructure</option>
-                  <option value="Consulting">Consulting</option>
-                  <option value="Support">Support</option>
-                </select>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 dark:text-[#9CA3AF]">Type:</span>
+                  <Popover open={projectTypeOpen} onOpenChange={setProjectTypeOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        role="combobox"
+                        aria-expanded={projectTypeOpen}
+                        className="w-[200px] flex items-center justify-between h-8 px-3 py-1.5 border border-[#D1D5DB] dark:border-[#4DB6AC] rounded-md bg-background text-sm font-normal hover:bg-muted/10 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        <span className="truncate">{project.type}</span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50 flex-shrink-0" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[200px] p-0">
+                      <Command>
+                        <CommandGroup>
+                          {['Development', 'Infrastructure', 'Consulting', 'Support'].map((type) => (
+                            <CommandItem
+                              key={type}
+                              value={type}
+                              onSelect={() => {
+                                setProject({ ...project, type });
+                                setProjectTypeOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4 flex-shrink-0",
+                                  project.type === type ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="truncate">{type}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-500 dark:text-[#9CA3AF]">Company:</span>
-                  <Select
-                    value={project.companyId}
-                    onValueChange={(value) => {
-                      const selectedCompany = companies.find(c => c.id === value);
-                      setProject({ 
-                        ...project, 
-                        companyId: value,
-                        company: selectedCompany ? selectedCompany.name : ''
-                      });
-                    }}
-                  >
-                    <SelectTrigger className="w-[200px] h-8 border-0 bg-transparent focus:ring-0 px-0">
-                      <SelectValue placeholder="Select company" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]">
-                      {companies.map((company) => (
-                        <SelectItem key={company.id} value={company.id}>
-                          {company.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={open} onOpenChange={setOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        role="combobox"
+                        aria-expanded={open}
+                        className="w-[300px] flex items-center justify-between h-8 px-3 py-1.5 border border-[#D1D5DB] dark:border-[#4DB6AC] rounded-md bg-background text-sm font-normal hover:bg-muted/10 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        disabled={loading}
+                      >
+                        <span className="truncate">
+                          {loading ? (
+                            "Loading companies..."
+                          ) : project.companyId ? (
+                            companies.find((company) => company.id === project.companyId)?.name
+                          ) : (
+                            "Select company..."
+                          )}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50 flex-shrink-0" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0">
+                      <Command>
+                        <CommandInput placeholder="Search company..." />
+                        <CommandEmpty>No company found.</CommandEmpty>
+                        <CommandGroup className="max-h-[300px] overflow-auto">
+                          {companies.map((company) => (
+                            <CommandItem
+                              key={company.id}
+                              value={company.name}
+                              onSelect={() => {
+                                setProject({
+                                  ...project,
+                                  companyId: company.id,
+                                  company: company.name,
+                                });
+                                setOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4 flex-shrink-0",
+                                  project.companyId === company.id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="truncate">{company.name}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">Team Members</h3>
-                  <select
-                    onChange={(e) => {
-                      const member = availableTeamMembers.find(m => m.id === e.target.value);
-                      if (member) addTeamMember(member);
-                      e.target.value = '';
-                    }}
-                    className="px-3 py-1 text-sm border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                    value=""
-                  >
-                    <option value="" disabled>Add team member...</option>
-                    {availableTeamMembers
-                      .filter(member => !selectedTeamMembers.find(m => m.id === member.id))
-                      .map(member => (
-                        <option key={member.id} value={member.id}>
-                          {member.name} - {member.role}
-                        </option>
-                      ))}
-                  </select>
+                  <Popover open={teamMemberOpen} onOpenChange={setTeamMemberOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        role="combobox"
+                        aria-expanded={teamMemberOpen}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add team member
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[300px] p-0" align="end">
+                      <Command>
+                        <CommandInput placeholder="Search team members..." />
+                        <CommandEmpty>No team member found.</CommandEmpty>
+                        <CommandGroup className="max-h-[300px] overflow-auto">
+                          {availableTeamMembers
+                            .filter(member => !selectedTeamMembers.find(m => m.id === member.id))
+                            .map(member => (
+                              <CommandItem
+                                key={member.id}
+                                value={`${member.name} - ${member.role}`}
+                                onSelect={() => {
+                                  addTeamMember(member);
+                                  setTeamMemberOpen(false);
+                                }}
+                              >
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{member.name}</span>
+                                  <span className="text-sm text-gray-500">{member.role}</span>
+                                </div>
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {selectedTeamMembers.map(member => (
@@ -294,7 +420,7 @@ export default function ProjectDetail() {
           </div>
 
           {/* Fee Proposals Section */}
-          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#D1D5DB] dark:border-[#4DB6AC]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E5E7EB]">Fee Proposals</h2>
               <button
@@ -320,7 +446,7 @@ export default function ProjectDetail() {
                       <span className="text-sm text-gray-900 dark:text-[#E5E7EB]">{proposal.overview}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(proposal.status)}`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getProposalStatusColor(proposal.status)}`}>
                         {proposal.status}
                       </span>
                       <DropdownMenu>
@@ -386,7 +512,7 @@ export default function ProjectDetail() {
 
         {/* Documents Section */}
         <div className="w-80 space-y-6">
-          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#D1D5DB] dark:border-[#4DB6AC]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold dark:text-[#E5E7EB]">Project Documents</h2>
               <DropdownMenu>

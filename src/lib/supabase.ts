@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import { Database } from '@/types/supabase';
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import type { Database } from '@/types/supabase';
 
 // Initialize the public Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -36,7 +37,9 @@ export const supabase = createClient<Database>(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storageKey: 'ostrich-auth-token'
+      storageKey: 'ostrich-auth-token',
+      flowType: 'pkce',
+      debug: true
     },
     db: {
       schema: 'public'
@@ -53,3 +56,14 @@ export const supabase = createClient<Database>(
     }
   }
 );
+
+// Add debug listener for auth state changes
+supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+  console.log('Auth state changed:', event);
+  console.log('Session:', session);
+  if (session?.user) {
+    console.log('User metadata:', session.user.user_metadata);
+    console.log('App metadata:', session.user.app_metadata);
+    console.log('Role from JWT:', session.user.role);
+  }
+});
