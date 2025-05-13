@@ -18,6 +18,8 @@ import { toast } from 'react-hot-toast';
 import { createLocation, updateLocation, deleteLocation } from '@/lib/actions/locations';
 import { Toaster } from 'react-hot-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from 'lucide-react';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
@@ -114,7 +116,7 @@ interface Contact {
   direct_phone: string;
   role_id: string;
   role?: Role;
-  location_id: string;
+  location_id: string | null;  // Changed from string to string | null
   is_primary: boolean;
   created_at: string;
   updated_at: string;
@@ -134,6 +136,10 @@ interface CompanyWithRelations {
   unassignedContacts: Contact[];
   status: string;
   industry_id?: string;
+  industry?: {
+    id: string;
+    name: string;
+  };
 }
 
 interface Role {
@@ -189,9 +195,12 @@ interface UnassignedContactsProps {
   contacts: Contact[];
   onEditContact: (contact: Contact) => void;
   onDeleteContact: (contact: Contact) => void;
+  onAddContact: (contact: Contact) => void;
+  roles: Role[];
+  locations: Location[];  // Add locations prop
 }
 
-function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: UnassignedContactsProps) {
+function UnassignedContacts({ contacts, onEditContact, onDeleteContact, onAddContact, roles, locations }: UnassignedContactsProps) {
   const [isAddContactDialogOpen, setIsAddContactDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [newContact, setNewContact] = useState<Partial<Contact>>({
@@ -201,7 +210,7 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
     mobile: '',
     direct_phone: '',
     role_id: '',
-    location_id: '',
+    location_id: null,  // Reset location_id to null
     is_primary: false
   });
 
@@ -212,21 +221,62 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
         return;
       }
 
+      // Use the create_contact database function
       const { data, error } = await supabase
-        .from('contacts')
-        .insert([{
-          ...newContact,
-          location_id: null,
-          status: 'Active'
-        }])
-        .select()
-        .single();
+        .rpc('create_contact', {
+          p_first_name: newContact.first_name,
+          p_last_name: newContact.last_name,
+          p_email: newContact.email,
+          p_mobile: newContact.mobile || null,
+          p_direct_phone: newContact.direct_phone || null,
+          p_role_id: newContact.role_id || null,
+          p_location_id: newContact.location_id || null,
+          p_status: 'Active'
+        });
 
       if (error) throw error;
 
-      // Update the local state with the new contact
-      onEditContact(data);
+      // Fetch the newly created contact with its role and location
+      const { data: contactWithRole, error: fetchError } = await supabase
+        .from('contacts')
+        .select(`
+          *,
+          role:roles(*),
+          location:locations(*)
+        `)
+        .eq('id', data.id)
+        .single();
 
+      if (fetchError) throw fetchError;
+
+      // If the contact has a location, we need to refresh both the locations and unassigned contacts
+      if (contactWithRole.location_id) {
+        // Fetch all contacts for the company's locations
+        const locationIds = locations.map(loc => loc.id);
+        const { data: allContacts, error: contactsError } = await supabase
+          .from('contacts')
+          .select(`
+            *,
+            role:roles(*),
+            location:locations(*)
+          `)
+          .or(`location_id.in.(${locationIds.join(',')}),location_id.is.null`);
+
+        if (contactsError) throw contactsError;
+
+        // Update the company state with the new contact lists
+        onAddContact({
+          ...contactWithRole,
+          // This will trigger a refresh of both the locations and unassigned contacts
+          _refresh: true,
+          allContacts: allContacts || []
+        });
+      } else {
+        // If no location, just add to unassigned contacts
+        onAddContact(contactWithRole);
+      }
+
+      // Reset the form
       setNewContact({
         first_name: '',
         last_name: '',
@@ -234,7 +284,7 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
         mobile: '',
         direct_phone: '',
         role_id: '',
-        location_id: '',
+        location_id: null,
         is_primary: false
       });
       setIsAddContactDialogOpen(false);
@@ -298,6 +348,11 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
       normalizeString(contact.direct_phone) === word
     );
   });
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'mobile' | 'direct_phone') => {
+    const formattedPhone = validateAndFormatPhone(e.target.value);
+    setNewContact(prev => ({ ...prev, [field]: formattedPhone }));
+  };
 
   return (
     <Card className="h-[800px] flex flex-col">
@@ -425,6 +480,62 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
             </div>
 
             <div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="mobile">Mobile Phone</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-gray-400" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[300px]">
+                      <p>Enter phone number with optional country code:</p>
+                      <ul className="list-disc list-inside mt-1 text-sm">
+                        <li>US number: (555) 123-4567</li>
+                        <li>US with country code: +1 (555) 123-4567</li>
+                        <li>International: +XX (555) 123-4567</li>
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                id="mobile"
+                value={newContact.mobile}
+                onChange={(e) => handlePhoneChange(e, 'mobile')}
+                placeholder="+1 (555) 123-4567"
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="direct_phone">Direct Phone</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-gray-400" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[300px]">
+                      <p>Enter phone number with optional country code:</p>
+                      <ul className="list-disc list-inside mt-1 text-sm">
+                        <li>US number: (555) 123-4567</li>
+                        <li>US with country code: +1 (555) 123-4567</li>
+                        <li>International: +XX (555) 123-4567</li>
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Input
+                id="direct_phone"
+                value={newContact.direct_phone}
+                onChange={(e) => handlePhoneChange(e, 'direct_phone')}
+                placeholder="+1 (555) 123-4567"
+                className="mt-1"
+              />
+            </div>
+
+            <div>
               <Label htmlFor="role">Role</Label>
               <select
                 id="role_id"
@@ -433,28 +544,29 @@ function UnassignedContacts({ contacts, onEditContact, onDeleteContact }: Unassi
                 className="w-full px-3 py-2 mt-1 border rounded-md"
               >
                 <option value="">Select role...</option>
-                {/* Add role options here */}
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div>
-              <Label htmlFor="mobile">Mobile Phone</Label>
-              <Input
-                id="mobile"
-                value={newContact.mobile}
-                onChange={(e) => setNewContact({ ...newContact, mobile: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="direct_phone">Direct Phone</Label>
-              <Input
-                id="direct_phone"
-                value={newContact.direct_phone}
-                onChange={(e) => setNewContact({ ...newContact, direct_phone: e.target.value })}
-                className="mt-1"
-              />
+              <Label htmlFor="location">Location (Optional)</Label>
+              <select
+                id="location_id"
+                value={newContact.location_id || ''}
+                onChange={(e) => setNewContact({ ...newContact, location_id: e.target.value || null })}
+                className="w-full px-3 py-2 mt-1 border rounded-md"
+              >
+                <option value="">No location assigned</option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.address_line1}, {location.city}, {location.state}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <DialogFooter>
@@ -762,41 +874,149 @@ LocationsList.displayName = 'LocationsList';
 interface CompanyDetailsProps {
   company: CompanyWithRelations;
   industries: Industry[];
+  companyId: string;
   onSave: (companyData: Partial<CompanyWithRelations>) => Promise<void>;
+  isSaving: boolean;
+  setIsSaving: (saving: boolean) => void;
 }
 
-function CompanyDetails({ company, industries, onSave }: CompanyDetailsProps) {
-  const handleSave = async (companyData: Partial<CompanyWithRelations>) => {
+function CompanyDetails({ company, industries, companyId, onSave, isSaving, setIsSaving }: CompanyDetailsProps) {
+  const [localCompany, setLocalCompany] = useState(company);
+
+  // Update local state when prop changes
+  useEffect(() => {
+    console.log('Company prop changed:', {
+      company,
+      currentLocal: localCompany,
+      industry_id: company.industry_id,
+      industry: company.industry
+    });
+    
+    setLocalCompany(prev => {
+      const newState = {
+        ...prev,
+        ...company,
+        industry_id: company.industry_id || company.industry?.id
+      };
+      console.log('Setting new local state:', newState);
+      return newState;
+    });
+  }, [company]);
+
+  const handleChange = (field: keyof CompanyWithRelations, value: any) => {
+    console.log('Handling change:', { 
+      field, 
+      value, 
+      currentState: localCompany,
+      newValue: value 
+    });
+    
+    setLocalCompany(prev => {
+      const newState = {
+        ...prev,
+        [field]: value
+      };
+      console.log('New state after change:', newState);
+      return newState;
+    });
+  };
+
+  const handleSave = async () => {
     try {
-      console.log('Saving company:', companyData);
-      const { industries: companyIndustries, locations, industry_id, ...companyWithoutRelations } = companyData;
+      setIsSaving(true);
       
-      // Update company
-      const { data, error } = await supabase
-        .from('companies')
-        .update({
-          ...companyWithoutRelations,
-          industry_id,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', company.id)
-        .select(`
-          *,
-          industry:industries(*),
-          locations(*)
-        `)
-        .single();
+      // Get the current industry_id, ensuring we have a value
+      const currentIndustryId = localCompany.industry_id || localCompany.industry?.id;
+      console.log('Starting save operation with industry:', {
+        selectedIndustryId: currentIndustryId,
+        localCompany,
+        industry_id: localCompany.industry_id,
+        industry: localCompany.industry
+      });
 
-      if (error) throw error;
+      if (!currentIndustryId) {
+        console.warn('No industry ID found in local state');
+        throw new Error('No industry selected');
+      }
 
-      // Update local state
-      onSave(data);
+      // Prepare update data
+      const updateData = {
+        p_id: companyId,
+        p_name: localCompany.name,
+        p_industry_id: currentIndustryId,
+        p_status: localCompany.status,
+        p_updated_at: new Date().toISOString()
+      };
+
+      console.log('Attempting to update company using database function:', updateData);
+      
+      // Use the update_company function
+      const { data: updateResult, error: updateError } = await supabase
+        .rpc('update_company', updateData);
+
+      if (updateError) {
+        console.error('Error updating company:', updateError);
+        throw updateError;
+      }
+
+      console.log('Update result from database function:', updateResult);
+
+      if (!updateResult) {
+        throw new Error('Update failed - no result returned');
+      }
+
+      // The updateResult is already an object, no need to parse it
+      const updatedCompany = updateResult;
+      
+      console.log('Update result:', {
+        updatedCompany,
+        industry_id: updatedCompany.industry_id,
+        expectedIndustryId: currentIndustryId
+      });
+
+      // Verify the industry was updated correctly
+      if (updatedCompany.industry_id !== currentIndustryId) {
+        console.error('Industry ID mismatch in update result:', {
+          expected: currentIndustryId,
+          received: updatedCompany.industry_id
+        });
+        throw new Error('Industry update verification failed - ID mismatch in update result');
+      }
+
+      // Update local state with the fetched data
+      const newLocalState = {
+        ...updatedCompany,
+        industry_id: updatedCompany.industry_id || updatedCompany.industry?.id,
+        unassignedContacts: company.unassignedContacts || []
+      };
+      
+      console.log('Setting new local state after verified update:', newLocalState);
+      setLocalCompany(newLocalState);
+
+      // Notify parent component of the update
+      await onSave(newLocalState);
+      
       toast.success('Company updated successfully');
     } catch (error) {
-      console.error('Error saving company:', error);
-      toast.error('Failed to save company');
+      console.error('Error in save operation:', error);
+      if (error instanceof Error) {
+        toast.error(`Failed to save company: ${error.message}`);
+      } else {
+        toast.error('Failed to save company');
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
+
+  // Get the current industry ID for the dropdown
+  const currentIndustryId = localCompany.industry_id || localCompany.industry?.id;
+  console.log('Rendering with industry state:', {
+    currentIndustryId,
+    localCompany,
+    industry_id: localCompany.industry_id,
+    industry: localCompany.industry
+  });
 
   return (
     <Card>
@@ -809,17 +1029,22 @@ function CompanyDetails({ company, industries, onSave }: CompanyDetailsProps) {
             <Label htmlFor="name">Company Name</Label>
             <Input
               id="name"
-              value={company.name}
-              onChange={(e) => onSave({ ...company, name: e.target.value })}
+              value={localCompany.name}
+              onChange={(e) => handleChange('name', e.target.value)}
+              disabled={isSaving}
             />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="industry">Industry</Label>
             <select
               id="industry"
-              value={company.industry_id || ''}
-              onChange={(e) => onSave({ ...company, industry_id: e.target.value })}
+              value={currentIndustryId || ''}
+              onChange={(e) => {
+                console.log('Industry dropdown changed:', e.target.value);
+                handleChange('industry_id', e.target.value);
+              }}
               className="w-full px-3 py-2 border rounded-md"
+              disabled={isSaving}
             >
               <option value="">Select Industry</option>
               {industries.map((industry) => (
@@ -833,9 +1058,10 @@ function CompanyDetails({ company, industries, onSave }: CompanyDetailsProps) {
             <Label htmlFor="status">Status</Label>
             <select
               id="status"
-              value={company.status}
-              onChange={(e) => onSave({ ...company, status: e.target.value })}
+              value={localCompany.status}
+              onChange={(e) => handleChange('status', e.target.value)}
               className="w-full px-3 py-2 border rounded-md"
+              disabled={isSaving}
             >
               <option value="Active">Active</option>
               <option value="Pending">Pending</option>
@@ -843,8 +1069,12 @@ function CompanyDetails({ company, industries, onSave }: CompanyDetailsProps) {
             </select>
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onSave(company)}>
-              Save Changes
+            <Button 
+              variant="outline" 
+              onClick={handleSave}
+              disabled={isSaving}
+            >
+              {isSaving ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </div>
@@ -865,24 +1095,38 @@ interface ContactDialogProps {
 
 // Update the phone validation function to handle international numbers
 const validateAndFormatPhone = (phone: string): string => {
-  // Remove all non-digit characters
-  const digits = phone.replace(/\D/g, '');
+  // Remove all non-digit characters except '+'
+  const cleaned = phone.replace(/[^\d+]/g, '');
+  
+  // If empty, return empty string
+  if (!cleaned) return '';
   
   // Handle different phone number formats
-  if (digits.length === 10) {
-    // Standard US number: (XXX) XXX-XXXX
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  } else if (digits.length === 11 && digits[0] === '1') {
-    // US number with country code: +1 (XXX) XXX-XXXX
-    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  } else if (digits.length > 10) {
-    // International number: +XX (XXX) XXX-XXXX
-    const countryCode = digits.slice(0, -10);
-    const number = digits.slice(-10);
-    return `+${countryCode} (${number.slice(0, 3)}) ${number.slice(3, 6)}-${number.slice(6)}`;
+  if (cleaned.startsWith('+')) {
+    // International number
+    const countryCode = cleaned.match(/^\+\d+/)?.[0] || '';
+    const number = cleaned.slice(countryCode.length);
+    
+    if (number.length === 10) {
+      // Standard 10-digit number after country code
+      return `${countryCode} (${number.slice(0, 3)}) ${number.slice(3, 6)}-${number.slice(6)}`;
+    } else if (number.length === 11 && number[0] === '1') {
+      // US number with country code
+      return `${countryCode} (${number.slice(1, 4)}) ${number.slice(4, 7)}-${number.slice(7)}`;
+    }
+    // Return as is if not matching expected formats
+    return cleaned;
+  } else {
+    // US number without country code
+    const digitsOnly = cleaned.replace(/\D/g, '');
+    if (digitsOnly.length === 10) {
+      return `(${digitsOnly.slice(0, 3)}) ${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6)}`;
+    } else if (digitsOnly.length === 11 && digitsOnly[0] === '1') {
+      return `+1 (${digitsOnly.slice(1, 4)}) ${digitsOnly.slice(4, 7)}-${digitsOnly.slice(7)}`;
+    }
   }
   
-  // If not a valid format, return the original input
+  // Return original input if no format matches
   return phone;
 };
 
@@ -1127,6 +1371,7 @@ export default function EditCompany() {
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Ensure we're on the client side before fetching data
   useEffect(() => {
@@ -1307,6 +1552,10 @@ export default function EditCompany() {
         </div>
       </div>
     );
+  }
+
+  if (!params?.id) {
+    return <div>Company ID is required</div>;
   }
 
   const handleDropContact = async (contactId: string, locationId: string) => {
@@ -1741,33 +1990,30 @@ export default function EditCompany() {
 
   const handleSaveCompany = async (companyData: Partial<CompanyWithRelations>) => {
     try {
-      console.log('Saving company:', companyData);
-      const { industries: companyIndustries, locations, industry_id, ...companyWithoutRelations } = companyData;
-      
-      // Update company
-      const { data, error } = await supabase
-        .from('companies')
-        .update({
-          ...companyWithoutRelations,
-          industry_id,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', params?.id)
-        .select(`
-          *,
-          industry:industries(*),
-          locations(*)
-        `)
-        .single();
+      if (!params?.id) {
+        throw new Error('Company ID is missing');
+      }
 
-      if (error) throw error;
+      console.log('Updating parent state with data:', companyData);
 
-      // Update local state
-      setCompany(data);
-      toast.success('Company updated successfully');
+      // Update the company state with the new data
+      setCompany(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          ...companyData,
+          industry_id: companyData.industry_id || companyData.industry?.id,
+          unassignedContacts: prev.unassignedContacts || []
+        };
+      });
     } catch (error) {
-      console.error('Error saving company:', error);
-      toast.error('Failed to save company');
+      console.error('Error updating company state:', error);
+      if (error instanceof Error) {
+        toast.error(`Failed to update company: ${error.message}`);
+      } else {
+        toast.error('Failed to update company');
+      }
+      throw error; // Re-throw to let the component handle it
     }
   };
 
@@ -1778,37 +2024,92 @@ export default function EditCompany() {
 
   const handleSaveContact = async (contactData: any) => {
     try {
-      console.log('Saving contact:', contactData);
-      
-      // Only include the fields that exist in the database schema
-      const updateData = {
-        first_name: contactData.first_name,
-        last_name: contactData.last_name,
-        email: contactData.email,
-        mobile: contactData.mobile || null,
-        direct_phone: contactData.direct_phone || null,
-        role_id: contactData.role_id || null,
-        location_id: contactData.location_id || null,
-        updated_at: new Date().toISOString()
-      };
-
-      // Log the update data for debugging
-      console.log('Update data:', updateData);
+      console.log('=== Contact Save Debug Start ===');
+      console.log('Initial contact data:', {
+        editingContact,
+        contactData,
+        currentRoleId: contactData.role_id,
+        currentRole: contactData.role,
+        locationId: contactData.location_id
+      });
       
       if (editingContact) {
-        // First update the contact
-        const { error: updateError } = await supabase
+        if (!editingContact.id) {
+          console.error('No editing contact ID found');
+          throw new Error('Contact ID is required for update');
+        }
+
+        // First verify the contact exists in Supabase
+        console.log('Verifying contact exists in Supabase...');
+        const { data: existingContact, error: verifyError } = await supabase
           .from('contacts')
-          .update(updateData)
-          .eq('id', editingContact.id);
+          .select('*')
+          .eq('id', editingContact.id)
+          .single();
+
+        if (verifyError) {
+          console.error('Error verifying contact:', verifyError);
+          throw verifyError;
+        }
+
+        console.log('Existing contact in database:', existingContact);
+
+        // Prepare the update data with p_ prefix for the database function
+        const updateData = {
+          p_id: editingContact.id,
+          p_first_name: contactData.first_name,
+          p_last_name: contactData.last_name,
+          p_email: contactData.email,
+          p_mobile: contactData.mobile || null,
+          p_direct_phone: contactData.direct_phone || null,
+          p_role_id: contactData.role_id || null,
+          p_location_id: contactData.location_id || null,
+          p_updated_at: new Date().toISOString()
+        };
+
+        console.log('Update data prepared:', updateData);
+        console.log('Calling update_contact RPC function...');
+        
+        // Call the update_contact database function
+        const { data: updateResult, error: updateError } = await supabase
+          .rpc('update_contact', updateData);
 
         if (updateError) {
-          console.error('Update error:', updateError);
+          console.error('Update RPC error:', {
+            error: updateError,
+            code: updateError.code,
+            message: updateError.message,
+            details: updateError.details,
+            hint: updateError.hint
+          });
           throw updateError;
         }
 
-        // Then fetch the updated contact with its role
-        const { data, error: fetchError } = await supabase
+        console.log('Contact update RPC result:', updateResult);
+
+        // Verify the update by fetching the contact again
+        console.log('Verifying update in database...');
+        const { data: verifyUpdate, error: verifyUpdateError } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('id', editingContact.id)
+          .single();
+
+        if (verifyUpdateError) {
+          console.error('Error verifying update:', verifyUpdateError);
+          throw verifyUpdateError;
+        }
+
+        console.log('Contact after update in database:', verifyUpdate);
+
+        if (!verifyUpdate) {
+          console.error('No contact found after update');
+          throw new Error('Contact not found after update');
+        }
+
+        // Fetch the updated contact with role information
+        console.log('Fetching updated contact with role...');
+        const { data: updatedContact, error: fetchError } = await supabase
           .from('contacts')
           .select(`
             *,
@@ -1817,40 +2118,132 @@ export default function EditCompany() {
           .eq('id', editingContact.id)
           .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+          console.error('Error fetching updated contact:', {
+            error: fetchError,
+            code: fetchError.code,
+            message: fetchError.message,
+            details: fetchError.details,
+            hint: fetchError.hint
+          });
+          throw fetchError;
+        }
 
-        // Update the contact in the local state
-        setCompany(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            // Update contacts in locations
-            locations: prev.locations.map(location => ({
-              ...location,
-              contacts: location.contacts.map(contact =>
-                contact.id === editingContact.id ? data : contact
-              )
-            })),
-            // Update contact in unassigned contacts if it exists there
-            unassignedContacts: prev.unassignedContacts.map(contact =>
-              contact.id === editingContact.id ? data : contact
-            )
-          };
+        if (!updatedContact) {
+          console.error('No contact found after update');
+          throw new Error('Contact not found after update');
+        }
+
+        console.log('Fetched updated contact:', {
+          contact: updatedContact,
+          role: updatedContact.role,
+          roleId: updatedContact.role_id,
+          locationId: updatedContact.location_id
         });
 
+        // Compare the data to verify changes were saved
+        console.log('Verifying changes were saved:', {
+          before: existingContact,
+          after: verifyUpdate,
+          expectedChanges: updateData,
+          actualChanges: {
+            first_name: verifyUpdate.first_name === updateData.p_first_name,
+            last_name: verifyUpdate.last_name === updateData.p_last_name,
+            email: verifyUpdate.email === updateData.p_email,
+            mobile: verifyUpdate.mobile === updateData.p_mobile,
+            direct_phone: verifyUpdate.direct_phone === updateData.p_direct_phone,
+            role_id: verifyUpdate.role_id === updateData.p_role_id,
+            location_id: verifyUpdate.location_id === updateData.p_location_id
+          }
+        });
+
+        // Update the contact in the local state
+        console.log('Updating local state...');
+        setCompany((prev: CompanyWithRelations | null): CompanyWithRelations | null => {
+          if (!prev) {
+            console.log('No previous company state found');
+            return null;
+          }
+
+          // Create a complete updated contact object that preserves all fields
+          const completeUpdatedContact: Contact = {
+            ...editingContact,  // Preserve all existing contact data
+            ...updatedContact,  // Override with updated fields
+            role: updatedContact.role,  // Ensure role is included
+            role_id: updatedContact.role_id,  // Ensure role_id is included
+            location_id: updatedContact.location_id  // Ensure location_id is included
+          };
+
+          console.log('Complete updated contact:', completeUpdatedContact);
+
+          // Update both locations and unassigned contacts
+          const updatedCompany: CompanyWithRelations = {
+            ...prev,
+            locations: prev.locations.map((location: Location) => ({
+              ...location,
+              contacts: location.contacts.map((contact: Contact) =>
+                contact.id === editingContact.id ? completeUpdatedContact : contact
+              )
+            })),
+            unassignedContacts: prev.unassignedContacts.map((contact: Contact) =>
+              contact.id === editingContact.id ? completeUpdatedContact : contact
+            )
+          };
+
+          console.log('Updated company state:', {
+            locations: updatedCompany.locations.map(l => ({
+              id: l.id,
+              contactCount: l.contacts.length,
+              contacts: l.contacts.map(c => ({
+                id: c.id,
+                name: `${c.first_name} ${c.last_name}`,
+                role: c.role?.name,
+                location_id: c.location_id
+              }))
+            })),
+            unassignedContacts: updatedCompany.unassignedContacts.map(c => ({
+              id: c.id,
+              name: `${c.first_name} ${c.last_name}`,
+              role: c.role?.name,
+              location_id: c.location_id
+            }))
+          });
+
+          return updatedCompany;
+        });
+
+        console.log('=== Contact Save Debug End ===');
         toast.success('Contact updated successfully');
       } else {
+        // For new contacts, we'll still use direct insert for now
+        console.log('Creating new contact...');
         // First insert the contact
         const { data: insertData, error: insertError } = await supabase
           .from('contacts')
           .insert({
-            ...updateData,
-            created_at: new Date().toISOString()
+            first_name: contactData.first_name,
+            last_name: contactData.last_name,
+            email: contactData.email,
+            mobile: contactData.mobile || null,
+            direct_phone: contactData.direct_phone || null,
+            role_id: contactData.role_id || null,
+            location_id: contactData.location_id || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
           })
           .select()
           .single();
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Error inserting new contact:', {
+            error: insertError,
+            code: insertError.code,
+            message: insertError.message,
+            details: insertError.details,
+            hint: insertError.hint
+          });
+          throw insertError;
+        }
 
         // Then fetch the new contact with its role
         const { data, error: fetchError } = await supabase
@@ -1862,7 +2255,16 @@ export default function EditCompany() {
           .eq('id', insertData.id)
           .single();
 
-        if (fetchError) throw fetchError;
+        if (fetchError) {
+          console.error('Error fetching new contact:', {
+            error: fetchError,
+            code: fetchError.code,
+            message: fetchError.message,
+            details: fetchError.details,
+            hint: fetchError.hint
+          });
+          throw fetchError;
+        }
 
         // Add the new contact to the local state
         setCompany(prev => {
@@ -1876,50 +2278,99 @@ export default function EditCompany() {
             )
           };
 
-          // If the contact has no location_id, add it to unassigned contacts
+          // If the contact is unassigned (no location_id), add it to unassignedContacts
           if (!contactData.location_id) {
-            updatedCompany.unassignedContacts = [...prev.unassignedContacts, data];
+            updatedCompany.unassignedContacts = [...(prev.unassignedContacts || []), data];
           }
 
           return updatedCompany;
         });
 
-        toast.success('Contact created successfully');
+        toast.success('Contact added successfully');
       }
 
+      // Close the dialog and clear the editing state
       setIsContactDialogOpen(false);
       setEditingContact(null);
     } catch (error) {
       console.error('Error saving contact:', error);
-      toast.error('Failed to save contact');
+      if (error instanceof Error) {
+        toast.error(`Failed to save contact: ${error.message}`);
+      } else {
+        toast.error('Failed to save contact');
+      }
     }
   };
 
   const handleDeleteContact = async (contact: Contact) => {
     try {
-      const { error } = await supabase
-        .from('contacts')
-        .delete()
-        .eq('id', contact.id);
+      // Check if the contact is assigned to a location
+      if (contact.location_id) {
+        toast.error('Cannot delete contact. Please unassign the contact from its location first.');
+        return;
+      }
 
-      if (error) throw error;
+      // Delete the contact using a database function
+      const { data, error: deleteError } = await supabase
+        .rpc('delete_contact', {
+          p_contact_id: contact.id
+        });
 
-      // Update local state
+      if (deleteError) {
+        console.error('Error deleting contact:', deleteError);
+        throw deleteError;
+      }
+
+      // Only update local state after successful deletion
       setCompany(prev => {
         if (!prev) return null;
         return {
           ...prev,
-          locations: prev.locations.map(location => ({
-            ...location,
-            contacts: location.contacts.filter(c => c.id !== contact.id)
-          }))
+          unassignedContacts: prev.unassignedContacts.filter(c => c.id !== contact.id)
         };
       });
 
       toast.success('Contact deleted successfully');
     } catch (error) {
       console.error('Error deleting contact:', error);
-      toast.error('Failed to delete contact');
+      if (error instanceof Error) {
+        toast.error(`Failed to delete contact: ${error.message}`);
+      } else {
+        toast.error('Failed to delete contact');
+      }
+    }
+  };
+
+  const handleAddContact = (contact: Contact & { _refresh?: boolean; allContacts?: Contact[] }) => {
+    if (contact._refresh && contact.allContacts) {
+      // Refresh both locations and unassigned contacts
+      setCompany(prev => {
+        if (!prev) return null;
+
+        // Update locations with their contacts
+        const updatedLocations = prev.locations.map(location => ({
+          ...location,
+          contacts: contact.allContacts!.filter(c => c.location_id === location.id)
+        }));
+
+        // Update unassigned contacts
+        const unassignedContacts = contact.allContacts!.filter(c => !c.location_id);
+
+        return {
+          ...prev,
+          locations: updatedLocations,
+          unassignedContacts
+        };
+      });
+    } else {
+      // Just add to unassigned contacts
+      setCompany(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          unassignedContacts: [...prev.unassignedContacts, contact]
+        };
+      });
     }
   };
 
@@ -1941,11 +2392,16 @@ export default function EditCompany() {
         <div className="max-w-[1400px] mx-auto space-y-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
             <div className="grid grid-rows-[auto_1fr] gap-8">
-              <CompanyDetails
-                company={company}
-                industries={industries}
-                onSave={handleSaveCompany}
-              />
+              {company && (
+                <CompanyDetails
+                  company={company}
+                  industries={industries}
+                  companyId={params.id}
+                  onSave={handleSaveCompany}
+                  isSaving={isSaving}
+                  setIsSaving={setIsSaving}
+                />
+              )}
               <LocationsList
                 locations={company.locations}
                 locationTypes={locationTypes}
@@ -1973,6 +2429,9 @@ export default function EditCompany() {
                 contacts={company.unassignedContacts || []}
                 onEditContact={handleEditContact}
                 onDeleteContact={handleDeleteContact}
+                onAddContact={handleAddContact}
+                roles={roles}
+                locations={company.locations}  // Pass locations to UnassignedContacts
               />
             </div>
           </div>

@@ -22,7 +22,8 @@ interface Contact {
   id: string;
   name: string;
   email: string;
-  phone: string;
+  mobile: string;
+  direct_phone: string;
 }
 
 interface Space {
@@ -53,19 +54,22 @@ const contacts: Contact[] = [
     id: '1',
     name: 'John Smith',
     email: 'john.smith@example.com',
-    phone: '+1 (555) 123-4567',
+    mobile: '+1 (555) 123-4567',
+    direct_phone: '+1 (555) 123-4567',
   },
   {
     id: '2',
     name: 'Sarah Johnson',
     email: 'sarah.johnson@example.com',
-    phone: '+1 (555) 234-5678',
+    mobile: '+1 (555) 234-5678',
+    direct_phone: '+1 (555) 234-5678',
   },
   {
     id: '3',
     name: 'Michael Brown',
     email: 'michael.brown@example.com',
-    phone: '+1 (555) 345-6789',
+    mobile: '+1 (555) 345-6789',
+    direct_phone: '+1 (555) 345-6789',
   },
 ];
 

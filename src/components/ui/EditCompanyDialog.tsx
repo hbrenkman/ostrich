@@ -16,7 +16,8 @@ interface Contact {
   id: string;
   name: string;
   title: string;
-  phone: string;
+  mobile: string;
+  direct_phone: string;
   email: string;
 }
 
@@ -97,7 +98,8 @@ export function EditCompanyDialog({ open, onOpenChange, company, onSave }: EditC
       id: `contact_${Date.now()}`,
       name: '',
       title: '',
-      phone: '',
+      mobile: '',
+      direct_phone: '',
       email: '',
     };
 
@@ -209,10 +211,16 @@ export function EditCompanyDialog({ open, onOpenChange, company, onSave }: EditC
                             <Mail className="w-4 h-4" />
                             {contact.email}
                           </div>
-                          {contact.phone && (
+                          {contact.mobile && (
                             <div className="flex items-center gap-2">
                               <Phone className="w-4 h-4" />
-                              Phone: {contact.phone}
+                              Mobile: {contact.mobile}
+                            </div>
+                          )}
+                          {contact.direct_phone && (
+                            <div className="flex items-center gap-2">
+                              <Phone className="w-4 h-4" />
+                              Direct Phone: {contact.direct_phone}
                             </div>
                           )}
                         </div>

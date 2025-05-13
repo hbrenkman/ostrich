@@ -26,15 +26,10 @@ export function useAuth() {
 
   useEffect(() => {
     if (isChecking || !pathname) return;
-
-    console.log('Auth check - pathname:', pathname);
-    console.log('Auth check - context user:', context.user);
     
     if (!isPublicRoute(pathname) && !context.user) {
-      console.log('Not authenticated, redirecting to login');
       router.push('/auth/login');
     } else if (context.user && pathname === '/auth/login') {
-      console.log('Already authenticated, redirecting to dashboard');
       router.push('/dashboard');
     }
   }, [context.user, pathname, router, isChecking]);

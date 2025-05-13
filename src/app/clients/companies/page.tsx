@@ -23,6 +23,9 @@ interface Location {
   state: string;
   zip: string;
   phone?: string;
+  status: string;
+  is_headquarters: boolean;
+  location_type_id: string;
 }
 
 interface CompanyWithRelations extends Company {
@@ -152,10 +155,26 @@ export default function Companies() {
           setIndustries(industriesData || []);
         }
 
-        // Fetch companies with their industries
+        // Fetch companies with their industries and locations
         const { data: companiesData, error: companiesError } = await supabase
           .from('companies')
-          .select('*, industry:industries(*)')
+          .select(`
+            *,
+            industry:industries(*),
+            locations(
+              id,
+              name,
+              address_line1,
+              address_line2,
+              city,
+              state,
+              zip,
+              phone,
+              status,
+              location_type_id,
+              is_headquarters
+            )
+          `)
           .order('name', { ascending: true });
 
         if (companiesError) {
@@ -328,28 +347,50 @@ export default function Companies() {
             data={paginatedCompanies}
             expandedContent={(company: CompanyWithRelations) => (
               <div className="p-4 space-y-4">
+                <div className="text-sm font-medium text-muted-foreground mb-2">
+                  {company.locations?.length || 0} Location{company.locations?.length !== 1 ? 's' : ''}
+                </div>
                 {company.locations?.map((location) => (
-                  <div key={location.id} className="flex items-start gap-4">
-                    <div className="flex-1">
-                      <div className="font-medium">{location.name}</div>
-                      <div className="text-sm text-muted-foreground space-y-1">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4" />
-                          {location.address_line1}
-                          {location.address_line2 && <>, {location.address_line2}</>}
-                          <br />
-                          {location.city}, {location.state} {location.zip}
+                  <div key={location.id} className="flex items-start gap-4 p-3 bg-muted/50 rounded-lg">
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                          {location.name || 'Unnamed Location'}
+                          {location.is_headquarters && (
+                            <span className="px-2 py-0.5 text-xs bg-primary/10 text-primary rounded-full">
+                              HQ
+                            </span>
+                          )}
+                        </div>
+                        <span className={`px-2 py-1 text-xs rounded-full ${location.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {location.status}
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground space-y-1.5">
+                        <div className="flex items-start gap-2">
+                          <MapPin className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                          <div>
+                            <div>{location.address_line1}</div>
+                            {location.address_line2 && <div>{location.address_line2}</div>}
+                            <div>{location.city}, {location.state} {location.zip}</div>
+                          </div>
                         </div>
                         {location.phone && (
                           <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4" />
-                            {location.phone}
+                            <Phone className="h-4 w-4 text-muted-foreground" />
+                            <span>{location.phone}</span>
                           </div>
                         )}
                       </div>
                     </div>
                   </div>
                 ))}
+                {(!company.locations || company.locations.length === 0) && (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    No locations found for this company
+                  </div>
+                )}
               </div>
             )}
             expandedRows={expandedCompanies}

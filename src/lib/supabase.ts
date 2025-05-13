@@ -3,11 +3,14 @@ import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import type { Database } from '@/types/supabase';
 
 // Initialize the public Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseUrl = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:8001'  // Use local Supabase in development
+  : process.env.NEXT_PUBLIC_SUPABASE_URL;  // Use production URL in production
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // Add detailed debug logging for public client
 console.log('Supabase Public Environment Variables (Detailed):', {
+  environment: process.env.NODE_ENV,
   url: {
     value: supabaseUrl,
     type: typeof supabaseUrl,
@@ -38,8 +41,7 @@ export const supabase = createClient<Database>(
       autoRefreshToken: true,
       detectSessionInUrl: true,
       storageKey: 'ostrich-auth-token',
-      flowType: 'pkce',
-      debug: true
+      flowType: 'pkce'
     },
     db: {
       schema: 'public'
