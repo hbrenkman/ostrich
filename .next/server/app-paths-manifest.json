@@ -1,8 +1,7 @@
 {
-  "/not-found": "app/not-found.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/clients/contacts/page": "app/clients/contacts/page.js",
   "/clients/companies/page": "app/clients/companies/page.js",
-  "/auth/login/page": "app/auth/login/page.js",
-  "/clients/companies/[id]/edit/page": "app/clients/companies/[id]/edit/page.js"
+  "/clients/contacts/page": "app/clients/contacts/page.js",
+  "/clients/companies/[id]/edit/page": "app/clients/companies/[id]/edit/page.js",
+  "/projects/page": "app/projects/page.js"
 }
