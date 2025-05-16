@@ -320,7 +320,7 @@ export default function Companies() {
         {canCreateCompany && (
           <button
             onClick={() => setIsNewCompanyDialogOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-xs"
           >
             <Plus className="h-4 w-4" />
             Add Company

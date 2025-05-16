@@ -1,7 +1,9 @@
 {
+  "/not-found": "app/not-found.js",
+  "/admin/employees/page": "app/admin/employees/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/clients/companies/page": "app/clients/companies/page.js",
-  "/clients/contacts/page": "app/clients/contacts/page.js",
-  "/clients/companies/[id]/edit/page": "app/clients/companies/[id]/edit/page.js",
-  "/projects/page": "app/projects/page.js"
+  "/admin/employees/new/page": "app/admin/employees/new/page.js",
+  "/admin/employees/[id]/page": "app/admin/employees/[id]/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/auth/login/page": "app/auth/login/page.js"
 }

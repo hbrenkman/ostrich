@@ -1,134 +1,118 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchData, insertData, updateData, deleteData } from '@/lib/supabaseUtils';
+import { createSupabaseClient } from '@/lib/supabase/server';
+
+interface ConstructionIndex {
+  id: string;
+  index_value: number;
+  metro_area: {
+    id: string;
+    name: string;
+    is_other: boolean;
+    state: {
+      id: string;
+      name: string;
+    };
+  };
+}
+
+interface MetroData {
+  name: string;
+  index: number;
+}
+
+interface StateData {
+  state: string;
+  metros: MetroData[];
+}
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const state = searchParams.get('state');
-    const metro = searchParams.get('metro');
+    console.log('API: Starting query...');
     
-    let queryParams: any = {};
+    // Use server-side Supabase client with service role key
+    const supabase = createSupabaseClient();
     
-    if (state) {
-      queryParams.filter = [{
-        column: 'state',
-        operator: 'eq',
-        value: state
-      }];
-    }
-    
-    if (metro) {
-      if (!queryParams.filter) queryParams.filter = [];
-      queryParams.filter.push({
-        column: 'metro_area',
-        operator: 'eq',
-        value: metro
+    // Query starting from construction_index to ensure we get all indices
+    const { data, error } = await supabase
+      .from('construction_index')
+      .select(`
+        id,
+        index_value,
+        metro_area:metro_areas!inner (
+          id,
+          name,
+          is_other,
+          state:states!inner (
+            id,
+            name
+          )
+        )
+      `)
+      .order('index_value', { ascending: true });
+
+    console.log('API: Query completed. Error:', error);
+    if (data && data.length > 0) {
+      const firstIndex = data[0] as unknown as ConstructionIndex;
+      console.log('API: First index raw data:', {
+        index: firstIndex.index_value,
+        metro: firstIndex.metro_area.name,
+        state: firstIndex.metro_area.state.name
       });
     }
-    
-    // Order by state and then by metro_area
-    queryParams.order = [
-      { column: 'state', ascending: true },
-      { column: 'metro_area', ascending: true }
-    ];
-    
-    const result = await fetchData('state_cost_index', queryParams);
-    
-    if (result.status === 'error') {
-      return NextResponse.json({ error: result.message }, { status: 500 });
+
+    if (error) {
+      console.error('API Error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    if (!data || data.length === 0) {
+      console.log('API: No data returned');
+      return NextResponse.json({ error: 'No data found' }, { status: 404 });
+    }
+
+    // Group by state
+    const stateMap = new Map<string, StateData>();
     
-    // Group by state for easier consumption
-    const groupedByState = result.data.reduce((acc, item) => {
-      if (!acc[item.state]) {
-        acc[item.state] = {
-          state: item.state,
+    (data as unknown as ConstructionIndex[]).forEach(index => {
+      const stateName = index.metro_area.state.name;
+      const metroName = index.metro_area.name;
+      
+      if (!stateMap.has(stateName)) {
+        stateMap.set(stateName, {
+          state: stateName,
           metros: []
-        };
+        });
       }
-      
-      acc[item.state].metros.push({
-        name: item.metro_area,
-        index: item.cost_index
+
+      const stateData = stateMap.get(stateName)!;
+      stateData.metros.push({
+        name: metroName,
+        index: index.index_value
       });
-      
-      return acc;
-    }, {});
-    
-    return NextResponse.json(Object.values(groupedByState));
-  } catch (error) {
-    console.error('Error fetching state cost index:', error);
-    return NextResponse.json({ error: 'Failed to fetch state cost index' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const data = await request.json();
-    
-    if (!data.state || !data.metro_area || data.cost_index === undefined) {
-      return NextResponse.json({ error: 'State, metro area, and cost index are required' }, { status: 400 });
-    }
-    
-    const result = await insertData('state_cost_index', {
-      state: data.state,
-      metro_area: data.metro_area,
-      cost_index: data.cost_index
     });
-    
-    if (result.status === 'error') {
-      return NextResponse.json({ error: result.message }, { status: 500 });
-    }
-    
-    return NextResponse.json(result.data);
-  } catch (error) {
-    console.error('Error creating state cost index entry:', error);
-    return NextResponse.json({ error: 'Failed to create state cost index entry' }, { status: 500 });
-  }
-}
 
-export async function PUT(request: NextRequest) {
-  try {
-    const data = await request.json();
-    
-    if (!data.id || !data.state || !data.metro_area || data.cost_index === undefined) {
-      return NextResponse.json({ error: 'ID, state, metro area, and cost index are required' }, { status: 400 });
-    }
-    
-    const result = await updateData('state_cost_index', 'id', data.id, {
-      state: data.state,
-      metro_area: data.metro_area,
-      cost_index: data.cost_index
+    // Convert map to array and sort
+    const result = Array.from(stateMap.values())
+      .sort((a: StateData, b: StateData) => a.state.localeCompare(b.state))
+      .map(state => ({
+        ...state,
+        metros: state.metros.sort((a: MetroData, b: MetroData) => {
+          // Sort 'Other' metros to the end
+          if (a.name === 'Other') return 1;
+          if (b.name === 'Other') return -1;
+          return a.name.localeCompare(b.name);
+        })
+      }));
+
+    console.log('API: First state transformed:', {
+      state: result[0]?.state,
+      metroCount: result[0]?.metros.length,
+      firstMetro: result[0]?.metros[0] || null
     });
-    
-    if (result.status === 'error') {
-      return NextResponse.json({ error: result.message }, { status: 500 });
-    }
-    
-    return NextResponse.json(result.data);
-  } catch (error) {
-    console.error('Error updating state cost index entry:', error);
-    return NextResponse.json({ error: 'Failed to update state cost index entry' }, { status: 500 });
-  }
-}
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const { id } = await request.json();
-    
-    if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-    }
-    
-    const result = await deleteData('state_cost_index', 'id', id);
-    
-    if (result.status === 'error') {
-      return NextResponse.json({ error: result.message }, { status: 500 });
-    }
-    
-    return NextResponse.json({ success: true });
+    return NextResponse.json(result);
   } catch (error) {
-    console.error('Error deleting state cost index entry:', error);
-    return NextResponse.json({ error: 'Failed to delete state cost index entry' }, { status: 500 });
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

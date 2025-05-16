@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-interface ReferenceTableEntry {
+export interface ReferenceTableEntry {
   id: string;
   key: string;
   value: string | number;
@@ -10,7 +10,7 @@ interface ReferenceTableEntry {
 export interface ReferenceTable {
   id: string;
   name: string;
-  category: 'Fee Calculation' | 'Project Types' | 'Service Types' | 'Rate Categories';
+  category: 'Fee Calculation' | 'Project Types' | 'Service Types' | 'Rate Categories' | 'Cost Indices' | 'Construction Costs';
   description: string;
   entries: ReferenceTableEntry[];
 }

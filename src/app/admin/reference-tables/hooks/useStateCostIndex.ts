@@ -16,11 +16,13 @@ export function useStateCostIndex(state?: string) {
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    console.log('Hook: useEffect triggered, fetching state data...');
     fetchStateData();
   }, [state]);
 
   const fetchStateData = async () => {
     try {
+      console.log('Hook: Starting to fetch state data...');
       setLoading(true);
       const url = new URL('/api/state-cost-index', window.location.origin);
       
@@ -28,15 +30,29 @@ export function useStateCostIndex(state?: string) {
         url.searchParams.append('state', state);
       }
       
+      console.log('Hook: Fetching from URL:', url.toString());
       const response = await fetch(url.toString());
       
       if (!response.ok) {
-        throw new Error('Failed to fetch state cost index data');
+        const errorText = await response.text();
+        console.error('Hook: Error response:', errorText);
+        throw new Error(`Failed to fetch state cost index data: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
+      console.log('Hook: Received data:', data);
+      if (data && data.length > 0) {
+        console.log('Hook: First state sample:', {
+          state: data[0].state,
+          metros: data[0].metros.map((m: MetroArea) => ({
+            name: m.name,
+            index: m.index
+          }))
+        });
+      }
       setStateData(data);
     } catch (err) {
+      console.error('Hook: Error in fetchStateData:', err);
       setError(err instanceof Error ? err : new Error('Unknown error'));
     } finally {
       setLoading(false);

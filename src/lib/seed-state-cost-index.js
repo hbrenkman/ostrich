@@ -59,56 +59,89 @@ export const states_with_metro_areas = [
 ];
 
 /**
- * Seed the state_cost_index table with data.
+ * Seed the state cost index tables with data.
  */
 async function seedStateCostIndex() {
   try {
     console.log('Starting to seed state cost index data...');
-    console.log('Checking if state_cost_index exists...');
     
-    // Check if table exists first
-    const { data: tableExists, error: tableCheckError } = await supabase
-      .from('state_cost_index')
-      .select('count')
-      .limit(1);
+    // First, clear existing data from all tables
+    console.log('Clearing existing data...');
+    const { error: deleteConstructionIndexError } = await supabase
+      .from('construction_index')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
     
-    if (tableCheckError) {
-      console.error('Error checking state_cost_index table:', tableCheckError);
-      console.log('Table may not exist, skipping seeding');
-      return false;
+    if (deleteConstructionIndexError) {
+      console.error('Error clearing construction_index:', deleteConstructionIndexError);
     }
     
-    // First, clear existing data
-    const { error: deleteError } = await supabase
-      .from('state_cost_index')
+    const { error: deleteMetroAreasError } = await supabase
+      .from('metro_areas')
       .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
+      .neq('id', '00000000-0000-0000-0000-000000000000');
     
-    if (deleteError) {
-      throw deleteError;
+    if (deleteMetroAreasError) {
+      console.error('Error clearing metro_areas:', deleteMetroAreasError);
+    }
+    
+    const { error: deleteStatesError } = await supabase
+      .from('states')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    if (deleteStatesError) {
+      console.error('Error clearing states:', deleteStatesError);
     }
     
     console.log('Cleared existing data');
     
     // Insert new data
     for (const stateData of states_with_metro_areas) {
-      const state = stateData.state;
+      // Insert state
+      const { data: state, error: stateError } = await supabase
+        .from('states')
+        .insert({ name: stateData.state })
+        .select()
+        .single();
       
+      if (stateError) {
+        console.error(`Error inserting state ${stateData.state}:`, stateError);
+        continue;
+      }
+      
+      // Insert metro areas and their construction indices
       for (const metro of stateData.metros) {
-        const data = {
-          state: state,
-          metro_area: metro.name,
-          cost_index: metro.index
-        };
+        // Insert metro area
+        const { data: metroArea, error: metroError } = await supabase
+          .from('metro_areas')
+          .insert({
+            state_id: state.id,
+            name: metro.name,
+            is_other: metro.name === 'Other'
+          })
+          .select()
+          .single();
         
-        const { error: insertError } = await supabase
-          .from('state_cost_index')
-          .insert(data);
+        if (metroError) {
+          console.error(`Error inserting metro area ${metro.name} for state ${stateData.state}:`, metroError);
+          continue;
+        }
         
-        if (insertError) {
-          console.error(`Error inserting data for ${state}, ${metro.name}:`, insertError);
+        // Insert construction index
+        const { error: indexError } = await supabase
+          .from('construction_index')
+          .insert({
+            metro_area_id: metroArea.id,
+            index_value: metro.index
+          });
+        
+        if (indexError) {
+          console.error(`Error inserting construction index for ${metro.name} in ${stateData.state}:`, indexError);
         }
       }
+      
+      console.log(`Inserted data for state: ${stateData.state}`);
     }
     
     console.log('State cost index data seeded successfully!');

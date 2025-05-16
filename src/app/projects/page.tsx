@@ -34,23 +34,13 @@ interface Project {
   number: string;
   name: string;
   type: string;
-  status: 'Pending' | 'Design' | 'Construction' | 'Hold' | 'Cancelled';
   company: {
-    id: string;
     name: string;
   } | null;
-  company_location: {
-    id: string;
-    address: string;
-    city: string;
-    state: string;
-  } | null;
-  company_contact: {
-    id: string;
-    name: string;
-    email: string;
-  } | null;
-  fee_proposals: FeeProposal[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+  revision: number;
 }
 
 export default function Projects() {
@@ -97,41 +87,52 @@ export default function Projects() {
   }, [filter, setCurrentPage]);
 
   const fetchProjects = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
+      // First, get the latest revision for each project number
+      const { data: latestRevisions, error: revisionError } = await supabase
+        .from('projects')
+        .select('number, revision')
+        .order('revision', { ascending: false })
+        .order('number');
+
+      if (revisionError) throw revisionError;
+
+      // Create a map of project numbers to their latest revision
+      const latestRevisionMap = new Map(
+        latestRevisions?.map(rev => [rev.number, rev.revision]) || []
+      );
+
+      // Then fetch the full project data for those specific revisions
       const { data, error } = await supabase
         .from('projects')
         .select(`
-          id,
-          number,
-          name,
-          type,
-          status,
-          company:companies!inner(id, name),
-          company_location:locations!inner(id, address, city, state),
-          company_contact:contacts!inner(id, name, email),
-          fee_proposals(
-            id,
-            number,
-            overview,
-            design_budget,
-            construction_support_budget,
-            status
-          )
+          *,
+          type:project_types(name)
         `)
-        .order('created_at', { ascending: false });
+        .in('number', Array.from(latestRevisionMap.keys()))
+        .order('number');
 
       if (error) throw error;
-      
-      // Transform the data to match our Project type
-      const transformedData = (data || []).map(project => ({
-        ...project,
-        company: project.company?.[0] || null,
-        company_location: project.company_location?.[0] || null,
-        company_contact: project.company_contact?.[0] || null,
-      })) as Project[];
-      
-      setProjects(transformedData);
+
+      // Filter to only include the latest revision of each project
+      const projects = data
+        ?.filter(project => project.revision === latestRevisionMap.get(project.number))
+        .map(project => ({
+          id: project.id,
+          number: project.number,
+          name: project.name,
+          type: project.type.name,
+          company: project.company_name ? {
+            name: project.company_name
+          } : null,
+          status: project.status_id,
+          created_at: project.created_at,
+          updated_at: project.updated_at,
+          revision: project.revision
+        })) || [];
+
+      setProjects(projects);
     } catch (error) {
       console.error('Error fetching projects:', error);
       toast.error('Failed to load projects');
@@ -154,18 +155,7 @@ export default function Projects() {
     );
   }
 
-  const filteredProjects = searchedProjects.filter(project => {
-    if (filter === 'active') {
-      return project.status === 'Design' || project.status === 'Construction';
-    }
-    if (filter === 'pending-proposals') {
-      return project.status === 'Pending';
-    }
-    return true;
-  });
-
-  const designProjects = filteredProjects.filter(project => project.status === 'Design');
-  const constructionProjects = filteredProjects.filter(project => project.status === 'Construction');
+  const filteredProjects = searchedProjects;
 
   const toggleRow = (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -178,35 +168,6 @@ export default function Projects() {
     setExpandedRows(newExpandedRows);
   };
 
-  const updateProjectStatus = (projectIndex: number, newStatus: Project['status']) => {
-    const updatedProjects = [...projects];
-    updatedProjects[projectIndex].status = newStatus;
-    // In a real app, you would update the state and/or backend here
-  };
-
-  const updateProposalStatus = (projectIndex: number, proposalIndex: number, newStatus: FeeProposal['status']) => {
-    const updatedProjects = [...projects];
-    updatedProjects[projectIndex].fee_proposals[proposalIndex].status = newStatus;
-    // In a real app, you would update the state and/or backend here
-  };
-
-  const getStatusColor = (status: Project['status']) => {
-    switch (status) {
-      case 'Design':
-        return 'bg-primary text-primary-foreground';
-      case 'Construction':
-        return 'bg-secondary text-secondary-foreground';
-      case 'Pending':
-        return 'bg-muted text-muted-foreground';
-      case 'Hold':
-        return 'bg-accent text-accent-foreground';
-      case 'Cancelled':
-        return 'bg-destructive text-destructive-foreground';
-      default:
-        return 'bg-gray-200 text-gray-700';
-    }
-  };
-
   const handleProjectClick = (project: Project, event?: React.MouseEvent) => {
     // Prevent navigation if clicking the expand button
     if (event?.target instanceof HTMLElement && event.target.closest('button')) {
@@ -214,72 +175,6 @@ export default function Projects() {
     }
     router.push(`/projects/${project.number}`);
   };
-
-  const getFilterDescription = () => {
-    switch (filter) {
-      case 'active':
-        return 'Showing Design and Construction Projects';
-      case 'pending-proposals':
-        return 'Showing Projects with Pending Status';
-      default:
-        return '';
-    }
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
-
-  const renderExpandedContent = (project: Project) => (
-    <div className="py-4">
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <h4 className="text-sm font-medium mb-2">Company Details</h4>
-          <div className="space-y-1 text-sm">
-            <p><span className="text-muted-foreground">Location:</span> {project.company_location?.address}, {project.company_location?.city}, {project.company_location?.state}</p>
-            <p><span className="text-muted-foreground">Contact:</span> {project.company_contact?.name} ({project.company_contact?.email})</p>
-          </div>
-        </div>
-      </div>
-      
-      <h4 className="text-sm font-medium mb-2">Fee Proposals</h4>
-      <div className="space-y-4">
-        {project.fee_proposals?.map((proposal) => (
-          <div key={proposal.id} className="bg-card p-4 rounded-md border border-border">
-            <div className="flex justify-between items-start">
-              <div>
-                <h5 className="font-medium">{proposal.number}</h5>
-                <p className="text-sm text-muted-foreground">{proposal.overview}</p>
-              </div>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                proposal.status === 'Active' 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'bg-muted text-muted-foreground'
-              }`}>
-                {proposal.status}
-              </span>
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Design Budget</p>
-                <p className="font-medium">{formatCurrency(proposal.design_budget)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Construction Support Budget</p>
-                <p className="font-medium">{formatCurrency(proposal.construction_support_budget)}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-        {(!project.fee_proposals || project.fee_proposals.length === 0) && (
-          <p className="text-sm text-muted-foreground">No fee proposals yet.</p>
-        )}
-      </div>
-    </div>
-  );
 
   const columns: {
     header: string;
@@ -298,31 +193,16 @@ export default function Projects() {
     {
       header: 'Client',
       accessor: (project: Project) => project.company?.name || 'N/A'
-    },
-    {
-      header: 'Type',
-      accessor: (project: Project) => project.type
-    },
-    {
-      header: 'Status',
-      accessor: (project: Project) => (
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-          {project.status}
-        </span>
-      )
     }
   ];
+
+  const renderExpandedContent = (project: Project) => null;
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Projects</h1>
-          {filter && (
-            <p className="text-sm text-muted-foreground mt-1">
-              {filter === 'active' ? 'Showing Design and Construction Projects' : 'Showing Projects with Pending Status'}
-            </p>
-          )}
         </div>
         
         <div className="flex items-center gap-4">
@@ -339,7 +219,7 @@ export default function Projects() {
           
           <Link
             href="/projects/new"
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-xs"
           >
             <Plus className="h-4 w-4" />
             New Project

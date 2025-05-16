@@ -1,9 +1,9 @@
 {
   "pages": {
-    "/page": [
+    "/admin/employees/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
+      "static/chunks/app/admin/employees/page.js"
     ],
     "/layout": [
       "static/chunks/webpack.js",
@@ -21,25 +21,25 @@
       "static/chunks/main-app.js",
       "static/chunks/app/dashboard/page.js"
     ],
-    "/clients/contacts/page": [
+    "/admin/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/clients/contacts/page.js"
+      "static/chunks/app/admin/page.js"
     ],
-    "/clients/companies/page": [
+    "/admin/employees/new/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/clients/companies/page.js"
+      "static/chunks/app/admin/employees/new/page.js"
     ],
-    "/clients/companies/[id]/edit/page": [
+    "/admin/employees/[id]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/clients/companies/[id]/edit/page.js"
+      "static/chunks/app/admin/employees/[id]/page.js"
     ],
-    "/projects/page": [
+    "/not-found": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/projects/page.js"
+      "static/chunks/app/not-found.js"
     ]
   }
 }
