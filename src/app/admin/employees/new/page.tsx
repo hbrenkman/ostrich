@@ -385,6 +385,10 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
   const [loadingDocumentTypes, setLoadingDocumentTypes] = useState(false);
   const [complianceHistory, setComplianceHistory] = useState<ComplianceDocument[]>([]);
 
+  // Add this to the state declarations at the top of the component
+  const [photoLoading, setPhotoLoading] = useState(true);
+  const [photoSignedUrl, setPhotoSignedUrl] = useState<string | null>(null);
+
   // Add the fetch function with the other fetch functions
   async function fetchDocumentTypes() {
     try {
@@ -501,15 +505,39 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
 
         if (error) throw error;
         if (data) {
-          setEmployee(data);
+          // Construct the full address string from the database fields
+          const addressParts = [
+            data.address_line1,
+            data.address_line2,
+            data.city,
+            data.state,
+            data.zip
+          ].filter(Boolean); // Remove any null/undefined/empty values
+          
+          const fullAddress = addressParts.join(', ');
+          setAddressInput(fullAddress);
+          
+          // Set the parsed address immediately since we know it's valid
+          setParsedAddress({
+            address_line1: data.address_line1 || '',
+            address_line2: data.address_line2 || null,
+            city: data.city || '',
+            state: data.state || '',
+            zip: data.zip || ''
+          });
+
           // Get signed URL for photo if exists
           if (data.photo_url) {
             const { data: signedUrlData } = await supabase.storage
-            .from('employee-photos')
+              .from('employee-photos')
               .createSignedUrl(`${data.employee_id}.JPG`, 3600);
             if (signedUrlData) {
-              setEmployee(prev => ({ ...prev, photo_url: signedUrlData.signedUrl }));
+              setEmployee({ ...data, photo_url: signedUrlData.signedUrl });
+            } else {
+              setEmployee(data);
             }
+          } else {
+            setEmployee(data);
           }
         }
       } catch (err) {
@@ -556,9 +584,20 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
 
   async function handleAddressChange(value: string) {
     setAddressInput(value);
-    setParsedAddress(null);
-    setAddressError(null);
-    if (value.length > 10) {
+    
+    // Don't try to verify if the address is too short
+    if (value.length < 10) {
+      setParsedAddress(null);
+      setAddressError(null);
+      return;
+    }
+
+    // If we're in edit mode and this is the initial load, don't verify
+    if (isEditMode && value === addressInput && parsedAddress) {
+      return;
+    }
+
+    try {
       const verified = await verifyAddress(value);
       if (verified) {
         // Parse the address components
@@ -568,14 +607,25 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         const stateZip = (verified.state + ' ' + verified.zip) || addressParts[2] || '';
         const [state, zip] = stateZip.split(' ').map(part => part.trim());
 
-        setParsedAddress({
+        const newParsedAddress = {
           address_line1: streetAddress,
-          address_line2: null, // We can add address_line2 handling if needed
+          address_line2: null,
           city,
           state,
           zip
-        });
-        setEmployee(prev => ({ ...prev, address_line1: streetAddress, city, state, zip }));
+        };
+
+        setParsedAddress(newParsedAddress);
+        setAddressError(null);
+        
+        // Update employee state with the verified address
+        setEmployee(prev => ({
+          ...prev,
+          address_line1: streetAddress,
+          city,
+          state,
+          zip
+        }));
       } else {
         // If verification fails, try to parse the address manually
         const addressParts = value.split(',').map(part => part.trim());
@@ -586,18 +636,32 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
           const state = stateZip[0];
           const zip = stateZip[1];
 
-          setParsedAddress({
+          const newParsedAddress = {
             address_line1: streetAddress,
             address_line2: null,
             city,
             state,
             zip
-          });
-          setEmployee(prev => ({ ...prev, address_line1: streetAddress, city, state, zip }));
+          };
+
+          setParsedAddress(newParsedAddress);
+          setAddressError(null);
+          
+          // Update employee state with the manually parsed address
+          setEmployee(prev => ({
+            ...prev,
+            address_line1: streetAddress,
+            city,
+            state,
+            zip
+          }));
         } else {
           setAddressError('Address could not be parsed. Please use format: Street, City, State ZIP');
         }
       }
+    } catch (err) {
+      console.error('Error verifying address:', err);
+      setAddressError('Error verifying address. Please check the format and try again.');
     }
   }
 
@@ -686,6 +750,19 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       }
       console.log('Validation passed');
 
+      // Extract just the filename from photo_url if it exists
+      let photoFilename = null;
+      if (employee.photo_url) {
+        // If it's a signed URL, extract the filename
+        if (employee.photo_url.includes('/')) {
+          const urlParts = employee.photo_url.split('/');
+          photoFilename = urlParts[urlParts.length - 1].split('?')[0];
+        } else {
+          // If it's already just a filename
+          photoFilename = employee.photo_url;
+        }
+      }
+
       // First, create/update the employee record to get the employee_id
       const employeeData = {
         first_name: employee.first_name.trim(),
@@ -706,7 +783,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         nationality: employee.nationality || null,
         emergency_contact_name: employee.emergency_contact_name || null,
         emergency_contact_phone: employee.emergency_contact_phone || null,
-        photo_url: pendingPhotoFile ? `${employee.employee_id}.JPG` : employee.photo_url,
+        photo_url: pendingPhotoFile ? `${employee.employee_id}.JPG` : photoFilename,
         updated_by: user.id,
       };
 
@@ -747,6 +824,17 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
 
       const savedEmployee = result.data;
       console.log('Employee saved successfully:', savedEmployee);
+
+      // After successful save, get a signed URL for the photo if it exists
+      if (savedEmployee.photo_url) {
+        const { data: signedUrlData } = await supabase.storage
+          .from('employee-photos')
+          .createSignedUrl(savedEmployee.photo_url, 3600);
+        
+        if (signedUrlData) {
+          setEmployee(prev => ({ ...prev, photo_url: signedUrlData.signedUrl }));
+        }
+      }
 
       // Save employment details
       if (employmentHistory.length > 0) {
@@ -1653,15 +1741,21 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       if (!employeeId) return;
       
       try {
+        setLoading(true);
+        setError(null);
+
         // Load employee data
         const { data: employeeData, error: employeeError } = await supabase
           .from('employees')
           .select('*')
           .eq('employee_id', employeeId)
           .single();
-      
+
         if (employeeError) throw employeeError;
         if (employeeData) {
+          // Set the address input with the combined address from the database
+          setAddressInput(employeeData.address || '');
+          
           // Get signed URL for photo if exists
           if (employeeData.photo_url) {
             const { data: signedUrlData } = await supabase.storage
@@ -1818,6 +1912,8 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       } catch (err) {
         console.error('Error loading data:', err);
         setError('Failed to load employee data');
+      } finally {
+        setLoading(false);
       }
     }
 
@@ -2093,6 +2189,37 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       throw err;
     }
   }
+
+  // Add this useEffect after the other useEffects
+  useEffect(() => {
+    async function loadPhotoSignedUrl() {
+      if (!employee.photo_url || employee.photo_url.startsWith('http')) {
+        setPhotoLoading(false);
+        setPhotoSignedUrl(employee.photo_url);
+        return;
+      }
+
+      try {
+        const { data: signedUrlData, error } = await supabase.storage
+          .from('employee-photos')
+          .createSignedUrl(employee.photo_url, 3600);
+
+        if (error) {
+          console.error('Error getting signed URL:', error);
+          setPhotoSignedUrl(null);
+        } else if (signedUrlData) {
+          setPhotoSignedUrl(signedUrlData.signedUrl);
+        }
+      } catch (err) {
+        console.error('Error loading photo signed URL:', err);
+        setPhotoSignedUrl(null);
+      } finally {
+        setPhotoLoading(false);
+      }
+    }
+
+    loadPhotoSignedUrl();
+  }, [employee.photo_url]);
 
   return (
     <div className="flex flex-col min-h-screen p-6 gap-6">
@@ -2417,34 +2544,20 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                       />
                       <span className="text-sm text-muted-foreground">{pendingPhotoFile.name}</span>
                     </div>
-                  ) : employee.photo_url ? (
+                  ) : photoLoading ? (
+                    <div className="flex flex-col items-center text-muted-foreground">
+                      <div className="h-24 w-24 rounded-full bg-muted animate-pulse mb-2" />
+                      <span className="text-sm">Loading photo...</span>
+                    </div>
+                  ) : photoSignedUrl ? (
                     <div className="flex flex-col items-center">
                       <img 
-                        src={employee.photo_url}
+                        src={photoSignedUrl}
                         alt={`${employee.first_name} ${employee.last_name}`}
                         className="h-24 w-24 object-cover rounded-full mb-2"
                         onError={(e) => {
                           console.error('Error loading employee photo:', e);
-                          console.log('Failed photo URL:', employee.photo_url);
-                          // Try to refresh the signed URL
-                          if (employee.employee_id) {
-                            supabase.storage
-                              .from('employee-photos')
-                              .createSignedUrl(`${employee.employee_id}.JPG`, 3600)
-                              .then(({ data: signedUrlData }) => {
-                                if (signedUrlData) {
-                                  setEmployee(prev => ({ ...prev, photo_url: signedUrlData.signedUrl }));
-                                } else {
-                          setEmployee(prev => ({ ...prev, photo_url: '' }));
-                                }
-                              })
-                              .catch(err => {
-                                console.error('Error refreshing signed URL:', err);
-                                setEmployee(prev => ({ ...prev, photo_url: '' }));
-                              });
-                          } else {
-                            setEmployee(prev => ({ ...prev, photo_url: '' }));
-                          }
+                          setPhotoSignedUrl(null);
                         }}
                       />
                       <span className="text-sm text-muted-foreground">Current photo</span>
@@ -3174,7 +3287,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
-                  </div>
+              </div>
                 </div>
               ))}
               {complianceHistory.length === 0 && (
@@ -3184,8 +3297,8 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                     readOnly
                     className="min-h-[60px] font-mono text-sm pr-10"
                     placeholder="Compliance document history will appear here..."
-                  />
-                </div>
+                />
+              </div>
               )}
             </div>
 
@@ -3194,7 +3307,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
               <h3 className="font-medium">Add Compliance Document</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-4">
-                  <div className="space-y-2">
+              <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Label htmlFor="document_type">Document Type</Label>
                     </div>
@@ -3219,19 +3332,19 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                       placeholder="Select Document Type"
                       isDisabled={loadingDocumentTypes}
                       styles={selectStyles}
-                    />
-                  </div>
-                  <div className="space-y-2">
+                />
+              </div>
+              <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <Label htmlFor="issue_date">Issue Date</Label>
+                <Label htmlFor="issue_date">Issue Date</Label>
                       {documentTypes.find(dt => dt.code === complianceDocuments.document_type)?.requires_issue && (
                         <span className="text-xs text-red-500">(Required)</span>
                       )}
                     </div>
-                    <Input
-                      id="issue_date"
-                      type="date"
-                      value={complianceDocuments.issue_date}
+                <Input
+                  id="issue_date"
+                  type="date"
+                  value={complianceDocuments.issue_date}
                       onChange={e => setComplianceDocuments(prev => ({ 
                         ...prev, 
                         issue_date: e.target.value,
@@ -3242,11 +3355,11 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         "border-2 border-red-200 focus:border-red-500" : 
                         "opacity-60"}
                       required={documentTypes.find(dt => dt.code === complianceDocuments.document_type)?.requires_issue}
-                    />
-                  </div>
+                />
+              </div>
                 </div>
                 <div className="space-y-4">
-                  <div className="space-y-2">
+              <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <Label htmlFor="document_number">Document Number</Label>
                       {documentTypes.find(dt => dt.code === complianceDocuments.document_type)?.requires_number && (
@@ -3271,15 +3384,15 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <Label htmlFor="expiration_date">Expiration Date</Label>
+                <Label htmlFor="expiration_date">Expiration Date</Label>
                       {documentTypes.find(dt => dt.code === complianceDocuments.document_type)?.requires_expiration && (
                         <span className="text-xs text-red-500">(Required)</span>
                       )}
                     </div>
-                    <Input
-                      id="expiration_date"
-                      type="date"
-                      value={complianceDocuments.expiration_date}
+                <Input
+                  id="expiration_date"
+                  type="date"
+                  value={complianceDocuments.expiration_date}
                       onChange={e => setComplianceDocuments(prev => ({ 
                         ...prev, 
                         expiration_date: e.target.value,
@@ -3292,8 +3405,8 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                       required={documentTypes.find(dt => dt.code === complianceDocuments.document_type)?.requires_expiration}
                     />
                   </div>
-                </div>
-                <div className="space-y-2">
+              </div>
+              <div className="space-y-2">
                   <Label htmlFor="file_url">Document File</Label>
                   <div
                     className={`border-2 border-dashed rounded-md p-4 ${
@@ -3363,7 +3476,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                           />
                         </>
                       )}
-                    </div>
+              </div>
                   </div>
                   {fileError && (
                     <div className="text-xs text-red-600 mt-1">{fileError}</div>
