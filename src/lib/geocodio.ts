@@ -37,6 +37,14 @@ interface GeocodioResponse {
   }>;
 }
 
+interface AddressObject {
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
 // Debounce function to limit API calls
 function debounce<T extends (...args: any[]) => Promise<any>>(func: T, wait: number): (...args: Parameters<T>) => Promise<ReturnType<T>> {
   let timeout: NodeJS.Timeout | null = null;
@@ -110,70 +118,47 @@ function formatAddressForApi(address: string): string {
   return `${street}, ${city}, ${state}${zip ? ` ${zip}` : ''}`;
 }
 
-export const verifyAddress = debounce(async (address: string): Promise<{
-  address_line1: string;
-  address_line2?: string;
-  city: string;
-  state: string;
-  zip: string;
-} | null> => {
+export async function verifyAddress(address: string | AddressObject): Promise<AddressObject | null> {
   try {
-    // Only proceed if the address is complete enough
-    if (!isAddressComplete(address)) {
-      console.log('Address not complete enough:', address);
+    let addressString: string;
+    
+    if (typeof address === 'string') {
+      addressString = address;
+    } else {
+      // Convert address object to string
+      addressString = [
+        address.address_line1,
+        address.address_line2,
+        `${address.city}, ${address.state} ${address.zip}`
+      ].filter(Boolean).join(', ');
+    }
+
+    // Make API call to Geocodio
+    const response = await fetch(`https://api.geocod.io/v1.7/geocode?q=${encodeURIComponent(addressString)}&api_key=${process.env.NEXT_PUBLIC_GEOCODIO_API_KEY}`);
+    
+    if (!response.ok) {
+      console.error('Geocodio API error:', await response.text());
       return null;
     }
 
-    // Format the address for the API call
-    const formattedAddress = formatAddressForApi(address);
-    console.log('Formatted address for API:', formattedAddress);
-    
-    const response = await fetch(
-      `${GEOCODIO_BASE_URL}?q=${encodeURIComponent(formattedAddress)}&api_key=${GEOCODIO_API_KEY}`
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      console.error('Geocodio API error:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorData,
-        address: formattedAddress
-      });
-      return null;
-    }
-    
-    const data: GeocodioResponse = await response.json();
-    console.log('Full Geocodio API response:', JSON.stringify(data, null, 2));
-    console.log('Input components:', JSON.stringify(data.input.address_components, null, 2));
-    console.log('Result components:', JSON.stringify(data.results[0].address_components, null, 2));
+    const data = await response.json();
     
     if (!data.results || data.results.length === 0) {
-      console.log('No results found for address:', formattedAddress);
       return null;
     }
 
     const result = data.results[0];
     const components = result.address_components;
 
-    // Log the components we're using
-    console.log('Components being used:', {
-      number: components.number,
-      formatted_street: components.formatted_street,
+    return {
+      address_line1: components.number + ' ' + components.street,
+      address_line2: components.secondary_unit || null,
       city: components.city,
       state: components.state,
       zip: components.zip
-    });
-
-    // Return the standardized address from Geocodio
-    return {
-      address_line1: `${components.number} ${components.formatted_street}`,
-      city: components.city,
-      state: components.state,
-      zip: components.zip || ''
     };
   } catch (error) {
     console.error('Error verifying address:', error);
     return null;
   }
-}, 500); 
+} 

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Search, Plus } from 'lucide-react';
 
 interface Employee {
-  id: string;
+  employee_id: string;
   first_name: string;
   last_name: string;
   email: string;
@@ -112,9 +112,9 @@ export default function EmployeesTable({ onEmployeeSelect }: EmployeesTableProps
             ) : (
               employees.map((employee) => (
                 <tr 
-                  key={employee.id}
+                  key={employee.employee_id}
                   className="border-b transition-colors hover:bg-muted/50 cursor-pointer"
-                  onClick={() => onEmployeeSelect(employee.id)}
+                  onClick={() => onEmployeeSelect(employee.employee_id)}
                 >
                   <td className="p-4 align-middle">
                     {employee.first_name} {employee.last_name}
@@ -129,7 +129,7 @@ export default function EmployeesTable({ onEmployeeSelect }: EmployeesTableProps
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onEmployeeSelect(employee.id);
+                            onEmployeeSelect(employee.employee_id);
                           }}
                         >
                           View Details

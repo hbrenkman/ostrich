@@ -12,17 +12,17 @@
   --popover-foreground: 214 14% 27%; /* #374151 */
   --card: 0 0% 100%; /* #FFFFFF */
   --card-foreground: 214 14% 27%; /* #374151 */
-  --border: 215 16% 77%; /* #D1D5DB */
+  --border: 175 47% 55%; /* #4DB6AC - Updated to match accent color */
   --input: 214 14% 27%; /* #374151 */
   --primary: 178 58% 44%; /* #2C7A7B */
   --primary-foreground: 0 0% 100%; /* #FFFFFF */
   --secondary: 24 68% 47%; /* #C05621 */
   --secondary-foreground: 0 0% 100%; /* #FFFFFF */
-  --accent: 178 58% 44%; /* #2C7A7B */
+  --accent: 175 47% 55%; /* #4DB6AC */
   --accent-foreground: 0 0% 0%; /* #000000 */
   --destructive: 346 87% 48%; /* #E11D48 */
   --destructive-foreground: 0 0% 100%; /* #FFFFFF */
-  --ring: 178 58% 44%; /* #2C7A7B */
+  --ring: 175 47% 55%; /* #4DB6AC */
   --radius: 0.5rem;
   --placeholder-text: 215 5% 64%; /* #9CA3AF */
 }
@@ -36,17 +36,17 @@
   --popover-foreground: 214 7% 91%; /* #E5E7EB */
   --card: 215 28% 17%; /* #1F2937 */
   --card-foreground: 214 7% 91%; /* #E5E7EB */
-  --border: 215 10% 30%; /* #4B5563 */
+  --border: 175 84% 51%; /* #2DD4BF - Updated to match dark mode accent */
   --input: 214 7% 91%; /* #E5E7EB */
   --primary: 175 47% 55%; /* #4DB6AC */
   --primary-foreground: 0 0% 0%; /* #000000 */
   --secondary: 24 68% 47%; /* #C05621 */
   --secondary-foreground: 0 0% 100%; /* #FFFFFF */
-  --accent: 175 47% 55%; /* #4DB6AC */
+  --accent: 175 84% 51%; /* #2DD4BF */
   --accent-foreground: 0 0% 0%; /* #000000 */
   --destructive: 346 87% 48%; /* #E11D48 */
   --destructive-foreground: 0 0% 100%; /* #FFFFFF */
-  --ring: 175 47% 55%; /* #4DB6AC */
+  --ring: 175 84% 51%; /* #2DD4BF */
   --placeholder-text: 215 5% 46%; /* #6B7280 */
 }
 
@@ -242,4 +242,88 @@ textarea {
   button {
     @apply text-button;
   }
+}
+
+/* Remove all react-select styles and keep only the validation state */
+.react-select-container.border-red-500 .react-select__control {
+  border-color: rgb(239 68 68) !important;
+}
+
+/* Dark mode styles */
+.dark .react-select-container .react-select__control,
+.dark .react-select-container .css-13cymwt-control,
+.dark .react-select-container [class*="css-"]-control {
+  @apply bg-[rgb(17_24_39)] rounded-md;
+  border: 1px solid #2DD4BF !important;
+  min-height: 36px !important;
+}
+
+/* Override all focus states in dark mode */
+.dark .react-select-container .react-select__control--is-focused,
+.dark .react-select-container .css-13cymwt-control--is-focused,
+.dark .react-select-container [class*="css-"]-control--is-focused,
+.dark .react-select-container .css-13cymwt-control:focus-within,
+.dark .react-select-container [class*="css-"]-control:focus-within,
+.dark .react-select-container .react-select__control--menu-is-open,
+.dark .react-select-container [class*="css-"]-control--menu-is-open {
+  border-color: #2DD4BF !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Override hover states in dark mode */
+.dark .react-select-container .react-select__control:hover,
+.dark .react-select-container .css-13cymwt-control:hover,
+.dark .react-select-container [class*="css-"]-control:hover {
+  border-color: #2DD4BF !important;
+}
+
+/* Override dropdown menu styles in dark mode */
+.dark .react-select-container .react-select__menu,
+.dark .react-select-container [class*="css-"]-menu {
+  @apply bg-[rgb(17_24_39)] rounded-md;
+  border: 1px solid #2DD4BF !important;
+}
+
+/* Override option styles in dark mode */
+.dark .react-select-container .react-select__option,
+.dark .react-select-container [class*="css-"]-option {
+  @apply bg-[rgb(17_24_39)];
+}
+
+.dark .react-select-container .react-select__option--is-focused,
+.dark .react-select-container [class*="css-"]-option--is-focused {
+  background-color: #2DD4BF !important;
+  color: rgb(17 24 39) !important;
+}
+
+.dark .react-select-container .react-select__option--is-selected,
+.dark .react-select-container [class*="css-"]-option--is-selected {
+  background-color: #2DD4BF !important;
+  color: rgb(17 24 39) !important;
+}
+
+/* Validation state */
+.react-select-container.border-red-500 .react-select__control,
+.react-select-container.border-red-500 .css-13cymwt-control,
+.react-select-container.border-red-500 [class*="css-"]-control {
+  border-color: rgb(239 68 68) !important;
+}
+
+.dark .react-select-container.border-red-500 .react-select__control,
+.dark .react-select-container.border-red-500 .css-13cymwt-control,
+.dark .react-select-container.border-red-500 [class*="css-"]-control {
+  border-color: rgb(239 68 68) !important;
+}
+
+/* Remove any default browser focus styles */
+.react-select-container input:focus,
+.react-select-container input:focus-visible,
+.react-select-container input:focus-within,
+.react-select-container [class*="css-"] input:focus,
+.react-select-container [class*="css-"] input:focus-visible,
+.react-select-container [class*="css-"] input:focus-within {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
