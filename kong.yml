@@ -1,0 +1,96 @@
+_format_version: "2.1"
+_transform: true
+
+services:
+  - name: auth-v1
+    url: http://supabase-ostrich-auth:9999/
+    routes:
+      - name: auth-v1-route
+        paths:
+          - /auth/v1
+        strip_path: true
+    plugins:
+      - name: cors
+        config:
+          origins: ['http://localhost:3000']
+          methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+          headers: [
+            'Accept',
+            'Accept-Version',
+            'Content-Length',
+            'Content-MD5',
+            'Content-Type',
+            'Date',
+            'Authorization',
+            'apikey',
+            'x-application-name',
+            'x-client-info',
+            'x-supabase-auth',
+            'x-supabase-client',
+            'x-supabase-api-version',
+            'x-supabase-auth-token',
+            'x-supabase-auth-refresh-token',
+            'x-supabase-auth-user',
+            'x-supabase-auth-role',
+            'accept-profile',
+            'content-profile',
+            'prefer',
+            'range',
+            'if-match',
+            'if-none-match',
+            'if-modified-since',
+            'if-unmodified-since'
+          ]
+          exposed_headers: ['Content-Length', 'Content-Range', 'X-Total-Count']
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+
+  - name: rest-v1
+    url: http://supabase-ostrich-rest:3000
+    routes:
+      - name: rest-v1-route
+        paths:
+          - /rest/v1
+        strip_path: true
+    plugins:
+      - name: cors
+        config:
+          origins: ['http://localhost:3000']
+          methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+          headers: [
+            'Accept',
+            'Accept-Version',
+            'Content-Length',
+            'Content-MD5',
+            'Content-Type',
+            'Date',
+            'Authorization',
+            'apikey',
+            'x-application-name',
+            'x-client-info',
+            'x-supabase-auth',
+            'x-supabase-client',
+            'x-supabase-api-version',
+            'x-supabase-auth-token',
+            'x-supabase-auth-refresh-token',
+            'x-supabase-auth-user',
+            'x-supabase-auth-role',
+            'accept-profile',
+            'content-profile',
+            'prefer',
+            'range',
+            'if-match',
+            'if-none-match',
+            'if-modified-since',
+            'if-unmodified-since'
+          ]
+          exposed_headers: ['Content-Length', 'Content-Range', 'X-Total-Count']
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ2MDc5MjAwLCJleHAiOjE5MDM4NDU2MDB9.fBnFSBgi2O_ObRR3ByelsgJ7xKaPoPdWYyw6C-7Ci70 

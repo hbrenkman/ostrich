@@ -20,9 +20,12 @@ let supabaseKey = isClient
   : process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('No valid Supabase credentials found. Using environment variables from .env file.');
-  supabaseUrl = 'https://wzwklwuslejfzktcdpjy.supabase.co';
-  supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6d2tsd3VzbGVqZnprdGNkcGp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTk0MDksImV4cCI6MjA1OTY5NTQwOX0.kPGnGvpsE64OxRAynmC2Mms6s-gS-FQxpGit0RtRZq4';
+  console.error('Missing Supabase credentials:', {
+    url: supabaseUrl,
+    key: supabaseKey ? 'present' : 'missing',
+    environment: process.env.NODE_ENV
+  });
+  throw new Error('Missing required Supabase credentials. Please check your .env.local file.');
 }
 
 // Create a single Supabase client for the entire app
@@ -36,13 +39,13 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 // Admin client for migrations (server-side only)
 let supabaseAdmin = null;
 if (!isClient) {
-  const supabaseAdminKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6d2tsd3VzbGVqZnprdGNkcGp5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDExOTQwOSwiZXhwIjoyMDU5Njk1NDA5fQ.60_9NeBCPAWko3ZXSQxxMjXiyBgswE-G-WNwSGjSoXo';
-  if (supabaseAdminKey) {
+  const supabaseAdminKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseAdminKey) {
+    console.error('Missing SUPABASE_SERVICE_ROLE_KEY, admin operations will not be available');
+  } else {
     supabaseAdmin = createClient(supabaseUrl, supabaseAdminKey, {
       auth: { autoRefreshToken: false, persistSession: false }
     });
-  } else {
-    console.warn('SUPABASE_SERVICE_ROLE_KEY not set, admin operations will not be available');
   }
 }
 

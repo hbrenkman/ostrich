@@ -132,7 +132,7 @@ async function checkSupabaseTables() {
 }
 
 // Run the check function
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   checkSupabaseTables();
 }
 

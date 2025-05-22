@@ -228,6 +228,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
     manager: string;
     location: string;
     workSchedule: string;
+    work_email: string;  // Add this line
     details: string;
   }[]>([]);
   const [historyForm, setHistoryForm] = useState({
@@ -239,6 +240,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
     manager: '',
     location: '',
     workSchedule: '',
+    work_email: '',  // Add this line
     details: '',
     editingIndex: -1,
   });
@@ -278,14 +280,6 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
     issue_date: '',
     expiration_date: '',
     editingIndex: -1  // Add this to track which entry is being edited
-  });
-  const [accessControl, setAccessControl] = useState({
-    access_level: '',
-    clearance_status: '',
-    device_id: '',
-    issued_date: '',
-    revoked_date: '',
-    system_name: '',
   });
   const [performanceReviews, setPerformanceReviews] = useState({
     reviewer_id: '',
@@ -869,6 +863,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
           manager: entry.manager,
           location: entry.location,
           work_schedule: entry.workSchedule,
+          work_email: entry.work_email || null,  // Add this line
           details: entry.details,
           created_by: user.id,
           updated_by: user.id
@@ -1079,6 +1074,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         manager: historyForm.manager,
         location: historyForm.location,
         work_schedule: historyForm.workSchedule,
+        work_email: historyForm.work_email || null,  // Add this line
         details: historyForm.details,
         created_by: user?.id,
         updated_by: user?.id
@@ -1113,6 +1109,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
           manager: historyForm.manager,
           location: historyForm.location,
           work_schedule: historyForm.workSchedule,
+          work_email: historyForm.work_email || null,  // Add this line
           details: historyForm.details,
           created_by: user?.id,
           updated_by: user?.id
@@ -1135,6 +1132,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         manager: historyForm.manager,
         location: historyForm.location,
         workSchedule: historyForm.workSchedule,
+        work_email: historyForm.work_email,  // Add this line
         details: historyForm.details,
       };
 
@@ -1157,6 +1155,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       manager: '', 
       location: '', 
       workSchedule: '', 
+      work_email: '',  // Add this line
       details: '', 
       editingIndex: -1 
     });
@@ -1179,6 +1178,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       manager: entry.manager,
       location: entry.location,
       workSchedule: entry.workSchedule,
+      work_email: entry.work_email,  // Add this line
       details: entry.details,
       editingIndex: index
     });
@@ -1195,6 +1195,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
       manager: '', 
       location: '', 
       workSchedule: '', 
+      work_email: '',  // Add this line
       details: '', 
       editingIndex: -1 
     });
@@ -1224,6 +1225,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         manager: '', 
         location: '', 
         workSchedule: '', 
+        work_email: '',  // Add this line
         details: '', 
         editingIndex: -1 
       });
@@ -1233,15 +1235,22 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
     }
   }
 
-  const employmentSummary = employmentHistory.map(e => `On ${e.date}: ${e.employmentStatus} | Title: ${e.jobTitle} | Manager: ${e.manager} | Location: ${e.location} | Schedule: ${e.workSchedule}`).join('\n');
+  const employmentSummary = employmentHistory.map(e => `On ${e.date}: ${e.employmentStatus} | Title: ${e.jobTitle} | Manager: ${e.manager} | Location: ${e.location} | Schedule: ${e.workSchedule}${e.work_email ? ` | Work Email: ${e.work_email}` : ''}`).join('\n');
 
   function handlePhotoDrop(files: FileList | null) {
-    if (!files || files.length === 0) return;
+    console.log('handlePhotoDrop called with files:', files);
+    if (!files || files.length === 0) {
+      console.log('No files provided to handlePhotoDrop');
+      return;
+    }
+    console.log('Setting pending photo file:', files[0]);
     setPendingPhotoFile(files[0]);
     setError(null);
   }
 
   function handlePhotoZoneClick() {
+    console.log('handlePhotoZoneClick called');
+    console.log('fileInputRef current:', fileInputRef.current);
     fileInputRef.current?.click();
   }
 
@@ -1310,6 +1319,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
             manager: entry.manager || '',
             location: entry.location || '',
             workSchedule: entry.work_schedule || '',
+            work_email: entry.work_email || '',  // Add this line
             details: entry.details || ''
           }));
           setEmploymentHistory(history);
@@ -1799,6 +1809,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
             manager: entry.manager || '',
             location: entry.location || '',
             workSchedule: entry.work_schedule || '',
+            work_email: entry.work_email || '',  // Add this line
             details: entry.details || ''
           }));
           setEmploymentHistory(history);
@@ -1845,7 +1856,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         if (complianceError) throw complianceError;
         if (complianceData) {
           const history = complianceData.map(entry => ({
-            document_id: entry.document_id,  // Changed from id to document_id
+            document_id: entry.document_id,
             date: entry.issue_date,
             document_type: entry.document_type,
             document_number: entry.document_number,
@@ -1865,7 +1876,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
           { data: documentTypesData }
         ] = await Promise.all([
           supabase.from('employee_job_title')
-            .select('role_id, role_name, role_description')  // Changed from description to role_description
+            .select('role_id, role_name, role_description')
             .order('role_name'),
           supabase.from('employment_status')
             .select('id, code, name')
@@ -1880,11 +1891,10 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         ]);
 
         if (jobTitlesData) {
-          // Handle the type conversion here in TypeScript
           setJobTitles((jobTitlesData as any[]).map(title => ({
-            role_id: parseInt(title.role_id, 10),  // Explicitly convert to integer
+            role_id: parseInt(title.role_id, 10),
             role_name: title.role_name,
-            description: title.role_description  // Changed from description to role_description
+            description: title.role_description
           })));
         }
         if (statusesData) {
@@ -1901,7 +1911,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
           const formattedPayGrades = (payGradesData as RawPayGrade[]).map(grade => ({
             grade_id: grade.grade_id,
             grade_code: grade.grade_code,
-            grade_name: grade.grade_code, // Using grade_code as grade_name
+            grade_name: grade.grade_code,
             description: grade.description,
             is_active: true
           }));
@@ -2223,7 +2233,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
 
   return (
     <div className="flex flex-col min-h-screen p-6 gap-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 pt-24">
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
@@ -2290,6 +2300,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 <Label htmlFor="first_name">First Name</Label>
                 <Input
                   id="first_name"
+                  tabIndex={1}
                   value={employee.first_name}
                   onChange={e => setEmployee(prev => ({ ...prev, first_name: e.target.value }))}
                   placeholder="First name"
@@ -2299,6 +2310,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                   <Label htmlFor="nationality">Nationality</Label>
                   <select
                     id="nationality"
+                    tabIndex={5}
                     value={employee.nationality}
                     onChange={e => setEmployee(prev => ({ ...prev, nationality: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-md"
@@ -2324,6 +2336,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 <Label htmlFor="middle_name">Middle Name/Initial</Label>
                 <Input
                   id="middle_name"
+                  tabIndex={2}
                   value={employee.middle_name}
                   onChange={e => setEmployee(prev => ({ ...prev, middle_name: e.target.value }))}
                   placeholder="Middle name or initial"
@@ -2340,6 +2353,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                           type="text"
                           inputMode="numeric"
                           maxLength={1}
+                          tabIndex={6 + i}  // This would make the SSN fields tab indices 6 through 14
                           className="w-8 h-10 text-center border rounded"
                           value={employee.ssn[i] || ''}
                           onChange={e => handleSsnChange(i, e.target.value)}
@@ -2357,6 +2371,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 <Label htmlFor="last_name">Last Name</Label>
                 <Input
                   id="last_name"
+                  tabIndex={3}
                   value={employee.last_name}
                   onChange={e => setEmployee(prev => ({ ...prev, last_name: e.target.value }))}
                   placeholder="Last name"
@@ -2367,6 +2382,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 <Label htmlFor="preferred_name">Preferred Name</Label>
                 <Input
                   id="preferred_name"
+                  tabIndex={4}
                   value={employee.preferred_name}
                   onChange={e => setEmployee(prev => ({ ...prev, preferred_name: e.target.value }))}
                   placeholder="Preferred name"
@@ -2376,6 +2392,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                   <Label htmlFor="date_of_birth">Date of Birth</Label>
                   <Input
                     id="date_of_birth"
+                    tabIndex={15}
                     type="date"
                     value={employee.date_of_birth}
                     onChange={e => setEmployee(prev => ({ ...prev, date_of_birth: e.target.value }))}
@@ -2395,6 +2412,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 <div className="flex flex-col">
                   <Input
                     id="address"
+                    tabIndex={16}
                     value={addressInput}
                     onChange={e => handleAddressChange(e.target.value)}
                     placeholder="Paste full address from Google Maps"
@@ -2425,6 +2443,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 </div>
                 <Input
                   id="email"
+                  tabIndex={17}
                   type="email"
                   value={employee.email}
                   onChange={e => setEmployee(prev => ({ ...prev, email: e.target.value }))}
@@ -2455,6 +2474,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 </div>
                 <Input
                   id="phone_number"
+                  tabIndex={18}
                   value={employee.phone_number}
                   onChange={e => handlePhoneChange(e.target.value, 'phone_number')}
                   onBlur={e => handlePhoneChange(e.target.value, 'phone_number')}
@@ -2475,6 +2495,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 </div>
                 <Input
                   id="emergency_contact_name"
+                  tabIndex={19}
                   value={employee.emergency_contact_name}
                   onChange={e => setEmployee(prev => ({ ...prev, emergency_contact_name: e.target.value }))}
                   placeholder="Emergency contact name"
@@ -2504,6 +2525,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                 </div>
                 <Input
                   id="emergency_contact_phone"
+                  tabIndex={20}
                   value={employee.emergency_contact_phone}
                   onChange={e => handlePhoneChange(e.target.value, 'emergency_contact_phone')}
                   onBlur={e => handlePhoneChange(e.target.value, 'emergency_contact_phone')}
@@ -2573,7 +2595,26 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={e => handlePhotoDrop(e.target.files)}
+                    tabIndex={20}
+                    onChange={e => {
+                      const files = e.target.files;
+                      if (files && files.length > 0) {
+                        const file = files[0];
+                        // Validate file type
+                        if (!file.type.startsWith('image/')) {
+                          setError('Please select an image file');
+                          return;
+                        }
+                        // Validate file size (5MB limit)
+                        if (file.size > 5 * 1024 * 1024) {
+                          setError('Image must be less than 5MB');
+                          return;
+                        }
+                        // Set the pending photo file directly
+                        setPendingPhotoFile(file);
+                        setError(null);
+                      }
+                    }}
                     disabled={uploadingPhoto}
                   />
                 </div>
@@ -2591,6 +2632,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         type="radio"
                         name="marital_status"
                         value="single"
+                        tabIndex={21}
                         checked={employee.marital_status === 'single'}
                         onChange={() => setEmployee(prev => ({ ...prev, marital_status: 'single' }))}
                       />
@@ -2601,6 +2643,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         type="radio"
                         name="marital_status"
                         value="married"
+                        tabIndex={22}
                         checked={employee.marital_status === 'married'}
                         onChange={() => setEmployee(prev => ({ ...prev, marital_status: 'married' }))}
                       />
@@ -2617,6 +2660,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         type="radio"
                         name="gender"
                         value="male"
+                        tabIndex={25}
                         checked={employee.gender === 'male'}
                         onChange={() => setEmployee(prev => ({ ...prev, gender: 'male' }))}
                       />
@@ -2627,6 +2671,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         type="radio"
                         name="gender"
                         value="female"
+                        tabIndex={26}
                         checked={employee.gender === 'female'}
                         onChange={() => setEmployee(prev => ({ ...prev, gender: 'female' }))}
                       />
@@ -2642,12 +2687,14 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
               <Button
                 variant="outline"
                 onClick={() => router.push('/admin/employees')}
+                tabIndex={27}
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSave}
                 disabled={loading}
+                tabIndex={28}
               >
                 {loading ? 'Saving...' : isEditMode ? 'Update Employee' : 'Save Employee'}
               </Button>
@@ -2674,7 +2721,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
               {employmentHistory.map((entry) => (
                 <div key={entry.id} className="relative">
                   <Textarea
-                    value={`On ${entry.date}: ${entry.employmentStatus} | Title: ${entry.jobTitle} | Manager: ${entry.manager} | Location: ${entry.location} | Schedule: ${entry.workSchedule}`}
+                    value={`On ${entry.date}: ${entry.employmentStatus} | Title: ${entry.jobTitle} | Manager: ${entry.manager} | Location: ${entry.location} | Schedule: ${entry.workSchedule}${entry.work_email ? ` | Work Email: ${entry.work_email}` : ''}`}
                     readOnly
                     className="min-h-[60px] font-mono text-sm pr-10"
                     placeholder="Employment history will appear here..."
@@ -2692,6 +2739,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                         manager: entry.manager,
                         location: entry.location,
                         workSchedule: entry.workSchedule,
+                        work_email: entry.work_email || '',
                         details: entry.details,
                         editingIndex: employmentHistory.findIndex(e => e.id === entry.id)
                       });
@@ -2841,6 +2889,16 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                     className={formValidation.workSchedule ? "border-red-500" : ""}
                   />
                       </div>
+                      <div className="space-y-1">
+                  <Label htmlFor="work_email">Work Email</Label>
+                  <Input
+                    id="work_email"
+                    type="email"
+                    value={historyForm.work_email}
+                    onChange={(e) => setHistoryForm({ ...historyForm, work_email: e.target.value })}
+                    placeholder="Enter work email"
+                  />
+                </div>
                     </div>
                     <div className="flex gap-2 justify-end">
                 <Button 
@@ -2862,6 +2920,7 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                       manager: '', 
                       location: '', 
                       workSchedule: '', 
+                      work_email: '',
                       details: '', 
                       editingIndex: -1 
                     }); 
@@ -3063,159 +3122,6 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
               {compensationError && (
                 <div className="text-xs text-red-600 mt-1">{compensationError}</div>
               )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Benefits */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Benefits</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="benefit_type">Benefit Type</Label>
-                <Input
-                  id="benefit_type"
-                  value={benefits.benefit_type}
-                  onChange={e => setBenefits(prev => ({ ...prev, benefit_type: e.target.value }))}
-                  placeholder="e.g. Health, Dental, Vision"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="plan_name">Plan Name</Label>
-                <Input
-                  id="plan_name"
-                  value={benefits.plan_name}
-                  onChange={e => setBenefits(prev => ({ ...prev, plan_name: e.target.value }))}
-                  placeholder="Plan name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="coverage_level">Coverage Level</Label>
-                <Input
-                  id="coverage_level"
-                  value={benefits.coverage_level}
-                  onChange={e => setBenefits(prev => ({ ...prev, coverage_level: e.target.value }))}
-                  placeholder="e.g. Individual, Family"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contribution_rate">Contribution Rate</Label>
-                <Input
-                  id="contribution_rate"
-                  type="number"
-                  value={benefits.contribution_rate}
-                  onChange={e => setBenefits(prev => ({ ...prev, contribution_rate: e.target.value }))}
-                  placeholder="Contribution rate (%)"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="enrollment_date">Enrollment Date</Label>
-                <Input
-                  id="enrollment_date"
-                  type="date"
-                  value={benefits.enrollment_date}
-                  onChange={e => setBenefits(prev => ({ ...prev, enrollment_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="termination_date">Termination Date</Label>
-                <Input
-                  id="termination_date"
-                  type="date"
-                  value={benefits.termination_date}
-                  onChange={e => setBenefits(prev => ({ ...prev, termination_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="beneficiary_name">Beneficiary Name</Label>
-                <Input
-                  id="beneficiary_name"
-                  value={benefits.beneficiary_name}
-                  onChange={e => setBenefits(prev => ({ ...prev, beneficiary_name: e.target.value }))}
-                  placeholder="Beneficiary name"
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="beneficiary_relationship">Beneficiary Relationship</Label>
-                <Input
-                  id="beneficiary_relationship"
-                  value={benefits.beneficiary_relationship}
-                  onChange={e => setBenefits(prev => ({ ...prev, beneficiary_relationship: e.target.value }))}
-                  placeholder="Relationship to beneficiary"
-                />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Qualifications */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Qualifications</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Qualification Name</Label>
-                <Input
-                  id="name"
-                  value={qualifications.name}
-                  onChange={e => setQualifications(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="e.g. PMP, CPA, RN"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="qualification_type">Qualification Type</Label>
-                <Input
-                  id="qualification_type"
-                  value={qualifications.qualification_type}
-                  onChange={e => setQualifications(prev => ({ ...prev, qualification_type: e.target.value }))}
-                  placeholder="e.g. Certification, Degree"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="institution">Institution</Label>
-                <Input
-                  id="institution"
-                  value={qualifications.institution}
-                  onChange={e => setQualifications(prev => ({ ...prev, institution: e.target.value }))}
-                  placeholder="Issuing institution"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="proficiency_level">Proficiency Level</Label>
-                <Input
-                  id="proficiency_level"
-                  value={qualifications.proficiency_level}
-                  onChange={e => setQualifications(prev => ({ ...prev, proficiency_level: e.target.value }))}
-                  placeholder="e.g. Beginner, Intermediate, Expert"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="issue_date">Issue Date</Label>
-                <Input
-                  id="issue_date"
-                  type="date"
-                  value={qualifications.issue_date}
-                  onChange={e => setQualifications(prev => ({ ...prev, issue_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="expiration_date">Expiration Date</Label>
-                <Input
-                  id="expiration_date"
-                  type="date"
-                  value={qualifications.expiration_date}
-                  onChange={e => setQualifications(prev => ({ ...prev, expiration_date: e.target.value }))}
-                />
-              </div>
             </div>
           </div>
         </CardContent>
@@ -3537,73 +3443,6 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
         </CardContent>
       </Card>
 
-      {/* Access Control */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Access Control</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="access_level">Access Level</Label>
-                <Input
-                  id="access_level"
-                  value={accessControl.access_level}
-                  onChange={e => setAccessControl(prev => ({ ...prev, access_level: e.target.value }))}
-                  placeholder="e.g. Admin, User, Guest"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clearance_status">Clearance Status</Label>
-                <Input
-                  id="clearance_status"
-                  value={accessControl.clearance_status}
-                  onChange={e => setAccessControl(prev => ({ ...prev, clearance_status: e.target.value }))}
-                  placeholder="e.g. Active, Suspended"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="device_id">Device ID</Label>
-                <Input
-                  id="device_id"
-                  value={accessControl.device_id}
-                  onChange={e => setAccessControl(prev => ({ ...prev, device_id: e.target.value }))}
-                  placeholder="Device ID"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="system_name">System Name</Label>
-                <Input
-                  id="system_name"
-                  value={accessControl.system_name}
-                  onChange={e => setAccessControl(prev => ({ ...prev, system_name: e.target.value }))}
-                  placeholder="System name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="issued_date">Issued Date</Label>
-                <Input
-                  id="issued_date"
-                  type="date"
-                  value={accessControl.issued_date}
-                  onChange={e => setAccessControl(prev => ({ ...prev, issued_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="revoked_date">Revoked Date</Label>
-                <Input
-                  id="revoked_date"
-                  type="date"
-                  value={accessControl.revoked_date}
-                  onChange={e => setAccessControl(prev => ({ ...prev, revoked_date: e.target.value }))}
-                />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Performance Reviews */}
       <Card>
         <CardHeader>
@@ -3716,6 +3555,92 @@ export default function NewEmployeePage({ params }: { params?: { id?: string } }
                   value={leaveBalances.transaction_type}
                   onChange={e => setLeaveBalances(prev => ({ ...prev, transaction_type: e.target.value }))}
                   placeholder="e.g. Accrual, Usage, Adjustment"
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Benefits - Moved to bottom */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Benefits</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="benefit_type">Benefit Type</Label>
+                <Input
+                  id="benefit_type"
+                  value={benefits.benefit_type}
+                  onChange={e => setBenefits(prev => ({ ...prev, benefit_type: e.target.value }))}
+                  placeholder="e.g. Health, Dental, Vision"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="plan_name">Plan Name</Label>
+                <Input
+                  id="plan_name"
+                  value={benefits.plan_name}
+                  onChange={e => setBenefits(prev => ({ ...prev, plan_name: e.target.value }))}
+                  placeholder="Plan name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coverage_level">Coverage Level</Label>
+                <Input
+                  id="coverage_level"
+                  value={benefits.coverage_level}
+                  onChange={e => setBenefits(prev => ({ ...prev, coverage_level: e.target.value }))}
+                  placeholder="e.g. Individual, Family"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="contribution_rate">Contribution Rate</Label>
+                <Input
+                  id="contribution_rate"
+                  type="number"
+                  value={benefits.contribution_rate}
+                  onChange={e => setBenefits(prev => ({ ...prev, contribution_rate: e.target.value }))}
+                  placeholder="Contribution rate (%)"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="enrollment_date">Enrollment Date</Label>
+                <Input
+                  id="enrollment_date"
+                  type="date"
+                  value={benefits.enrollment_date}
+                  onChange={e => setBenefits(prev => ({ ...prev, enrollment_date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="termination_date">Termination Date</Label>
+                <Input
+                  id="termination_date"
+                  type="date"
+                  value={benefits.termination_date}
+                  onChange={e => setBenefits(prev => ({ ...prev, termination_date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="beneficiary_name">Beneficiary Name</Label>
+                <Input
+                  id="beneficiary_name"
+                  value={benefits.beneficiary_name}
+                  onChange={e => setBenefits(prev => ({ ...prev, beneficiary_name: e.target.value }))}
+                  placeholder="Beneficiary name"
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="beneficiary_relationship">Beneficiary Relationship</Label>
+                <Input
+                  id="beneficiary_relationship"
+                  value={benefits.beneficiary_relationship}
+                  onChange={e => setBenefits(prev => ({ ...prev, beneficiary_relationship: e.target.value }))}
+                  placeholder="Relationship to beneficiary"
                 />
               </div>
             </div>

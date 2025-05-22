@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bird, LayoutDashboard, FolderKanban, Users, Clock, Settings, ChevronDown, DollarSign, UserCog, Cog, Home, FileText, Calendar, BarChart, Sun, Moon, Timer } from 'lucide-react';
+import { Bird, LayoutDashboard, FolderKanban, Users, Clock, Settings, ChevronDown, DollarSign, UserCog, Cog, Home, FileText, Calendar, BarChart, Sun, Moon, Timer, Shield, LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
@@ -17,7 +17,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import '@/app/globals.css';
 
-const toolbarGroups = [
+// Add type definitions at the top of the file
+type ToolbarItem = {
+  label: string;
+  icon: LucideIcon;
+  items: ToolbarSubItem[];
+  adminOnly?: boolean;
+  requiresProjectAccess?: boolean;
+};
+
+type ToolbarSubItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  adminOnly?: boolean;
+};
+
+const toolbarGroups: ToolbarItem[][] = [
   [
     {
       label: 'Home',
@@ -75,6 +91,7 @@ const toolbarGroups = [
       items: [
         { href: '/admin', label: 'Employees', icon: UserCog },
         { href: '/admin/subcontractors', label: 'Subcontractors', icon: Users },
+        { href: '/admin/users-permissions', label: 'Users & Permissions', icon: Shield },
         { href: '/admin/assets', label: 'Assets', icon: FileText },
         { href: '/admin/reference-tables', label: 'Reference Tables', icon: FileText },
         { href: '/admin/settings', label: 'Settings', icon: Cog },
@@ -85,14 +102,12 @@ const toolbarGroups = [
 ];
 
 function NavigationMenu() {
-  const pathname = usePathname();
+  const pathname = usePathname() || '/';
   const { isAdmin, user } = useAuth();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [activeMainMenuItem, setActiveMainMenuItem] = useState<string | null>(null);
 
-  const isActive = (item: { href: string }) => {
-    return pathname === item.href;
-  };
+  const isActive = (item: { href: string }) => pathname === item.href;
 
   const getActiveGroup = () => {
     if (pathname.startsWith('/dashboard')) return 'Home';
@@ -118,11 +133,7 @@ function NavigationMenu() {
 
   React.useEffect(() => {
     setActiveMainMenuItem(activeGroup);
-    if (activeGroup) {
-      setSelectedGroup(activeGroup);
-    } else {
-      setSelectedGroup(null);
-    }
+    setSelectedGroup(activeGroup);
   }, [pathname, activeGroup]);
 
   return (
@@ -132,48 +143,52 @@ function NavigationMenu() {
           <React.Fragment key={groupIndex}>
             <div className="flex items-center gap-1">
               {group.map((item) => {
+                if (
+                  (item.label === 'Financials' && !hasFinancialsAccess(user)) ||
+                  (item.adminOnly && !isAdmin()) ||
+                  (item.requiresProjectAccess && user?.role === 'production')
+                ) {
+                  return null;
+                }
+
                 const Icon = item.icon;
                 const isGroupSelected = selectedGroup === item.label;
                 const isCurrentGroup = activeGroup === item.label;
                 const isMenuItemActive = activeMainMenuItem === item.label;
+
                 return (
-                  ((item.label === 'Financials' && !hasFinancialsAccess(user)) ||
-                   (item.adminOnly && !isAdmin()) ||
-                   (item.requiresProjectAccess && user?.role === 'production')) ? null : (
-                    <div key={item.label}>
-                      <button
-                        onClick={() => handleGroupClick(item.label)}
-                        className={`px-3 py-1.5 rounded transition-colors ${isGroupSelected ? 'bg-muted/10' : ''}`}
-                      >
-                        <div className="flex flex-col items-center gap-0.5">
-                          <Icon
-                            className={`w-4 h-4 ${isMenuItemActive ? 'text-primary' : 'text-gray-500'}`}
-                          />
-                          <span className="text-xs font-medium">{item.label}</span>
-                        </div>
-                      </button>
-                      {isGroupSelected && (
-                        <div className="absolute left-0 right-0 bg-background border-b flex items-center gap-2 px-4 py-2 mt-1 z-10">
-                          {item.items.map((subItem) => (
-                            ((subItem.label === 'Performance' || subItem.adminOnly) && !isAdmin()) ? null : (
-                              <Link
-                                key={subItem.href}
-                                href={subItem.href}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                                  isActive(subItem)
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'hover:bg-muted'
-                                }`}
-                              >
-                                {subItem.icon && <subItem.icon className="w-4 h-4 mr-2 inline-block" />}
-                                {subItem.label}
-                              </Link>
-                            )
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
+                  <div key={item.label}>
+                    <button
+                      onClick={() => handleGroupClick(item.label)}
+                      className={`px-3 py-1.5 rounded transition-colors ${isGroupSelected ? 'bg-muted/10' : ''}`}
+                    >
+                      <div className="flex flex-col items-center gap-0.5">
+                        <Icon className={`w-4 h-4 ${isMenuItemActive ? 'text-primary' : 'text-gray-500'}`} />
+                        <span className="text-xs font-medium">{item.label}</span>
+                      </div>
+                    </button>
+                    {isGroupSelected && (
+                      <div className="absolute left-0 right-0 bg-background border-b flex items-center gap-2 px-4 py-2 mt-1 z-10">
+                        {item.items.map((subItem) => {
+                          if ((subItem.label === 'Performance' || subItem.adminOnly) && !isAdmin()) {
+                            return null;
+                          }
+                          return (
+                            <Link
+                              key={subItem.href}
+                              href={subItem.href}
+                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                                isActive(subItem) ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                              }`}
+                            >
+                              {subItem.icon && <subItem.icon className="w-4 h-4 mr-2 inline-block" />}
+                              {subItem.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -196,13 +211,20 @@ export function RootLayoutClient({
   const [monthlyUtilization] = useState(78);
   const [isLoading] = useState(false);
   const { isAdmin, user } = useAuth();
-  const pathname = usePathname();
+  const pathname = usePathname() || '/';
   const isLoginPage = pathname === '/auth/login';
   const { theme, setTheme } = useTheme();
 
   const logoSrc = theme === 'dark'
     ? '/images/logos/logo_ostrich_dark_background.svg'
     : '/images/logos/logo_ostrich_light_background.svg';
+
+  const getUtilizationColor = (value: number, isDark: boolean) => {
+    if (value < 70) return isDark ? 'bg-[#FB7185]' : 'bg-[#E11D48]';
+    if (value < 80) return isDark ? 'bg-[#F97316]' : 'bg-[#C05621]';
+    if (value <= 85) return isDark ? 'bg-[#2DD4BF]' : 'bg-[#4DB6AC]';
+    return 'bg-[#3B82F6]';
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -223,138 +245,117 @@ export function RootLayoutClient({
           </div>
           
           {/* Utilization Indicators */}
-          <div className={`flex-1 flex items-center justify-center gap-6 ${isLoginPage ? 'hidden' : ''}`}>
-            <div className="flex items-center gap-2">
-              <div className="group relative">
-                <Timer className="w-4 h-4 text-gray-500" />
-                <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover:block w-64 p-2 text-xs bg-gray-900 rounded shadow-lg z-50">
-                  <div className="font-medium mb-1 text-white">Weekly Utilization Rate</div>
-                  <p className="text-gray-100">Percentage of time spent on billable work this week. Target: 80-85%.</p>
-                  <div className="mt-1 text-gray-100">
-                    <div className="text-gray-100">• Below 70%: Action needed</div>
-                    <div className="text-gray-100">• 70-80%: Good</div>
-                    <div className="text-gray-100">• 80-85%: Optimal</div>
-                    <div className="text-gray-100">• Above 85%: Over-utilized</div>
+          {!isLoginPage && (
+            <div className="flex-1 flex items-center justify-center gap-6">
+              <div className="flex items-center gap-6">
+                <div className="group relative">
+                  <Timer className="w-4 h-4 text-gray-500" />
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover:block w-64 p-2 text-xs bg-gray-900 rounded shadow-lg z-50">
+                    <div className="font-medium mb-1 text-white">Weekly Utilization Rate</div>
+                    <p className="text-gray-100">Percentage of time spent on billable work this week. Target: 80-85%.</p>
+                    <div className="mt-1 text-gray-100">
+                      <div>• Below 70%: Action needed</div>
+                      <div>• 70-80%: Good</div>
+                      <div>• 80-85%: Optimal</div>
+                      <div>• Above 85%: Over-utilized</div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium">Weekly Utilization</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${getUtilizationColor(utilization, theme === 'dark')}`}
+                        style={{ width: `${utilization}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium">{utilization}%</span>
                   </div>
                 </div>
               </div>
-              <div>
-                <div className="text-sm font-medium">Weekly Utilization</div>
-                <div className="flex items-center gap-2">
-                  <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${
-                        theme === 'dark'
-                          ? utilization < 70
-                            ? 'bg-[#FB7185]'
-                            : utilization >= 70 && utilization < 80
-                            ? 'bg-[#F97316]'
-                            : utilization >= 80 && utilization <= 85
-                            ? 'bg-[#2DD4BF]'
-                            : 'bg-[#3B82F6]'
-                          : utilization < 70
-                            ? 'bg-[#E11D48]'
-                            : utilization >= 70 && utilization < 80
-                            ? 'bg-[#C05621]'
-                            : utilization >= 80 && utilization <= 85
-                            ? 'bg-[#4DB6AC]'
-                            : 'bg-[#3B82F6]'
-                      }`}
-                      style={{ width: '85%' }}
-                    />
-                  </div>
-                  <span className="text-sm font-medium">85%</span>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="group relative">
-                <Clock className="w-4 h-4 text-gray-500" />
-                <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover:block w-64 p-2 text-xs bg-gray-900 rounded shadow-lg z-50">
-                  <div className="font-medium mb-1 text-white">Monthly Billable Hours</div>
-                  <p className="text-gray-100">Percentage of total hours that are billable this month. Target: 75-80%.</p>
-                  <div className="mt-1 text-gray-100">
-                    <div className="text-gray-100">• Below 65%: Low utilization</div>
-                    <div className="text-gray-100">• 65-75%: Acceptable</div>
-                    <div className="text-gray-100">• 75-80%: Target range</div>
-                    <div className="text-gray-100">• Above 80%: Exceptional</div>
-                  </div>
-                  <div className="mt-1 text-gray-100">
-                    Monthly target: 140 billable hours
+
+              <div className="flex items-center gap-6">
+                <div className="group relative">
+                  <Clock className="w-4 h-4 text-gray-500" />
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover:block w-64 p-2 text-xs bg-gray-900 rounded shadow-lg z-50">
+                    <div className="font-medium mb-1 text-white">Monthly Billable Hours</div>
+                    <p className="text-gray-100">Percentage of total hours that are billable this month. Target: 75-80%.</p>
+                    <div className="mt-1 text-gray-100">
+                      <div>• Below 65%: Low utilization</div>
+                      <div>• 65-75%: Acceptable</div>
+                      <div>• 75-80%: Target range</div>
+                      <div>• Above 80%: Exceptional</div>
+                    </div>
+                    <div className="mt-1 text-gray-100">Monthly target: 140 billable hours</div>
                   </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-sm font-medium">Monthly Billable</div>
-                <div className="flex items-center gap-2">
-                  <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${
-                        theme === 'dark'
-                          ? monthlyUtilization < 65
-                            ? 'bg-[#FB7185]'
-                            : monthlyUtilization >= 65 && monthlyUtilization < 75
-                            ? 'bg-[#F97316]'
-                            : monthlyUtilization >= 75 && monthlyUtilization < 80
-                            ? 'bg-[#2DD4BF]'
-                            : 'bg-[#3B82F6]'
-                          : monthlyUtilization < 65
-                            ? 'bg-[#E11D48]'
-                            : monthlyUtilization >= 65 && monthlyUtilization < 75
-                            ? 'bg-[#C05621]'
-                            : monthlyUtilization >= 75 && monthlyUtilization < 80
-                            ? 'bg-[#4DB6AC]'
-                            : 'bg-[#3B82F6]'
-                      }`}
-                      style={{ width: '78%' }}
-                    />
+                <div>
+                  <div className="text-sm font-medium">Monthly Billable</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${getUtilizationColor(monthlyUtilization, theme === 'dark')}`}
+                        style={{ width: `${monthlyUtilization}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium">{monthlyUtilization}%</span>
                   </div>
-                  <span className="text-sm font-medium">78%</span>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center gap-2">
             <SupabaseConnectButton />
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-yellow-500 dark:text-blue-400 ${isLoginPage ? 'hidden' : ''}`}
-            >
-              {theme === 'dark' ? (
-                <Moon className="w-5 h-5" />
-              ) : (
-                <Sun className="w-5 h-5" />
-              )}
-            </button>
-            
-            {!isLoginPage && <LogoutButton />}
+            {!isLoginPage && (
+              <>
+                <button
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-yellow-500 dark:text-blue-400"
+                >
+                  {theme === 'dark' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+                </button>
+                <LogoutButton />
+              </>
+            )}
           </div>
         </div>
-        <div className={`${isLoginPage ? 'hidden' : ''} toolbar-border`}>
-          <NavigationMenu />
-        </div>
+        {!isLoginPage && (
+          <div className="toolbar-border">
+            <NavigationMenu />
+          </div>
+        )}
       </header>
 
       {/* Mobile Menu */}
-      <div className={`md:hidden bg-muted px-4 py-2 ${isLoginPage ? 'hidden' : ''}`}>
-        <nav className="flex flex-col space-y-1">
-          {toolbarGroups.map((group, groupIndex) => (
-            <div key={groupIndex} className="space-y-1">
-              {group.map((item) => {
-                const Icon = item.icon;
-                return (
-                  ((item.label === 'Financials' && !hasFinancialsAccess(user)) ||
-                   (item.adminOnly && !isAdmin()) ||
-                   (item.requiresProjectAccess && user?.role === 'production')) ? null : (
+      {!isLoginPage && (
+        <div className="md:hidden bg-muted px-4 py-2">
+          <nav className="flex flex-col space-y-1">
+            {toolbarGroups.map((group, groupIndex) => (
+              <div key={groupIndex} className="space-y-1">
+                {group.map((item) => {
+                  if (
+                    (item.label === 'Financials' && !hasFinancialsAccess(user)) ||
+                    (item.adminOnly && !isAdmin()) ||
+                    (item.requiresProjectAccess && user?.role === 'production')
+                  ) {
+                    return null;
+                  }
+
+                  const Icon = item.icon;
+                  return (
                     <div key={item.label} className="space-y-1">
                       <div className="flex items-center gap-2 px-3 py-2">
                         <Icon className="w-4 h-4" />
                         <span className="text-sm font-medium">{item.label}</span>
                       </div>
                       <div className="pl-10 space-y-1">
-                        {item.items.map((subItem) => (
-                          ((subItem.label === 'Performance' || subItem.adminOnly) && !isAdmin()) ? null : (
+                        {item.items.map((subItem) => {
+                          if ((subItem.label === 'Performance' || subItem.adminOnly) && !isAdmin()) {
+                            return null;
+                          }
+                          return (
                             <Link
                               key={subItem.href}
                               href={subItem.href}
@@ -362,20 +363,20 @@ export function RootLayoutClient({
                             >
                               {subItem.label}
                             </Link>
-                          )
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
-                  )
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-      </div>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+        </div>
+      )}
 
       {/* Main content */}
-      <main className={`flex-1 container mx-auto px-4 sm:px-6 lg:px-8 py-8 ${isLoginPage ? '' : 'mt-12'}`}>
+      <main className="flex-1">
         {children}
       </main>
 

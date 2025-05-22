@@ -71,10 +71,12 @@ export default function ProjectPerformance() {
   ];
 
   return (
-    <div className="p-6">
-      <div className="flex items-center gap-2 mb-6">
-        <TrendingUp className="w-6 h-6" />
-        <h1 className="text-2xl font-semibold">Project Performance</h1>
+    <div className="container mx-auto py-6 pt-24 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-6 h-6" />
+          <h1 className="text-h2">Project Performance</h1>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

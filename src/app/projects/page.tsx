@@ -199,10 +199,11 @@ export default function Projects() {
   const renderExpandedContent = (project: Project) => null;
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Projects</h1>
+    <div className="container mx-auto py-6 pt-24 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FolderKanban className="w-6 h-6" />
+          <h1 className="text-h2">Projects</h1>
         </div>
         
         <div className="flex items-center gap-4">

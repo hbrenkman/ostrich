@@ -133,11 +133,11 @@ export default function Assets() {
   };
 
   return (
-    <div className="p-6">
+    <div className="container mx-auto py-6 pt-24 space-y-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Package className="w-6 h-6 text-primary" />
-          <h1 className="text-2xl font-semibold">Asset Inventory</h1>
+          <h1 className="text-h2 font-semibold">Asset Inventory</h1>
         </div>
         <button
           onClick={() => setIsNewAssetDialogOpen(true)}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Plus, Mail, Phone, MapPin } from 'lucide-react';
+import { Search, Plus, Mail, Phone, MapPin, UserCircle } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../modules/auth/frontend/hooks/useAuth';
 import { DataTable } from '@/components/ui/data-table';
@@ -531,9 +531,12 @@ export default function Contacts() {
   }, []);
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Contacts</h1>
+    <div className="container mx-auto py-6 pt-24 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <UserCircle className="w-6 h-6" />
+          <h1 className="text-h2">Contacts</h1>
+        </div>
         {user?.role === 'admin' && (
           <button
             onClick={handleAddContact}

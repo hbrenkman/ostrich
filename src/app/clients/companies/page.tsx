@@ -314,9 +314,12 @@ export default function Companies() {
   }
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Companies</h1>
+    <div className="container mx-auto py-6 pt-24 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Building2 className="w-6 h-6" />
+          <h1 className="text-h2">Companies</h1>
+        </div>
         {canCreateCompany && (
           <button
             onClick={() => setIsNewCompanyDialogOpen(true)}

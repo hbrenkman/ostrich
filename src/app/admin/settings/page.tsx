@@ -240,7 +240,7 @@ export default function AdminSettings() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto py-6 pt-24 space-y-6">
       <div className="flex items-center gap-2">
         <Settings className="w-6 h-6" />
         <h1 className="text-h1">Settings</h1>

@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
 import { Bold, Italic, List, ListOrdered, Heading1, Heading2, ImageIcon, AlignLeft, AlignCenter, AlignRight, Maximize, Minimize } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Dynamically import the editor content to avoid SSR issues
+const DynamicEditorContent = dynamic(() => Promise.resolve(EditorContent), {
+  ssr: false
+});
 
 interface RichTextEditorProps {
   value: string;
@@ -14,6 +20,12 @@ interface RichTextEditorProps {
 }
 
 export function RichTextEditor({ value, onChange, placeholder, className }: RichTextEditorProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Create a custom extension for resizable images
   const ResizableImage = Image.extend({
     addAttributes() {
@@ -50,7 +62,7 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
         const dom = document.createElement('div');
         dom.classList.add('resize-image-wrapper');
         
-        const img = document.createElement('img');
+        const img = document.createElement('img') as HTMLImageElement;
         img.src = node.attrs.src;
         img.alt = node.attrs.alt || '';
         if (node.attrs.width) {
@@ -238,7 +250,6 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
     ],
     content: value || '',
     onUpdate: ({ editor }) => {
-      // Create an event-like object to match form input patterns
       onChange({ target: { value: editor.getHTML() } });
     },
     editorProps: {
@@ -247,10 +258,21 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
         'data-placeholder': placeholder || 'Enter content...',
       },
     },
+    immediatelyRender: false,
   });
 
-  if (!editor) {
-    return null;
+  if (!mounted || !editor) {
+    return (
+      <div className={cn("border rounded-md overflow-hidden", className)}>
+        <div className="flex items-center gap-1 p-2 border-b bg-muted/5">
+          <div className="h-8 w-full bg-gray-100 animate-pulse rounded" />
+        </div>
+        <div className="min-h-[150px] p-4 bg-background">
+          <div className="h-4 w-full bg-gray-100 animate-pulse rounded mb-2" />
+          <div className="h-4 w-3/4 bg-gray-100 animate-pulse rounded" />
+        </div>
+      </div>
+    );
   }
 
   const ToolbarButton = React.memo(({ 
@@ -419,7 +441,7 @@ export function RichTextEditor({ value, onChange, placeholder, className }: Rich
           />
         </div>
       </div>
-      <EditorContent editor={editor} />
+      <DynamicEditorContent editor={editor} />
     </div>
   );
 }

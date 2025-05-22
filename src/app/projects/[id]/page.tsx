@@ -167,6 +167,7 @@ export default function ProjectDetail() {
   const params = useParams();
   const { user } = useAuth();
   const projectId = params?.id as string;
+  const [projectUUID, setProjectUUID] = useState<string | null>(null);
 
   // State declarations
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -315,13 +316,8 @@ export default function ProjectDetail() {
         .eq('number', projectId)
         .single();
 
-      if (projectError) {
-        console.error('Error fetching project UUID:', projectError);
-        return;
-      }
-
-      if (!projectData?.id) {
-        console.error('Project not found');
+      if (projectError || !projectData?.id) {
+        toast.error('Project not found');
         return;
       }
 
@@ -426,6 +422,9 @@ export default function ProjectDetail() {
           console.log('Project data:', projectData);
 
           if (projectData) {
+            // Store the project's UUID
+            setProjectUUID(projectData.id);
+            
             console.log('Setting project with data:', {
               company_name: projectData.company_name,
               company_location_id: projectData.company_location_id,
@@ -678,8 +677,13 @@ export default function ProjectDetail() {
     setSelectedTeamMembers(selectedTeamMembers.filter(m => m.id !== memberId));
   };
 
-  const handleAddProposal = () => {
-    router.push(`/projects/${projectId}/proposals/new`);
+  const handleAddProposal = async () => {
+    if (!projectUUID) {
+      toast.error('Project not found');
+      return;
+    }
+
+    router.push(`/projects/${projectUUID}/proposals/new`);
   };
 
   const formatCurrency = (amount: number | null) => {
@@ -1078,8 +1082,8 @@ export default function ProjectDetail() {
   };
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="container mx-auto py-6 pt-24 space-y-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link
             href="/projects"
@@ -1089,7 +1093,7 @@ export default function ProjectDetail() {
           </Link>
           <div className="flex items-center gap-2">
             <FolderKanban className="w-6 h-6 text-primary" />
-            <h1 className="text-h1">{projectId === 'new' ? 'New Project' : 'Edit Project'}</h1>
+            <h1 className="text-h2">{projectId === 'new' ? 'New Project' : 'Edit Project'}</h1>
           </div>
         </div>
         {!isLoadingRevisions && projectRevisions.length > 0 && (

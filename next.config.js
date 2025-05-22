@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Enable middleware debugging
+  experimental: {
+    instrumentationHook: true
+  },
   images: {
     remotePatterns: [
       {
