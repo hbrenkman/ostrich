@@ -30,12 +30,14 @@ interface Space {
   id: string;
   name: string;
   description: string;
-  floorArea: number;  // Changed from string to number
+  floorArea: number;
   buildingType: string;
   buildingTypeId: string;
   spaceType: string;
   discipline: string;
   hvacSystem: string;
+  projectConstructionType: string;
+  projectConstructionTypeId: number;
   fees: Array<{
     id: string;
     discipline: string;
@@ -170,11 +172,20 @@ interface SpaceDialogProps {
   onSave: (space: Omit<Space, 'id'>) => void;
   costIndex: number | null;
   initialSpace?: Space | null;
+  onDisciplineFeeToggle: (structureId: string, discipline: string, isActive: boolean) => void;
 }
 
 interface FeeDuplicateStructure {
   id: number;
   rate: number;
+}
+
+// Add new interfaces for manual fee overrides
+interface ManualFeeOverride {
+  structureId: string;
+  discipline: string;
+  designFee?: number;
+  constructionSupportFee?: number;
 }
 
 const contacts: Contact[] = [
@@ -231,6 +242,8 @@ export default function EditProposalPage() {
   const [duplicateStructureRates, setDuplicateStructureRates] = useState<FeeDuplicateStructure[]>([]);
   // Add collapsed state to the component's state
   const [collapsedDuplicates, setCollapsedDuplicates] = useState<Set<string>>(new Set());
+  // Add new state for manual fee overrides
+  const [manualFeeOverrides, setManualFeeOverrides] = useState<ManualFeeOverride[]>([]);
 
   const [proposal, setProposal] = useState<ProposalFormData>({
     number: proposalId === 'new' ? '' : proposalId,
@@ -477,30 +490,30 @@ export default function EditProposalPage() {
 
   const formatCurrency = (value: string | number | undefined | null): string => {
     // Handle undefined or null values
-    if (value === undefined || value === null) return '$0.00';
+    if (value === undefined || value === null) return '$0';
     
     if (typeof value === 'number') {
       return new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value);
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(Math.round(value));
     }
     
     // Remove any non-digit characters except decimal point
     const numericValue = value.replace(/[^0-9.]/g, '');
-    if (!numericValue) return '$0.00';
+    if (!numericValue) return '$0';
     
-    // Convert to number and format
-    const number = parseFloat(numericValue);
-    if (isNaN(number)) return '$0.00';
+    // Convert to number, round it, and format
+    const number = Math.round(parseFloat(numericValue));
+    if (isNaN(number)) return '$0';
     
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(number);
   };
 
@@ -694,6 +707,11 @@ export default function EditProposalPage() {
     // If we're editing an existing space
     if (editingSpace) {
       console.log('Updating existing space:', editingSpace.id);
+      console.log('New space data:', {
+        ...space,
+        fees: space.fees
+      });
+      
       setProposal(prev => ({
         ...prev,
         structures: prev.structures.map(structure => {
@@ -706,7 +724,7 @@ export default function EditProposalPage() {
                       ...level,
                       spaces: level.spaces.map(sp =>
                         sp.id === editingSpace.id
-                          ? { ...space, id: sp.id, fees: sp.fees, splitFees: sp.splitFees } // Preserve the ID, fees, and splitFees
+                          ? { ...space, id: sp.id, splitFees: sp.splitFees } // Only preserve ID and splitFees
                           : sp
                       )
                     }
@@ -723,7 +741,7 @@ export default function EditProposalPage() {
                       ...level,
                       spaces: level.spaces.map(sp =>
                         sp.name === editingSpace.name
-                          ? { ...space, id: sp.id, fees: sp.fees, splitFees: sp.splitFees } // Preserve the ID, fees, and splitFees
+                          ? { ...space, id: sp.id, splitFees: sp.splitFees } // Only preserve ID and splitFees
                           : sp
                       )
                     }
@@ -743,8 +761,9 @@ export default function EditProposalPage() {
       id: newSpaceId,
       name: newSpace.name,
         floorArea: newSpace.floorArea,
-        splitFees: newSpace.splitFees
-      });
+        splitFees: newSpace.splitFees,
+        fees: newSpace.fees
+    });
 
       setProposal(prev => ({
         ...prev,
@@ -1271,7 +1290,7 @@ export default function EditProposalPage() {
 
   const handleDuplicateStructure = (structureId: string) => {
     console.log('=== Duplicating Structure ===');
-    console.log('Original Structure ID:', structureId);
+    console.log('Structure ID to duplicate:', structureId);
     
     const structureToDuplicate = proposal.structures.find(s => s.id === structureId);
     if (!structureToDuplicate) {
@@ -1279,34 +1298,59 @@ export default function EditProposalPage() {
       return;
     }
 
-    // Count how many duplicates already exist for this parent
-    const duplicateCount = proposal.structures.filter(s => s.parentId === structureId).length;
-    const duplicateNumber = duplicateCount + 1;
+    console.log('Found structure to duplicate:', {
+      ...structureToDuplicate,
+      designFeeRate: structureToDuplicate.designFeeRate,
+      constructionSupportEnabled: structureToDuplicate.constructionSupportEnabled
+    });
 
-    // Create a new structure with duplicated levels and spaces
+    // Create a new structure with a unique ID
     const newStructure: Structure = {
       id: crypto.randomUUID(),
+      parentId: structureId,
       constructionType: structureToDuplicate.constructionType,
       floorArea: structureToDuplicate.floorArea,
-      description: `${structureToDuplicate.description} (Duplicate ${duplicateNumber})`,
+      description: structureToDuplicate.description,
       spaceType: structureToDuplicate.spaceType,
       discipline: structureToDuplicate.discipline,
       hvacSystem: structureToDuplicate.hvacSystem,
+      designFeeRate: structureToDuplicate.designFeeRate ?? 80,
+      constructionSupportEnabled: structureToDuplicate.constructionSupportEnabled ?? true,
       levels: structureToDuplicate.levels.map(level => ({
         ...level,
         id: crypto.randomUUID(),
         spaces: level.spaces.map(space => ({
           ...space,
+          id: crypto.randomUUID(),
+          fees: space.fees.map(fee => ({
+            ...fee,
           id: crypto.randomUUID()
         }))
-      })),
-      parentId: structureId
+        }))
+      }))
     };
 
-    // Simply add the new structure to the end of the array
-    setProposal({
-      ...proposal,
-      structures: [...proposal.structures, newStructure]
+    console.log('Created new structure:', {
+      ...newStructure,
+      designFeeRate: newStructure.designFeeRate,
+      constructionSupportEnabled: newStructure.constructionSupportEnabled
+    });
+
+    // Find the index of the structure being duplicated
+    const originalIndex = proposal.structures.findIndex(s => s.id === structureId);
+    
+    // Insert the new structure directly after the original
+    setProposal(prev => {
+      const newStructures = [...prev.structures];
+      newStructures.splice(originalIndex + 1, 0, newStructure);
+      
+      // Renumber any existing duplicates that come after this point
+      const updatedStructures = renumberDuplicates(newStructures, structureId);
+      
+      return {
+        ...prev,
+        structures: updatedStructures
+      };
     });
   };
 
@@ -1322,7 +1366,9 @@ export default function EditProposalPage() {
     console.log('Found structure to copy:', {
       id: structureToCopy.id,
       description: structureToCopy.description,
-      levels: structureToCopy.levels.length
+      levels: structureToCopy.levels.length,
+      designFeeRate: structureToCopy.designFeeRate,
+      constructionSupportEnabled: structureToCopy.constructionSupportEnabled
     });
 
     // Create a new structure with copied levels and spaces, but without parentId
@@ -1334,6 +1380,8 @@ export default function EditProposalPage() {
       spaceType: structureToCopy.spaceType,
       discipline: structureToCopy.discipline,
       hvacSystem: structureToCopy.hvacSystem,
+      designFeeRate: structureToCopy.designFeeRate ?? 80, // Copy design fee rate with default
+      constructionSupportEnabled: structureToCopy.constructionSupportEnabled ?? true, // Copy construction support setting with default
       levels: structureToCopy.levels.map(level => ({
         ...level,
         id: crypto.randomUUID(),
@@ -1347,7 +1395,9 @@ export default function EditProposalPage() {
     console.log('Created new independent structure:', {
       id: newStructure.id,
       description: newStructure.description,
-      levels: newStructure.levels.length
+      levels: newStructure.levels.length,
+      designFeeRate: newStructure.designFeeRate,
+      constructionSupportEnabled: newStructure.constructionSupportEnabled
     });
 
     // Add the new structure to the end of the array
@@ -1814,6 +1864,102 @@ export default function EditProposalPage() {
       }
       return next;
     });
+  };
+
+  // Add helper function to get manual override
+  const getManualOverride = (structureId: string, discipline: string): ManualFeeOverride | undefined => {
+    return manualFeeOverrides.find(o => o.structureId === structureId && o.discipline === discipline);
+  };
+
+  // Add helper function to handle fee updates
+  const handleFeeUpdate = (structureId: string, discipline: string, type: 'design' | 'construction', value: number) => {
+    setManualFeeOverrides(prev => {
+      const existing = prev.find(o => o.structureId === structureId && o.discipline === discipline);
+      if (existing) {
+        return prev.map(o => 
+          o.structureId === structureId && o.discipline === discipline
+            ? { ...o, [type === 'design' ? 'designFee' : 'constructionSupportFee']: value }
+            : o
+        );
+      }
+      return [...prev, {
+        structureId,
+        discipline,
+        [type === 'design' ? 'designFee' : 'constructionSupportFee']: value
+      }];
+    });
+  };
+
+  // Add helper function to reset fees
+  const handleResetFees = (structureId: string, discipline: string) => {
+    setManualFeeOverrides(prev => 
+      prev.filter(o => !(o.structureId === structureId && o.discipline === discipline))
+    );
+  };
+
+  // Add helper function to format input value
+  const formatInputValue = (value: number): string => {
+    return Math.round(value).toString();
+  };
+
+  // Add helper function to parse input value
+  const parseInputValue = (value: string): number => {
+    const numericValue = value.replace(/[^0-9]/g, '');
+    return numericValue ? parseInt(numericValue, 10) : 0;
+  };
+
+  // Add a handler for toggling discipline fees that will be passed to SpaceDialog
+  const handleDisciplineFeeToggle = (structureId: string, discipline: string, isActive: boolean) => {
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.map(s => {
+        if (s.id === structureId) {
+          return {
+            ...s,
+            levels: s.levels.map(l => ({
+              ...l,
+              spaces: l.spaces.map(sp => ({
+                ...sp,
+                fees: sp.fees.map(f => {
+                  if (f.discipline === discipline) {
+                    return { ...f, isActive };
+                  }
+                  return f;
+                })
+              }))
+            }))
+          };
+        }
+        return s;
+      })
+    }));
+  };
+
+  // Update the fee table toggle handler to properly update space fees
+  const handleFeeTableToggle = (structureId: string, discipline: string, isActive: boolean) => {
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.map(s => {
+        if (s.id === structureId) {
+          return {
+            ...s,
+            levels: s.levels.map(l => ({
+              ...l,
+              spaces: l.spaces.map(sp => ({
+                ...sp,
+                fees: sp.fees.map(f => {
+                  if (f.discipline === discipline) {
+                    return { ...f, isActive };
+                  }
+                  return f;
+                })
+              }))
+            }))
+          };
+        }
+        return s;
+      })
+    }));
   };
 
   return (
@@ -2362,13 +2508,21 @@ export default function EditProposalPage() {
                                     </div>
                                     <div className="mt-2 text-sm">
                                       <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                        Building Type: {space.buildingTypeId}
+                                        Building Type: {space.buildingType}
                                       </div>
                                       <div className="text-gray-500 dark:text-[#9CA3AF]">
                                         Space Type: {space.spaceType}
                                       </div>
                                       <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                        Description: {space.description}
+                                        Project Construction Type: {space.projectConstructionType}
+                                      </div>
+                                      <div className="text-gray-500 dark:text-[#9CA3AF] mt-1">
+                                        Disciplines:
+                                        {space.fees.map((fee, index) => (
+                                          <span key={fee.id} className={`ml-1 ${fee.isActive ? 'text-primary' : 'text-gray-400'}`}>
+                                            {fee.discipline}{index < space.fees.length - 1 ? ', ' : ''}
+                                          </span>
+                                        ))}
                                       </div>
                                       <div className="mt-1 font-medium text-primary">
                                         Construction Cost: {formatCurrency(space.fees.reduce((sum, fee) => sum + (fee.isActive ? fee.totalFee : 0), 0))}
@@ -2467,8 +2621,8 @@ export default function EditProposalPage() {
 
         <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
           <div className="flex gap-6">
-            {/* Fee Table Section */}
-            <div className="flex-1 min-w-0">
+            {/* Fee Table Section - Add overflow-auto to enable scrolling */}
+            <div className="flex-1 min-w-0 overflow-auto">
               <h2 className="text-lg font-semibold mb-4 dark:text-[#E5E7EB]">Fee Table</h2>
               <div className="space-y-6">
                 {proposal.structures.map((structure, structureIndex) => {
@@ -2615,6 +2769,8 @@ export default function EditProposalPage() {
                                 })()).map(([discipline, data]) => {
                                   const { fee: disciplineDesignFee, rate: disciplineRate } = calculateDisciplineFee(data.totalCost, discipline as string, structure);
                                   const isActive = data.fees.some(f => f.isActive);
+                                  const manualOverride = getManualOverride(structure.id, discipline);
+                                  const displayDesignFee = manualOverride?.designFee ?? disciplineDesignFee;
 
                                       return (
                                     <React.Fragment key={discipline}>
@@ -2634,47 +2790,52 @@ export default function EditProposalPage() {
                                             <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
                                           {disciplineRate.toFixed(1)}%
                                             </td>
-                                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                              {formatCurrency(disciplineDesignFee)}
+                                        <td className="py-3 px-4 text-sm">
+                                          <div className="flex items-center gap-2">
+                                            <input
+                                              type="number"
+                                              step="0.01"
+                                              min="0"
+                                              value={formatInputValue(displayDesignFee)}
+                                              onChange={(e) => {
+                                                const value = parseInputValue(e.target.value);
+                                                if (!isNaN(value)) {
+                                                  handleFeeUpdate(structure.id, discipline, 'design', value);
+                                                }
+                                              }}
+                                              className="w-32 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
+                                            />
+                                            {manualOverride?.designFee !== undefined && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleResetFees(structure.id, discipline)}
+                                                className="p-1 text-gray-500 hover:text-primary"
+                                                title="Reset to calculated value"
+                                              >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                                  <path d="M3 3v5h5"/>
+                                                </svg>
+                                              </button>
+                                            )}
+                                          </div>
                                             </td>
                                             <td className="py-3 px-4">
                                           <div className="flex items-center gap-2">
                                               <button
                                                 type="button"
                                               onClick={() => {
-                                                // Toggle all fees for this discipline
-                                                setProposal(prev => ({
-                                                  ...prev,
-                                                  structures: prev.structures.map(s => {
-                                                    if (s.id === structure.id) {
-                                                      return {
-                                                        ...s,
-                                                        levels: s.levels.map(l => ({
-                                                          ...l,
-                                                          spaces: l.spaces.map(sp => ({
-                                                            ...sp,
-                                                            fees: sp.fees.map(f => {
-                                                              if (f.discipline === discipline) {
-                                                                return { ...f, isActive: !isActive };
-                                                              }
-                                                              return f;
-                                                            })
-                                                          }))
-                                                        }))
-                                                      };
-                                                    }
-                                                    return s;
-                                                  })
-                                                }));
+                                                const newIsActive = !data.fees.some(f => f.isActive);
+                                                handleFeeTableToggle(structure.id, discipline, newIsActive);
                                               }}
                                               className={`p-1.5 rounded-md transition-colors ${
-                                                isActive 
+                                                data.fees.some(f => f.isActive)
                                                   ? 'bg-primary/10 text-primary hover:bg-primary/20' 
                                                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                                               }`}
-                                              title={isActive ? 'Disable discipline' : 'Enable discipline'}
+                                              title={data.fees.some(f => f.isActive) ? 'Disable discipline' : 'Enable discipline'}
                                             >
-                                              {isActive ? (
+                                              {data.fees.some(f => f.isActive) ? (
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                                                   <path d="M20 6 9 17l-5-5"/>
                                                 </svg>
@@ -2902,13 +3063,29 @@ export default function EditProposalPage() {
                                   </td>
                                   <td className="py-2 px-4 text-sm font-medium text-gray-900 dark:text-[#E5E7EB]">
                                     {(() => {
-                                      const totalFee = calculateTotalDesignFee(structure);
+                                      const totalFee = structure.levels.reduce((total, level) => 
+                                        total + level.spaces.reduce((levelTotal, space) => 
+                                          levelTotal + space.fees.reduce((feeTotal, fee) => {
+                                            const manualOverride = getManualOverride(structure.id, fee.discipline);
+                                            const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
+                                            return feeTotal + (manualOverride?.designFee ?? disciplineDesignFee);
+                                          }, 0)
+                                        , 0)
+                                      , 0);
                                       const effectiveRate = (totalFee / totalStructureCost) * 100;
                                       return isNaN(effectiveRate) ? '0.0' : effectiveRate.toFixed(1);
                                     })()}%
                                   </td>
                                   <td className="py-2 px-4 text-sm font-medium text-primary">
-                                    {formatCurrency(calculateTotalDesignFee(structure))}
+                                    {formatCurrency(structure.levels.reduce((total, level) => 
+                                      total + level.spaces.reduce((levelTotal, space) => 
+                                        levelTotal + space.fees.reduce((feeTotal, fee) => {
+                                          const manualOverride = getManualOverride(structure.id, fee.discipline);
+                                          const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
+                                          return feeTotal + (manualOverride?.designFee ?? disciplineDesignFee);
+                                        }, 0)
+                                      , 0)
+                                    , 0))}
                                   </td>
                                   <td className="py-2 px-4"></td>
                                 </tr>
@@ -2941,6 +3118,8 @@ export default function EditProposalPage() {
                                       
                                       // Calculate construction support fee based on the discipline's design fee and construction support rate
                                       const disciplineConstructionSupportFee = disciplineDesignFee * (constructionSupportRate / 100);
+                                      const manualOverride = getManualOverride(structure.id, fee.discipline);
+                                      const displayConstructionSupportFee = manualOverride?.constructionSupportFee ?? disciplineConstructionSupportFee;
 
                                       // Find nested items for this discipline
                                       const nestedItems = proposal.feeItems.filter(
@@ -2968,66 +3147,61 @@ export default function EditProposalPage() {
                                                 return disciplineRate.toFixed(1);
                                               })()}%
                                           </td>
-                                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                            {formatCurrency(disciplineConstructionSupportFee)}
+                                          <td className="py-3 px-4 text-sm">
+                                            <div className="flex items-center gap-2">
+                                              <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={formatInputValue(displayConstructionSupportFee)}
+                                                onChange={(e) => {
+                                                  const value = parseInputValue(e.target.value);
+                                                  if (!isNaN(value)) {
+                                                    handleFeeUpdate(structure.id, fee.discipline, 'construction', value);
+                                                  }
+                                                }}
+                                                className="w-32 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
+                                              />
+                                              {manualOverride?.constructionSupportFee !== undefined && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleResetFees(structure.id, fee.discipline)}
+                                                  className="p-1 text-gray-500 hover:text-primary"
+                                                  title="Reset to calculated value"
+                                                >
+                                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                                    <path d="M3 3v5h5"/>
+                                                  </svg>
+                                                </button>
+                                              )}
+                                            </div>
                                           </td>
                                           <td className="py-3 px-4">
                                               <div className="flex items-center gap-2">
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                    // Toggle the discipline's active state
-                                                    setProposal(prev => ({
-                                                      ...prev,
-                                                      structures: prev.structures.map(s => {
-                                                        if (s.id === structure.id) {
-                                                      return {
-                                                        ...s,
-                                                            levels: s.levels.map(l => {
-                                                              if (l.id === level.id) {
-                                                                return {
-                                                                ...l,
-                                                                  spaces: l.spaces.map(sp => {
-                                                                    if (sp.id === space.id) {
-                                                                      return {
-                                                                        ...sp,
-                                                                        fees: sp.fees.map(f => {
-                                                                          if (f.id === fee.id) {
-                                                                            return { ...f, isActive: !f.isActive };
-                                                                          }
-                                                                          return f;
-                                                                        })
-                                                                      };
-                                                                    }
-                                                                    return sp;
-                                                                  })
-                                                                };
-                                                              }
-                                                              return l;
-                                                            })
-                                                      };
-                                                    }
-                                                    return s;
-                                                  })
-                                                    }));
-                                                  }}
-                                                  className={`p-1.5 rounded-md transition-colors ${
-                                                    fee.isActive 
-                                                      ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                                                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                                  }`}
-                                                  title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
-                                                >
-                                                  {fee.isActive ? (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                      <path d="M20 6 9 17l-5-5"/>
-                                                    </svg>
-                                                  ) : (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                      <path d="M18 6 6 18"/>
-                                                      <path d="m6 6 12 12"/>
-                                                    </svg>
-                                                  )}
+                                                const newIsActive = !fee.isActive;
+                                                handleFeeTableToggle(structure.id, fee.discipline, newIsActive);
+                                              }}
+                                              className={`p-1.5 rounded-md transition-colors ${
+                                                fee.isActive
+                                                  ? 'bg-primary/10 text-primary hover:bg-primary/20' 
+                                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                              }`}
+                                              title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
+                                            >
+                                              {fee.isActive ? (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                  <path d="M20 6 9 17l-5-5"/>
+                                                </svg>
+                                              ) : (
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                  <path d="M18 6 6 18"/>
+                                                  <path d="m6 6 12 12"/>
+                                                </svg>
+                                              )}
                                             </button>
                                               </div>
                                           </td>
@@ -3193,11 +3367,11 @@ export default function EditProposalPage() {
               </div>
             </div>
 
-            {/* Additional Items Container */}
+            {/* Additional Items Container - Make it sticky */}
             <div className="w-80 flex-shrink-0">
-              <div className="bg-muted/5 rounded-lg border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 p-2">
+              <div className="sticky top-24 bg-muted/5 rounded-lg border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 p-2">
                 <h2 className="text-lg font-semibold mb-2 px-2 dark:text-[#E5E7EB]">Additional Items</h2>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
                   {/* Design Phase Items */}
                   <div className="border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 rounded-md overflow-hidden">
                     <div className="bg-muted/10 px-2 py-1.5">
@@ -3327,6 +3501,7 @@ export default function EditProposalPage() {
         onSave={handleAddSpace}
         costIndex={proposal.costIndex}
         initialSpace={editingSpace}
+        onDisciplineFeeToggle={handleDisciplineFeeToggle}
       />
     </div>
   );
