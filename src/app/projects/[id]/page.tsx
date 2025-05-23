@@ -138,6 +138,7 @@ interface ProjectState {
   projectLocationState: string;
   projectLocationZip: string;
   projectLocationCountry: string;
+  costIndex: number | null;
   revision: number;
 }
 
@@ -155,6 +156,7 @@ interface ProjectRevision {
   project_location_state: string | null;
   project_location_zip: string | null;
   project_location_country: string;
+  cost_index: number | null;
   revision: number;
   created_at: string;
   created_by: string;
@@ -280,24 +282,42 @@ export default function ProjectDetail() {
   };
 
   const handleProjectLocationChange = async (address: string) => {
+    console.log('handleProjectLocationChange called with address:', address);
     setProjectLocationInput(address);
     
     // Only verify if the address is complete enough
     if (address.length > 10) {
-      console.log('Attempting to verify project location:', address);
+      console.log('Address is long enough, attempting verification');
       const verifiedAddress = await verifyAddress(address);
       console.log('Project location verification result:', verifiedAddress);
       
       if (verifiedAddress) {
-        setProject(prev => ({
-          ...prev,
-          projectLocationAddress: verifiedAddress.address_line1,
-          projectLocationCity: verifiedAddress.city,
-          projectLocationState: verifiedAddress.state,
-          projectLocationZip: verifiedAddress.zip,
-          projectLocationCountry: 'USA' // Default to USA for now
-        }));
+        console.log('Setting project state with verified address and cost index:', {
+          address: verifiedAddress.address_line1,
+          city: verifiedAddress.city,
+          state: verifiedAddress.state,
+          zip: verifiedAddress.zip,
+          costIndex: verifiedAddress.cost_index
+        });
+        
+        setProject(prev => {
+          const newState = {
+            ...prev,
+            projectLocationAddress: verifiedAddress.address_line1,
+            projectLocationCity: verifiedAddress.city,
+            projectLocationState: verifiedAddress.state,
+            projectLocationZip: verifiedAddress.zip,
+            projectLocationCountry: 'USA', // Default to USA for now
+            costIndex: verifiedAddress.cost_index || null
+          };
+          console.log('New project state:', newState);
+          return newState;
+        });
+      } else {
+        console.log('Address verification failed');
       }
+    } else {
+      console.log('Address too short for verification:', address.length);
     }
   };
 
@@ -446,6 +466,7 @@ export default function ProjectDetail() {
               projectLocationState: projectData.project_location_state || '',
               projectLocationZip: projectData.project_location_zip || '',
               projectLocationCountry: projectData.project_location_country || 'USA',
+              costIndex: projectData.cost_index || null,
               revision: projectData.revision
             });
 
@@ -535,6 +556,7 @@ export default function ProjectDetail() {
     projectLocationState: '',
     projectLocationZip: '',
     projectLocationCountry: 'USA',
+    costIndex: null,
     revision: 0
   });
   
@@ -598,6 +620,7 @@ export default function ProjectDetail() {
             project_location_state: project.projectLocationState || null,
             project_location_zip: project.projectLocationZip || null,
             project_location_country: project.projectLocationCountry,
+            cost_index: project.costIndex,
             status_id: statusData.id,
             revision: 1,
             created_by: user.id,
@@ -622,7 +645,8 @@ export default function ProjectDetail() {
           currentRevision.project_location_city !== project.projectLocationCity ||
           currentRevision.project_location_state !== project.projectLocationState ||
           currentRevision.project_location_zip !== project.projectLocationZip ||
-          currentRevision.project_location_country !== project.projectLocationCountry;
+          currentRevision.project_location_country !== project.projectLocationCountry ||
+          currentRevision.cost_index !== project.costIndex;
 
         if (hasChanges) {
           // Create new revision
@@ -641,6 +665,7 @@ export default function ProjectDetail() {
               project_location_state: project.projectLocationState || null,
               project_location_zip: project.projectLocationZip || null,
               project_location_country: project.projectLocationCountry,
+              cost_index: project.costIndex,
               revision: latestRevision + 1,
               created_by: user.id,
               updated_by: user.id
@@ -1069,6 +1094,7 @@ export default function ProjectDetail() {
       projectLocationState: revisionData.project_location_state || '',
       projectLocationZip: revisionData.project_location_zip || '',
       projectLocationCountry: revisionData.project_location_country || 'USA',
+      costIndex: revisionData.cost_index || null,
       revision: revisionData.revision
     });
 
@@ -1294,6 +1320,21 @@ export default function ProjectDetail() {
                 <h3 className="text-lg font-medium text-gray-900 dark:text-[#E5E7EB]">Project Location</h3>
                 <div className="space-y-4">
                   <div>
+                    <Label htmlFor="costIndex">Cost Index</Label>
+                    <Input
+                      id="costIndex"
+                      type="number"
+                      step="0.01"
+                      value={project.costIndex || ''}
+                      onChange={(e) => {
+                        const value = e.target.value === '' ? null : parseFloat(e.target.value);
+                        setProject({ ...project, costIndex: value });
+                      }}
+                      placeholder="Enter cost index"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
                     <Label htmlFor="projectLocation">Address</Label>
                     <Input
                       id="projectLocation"
@@ -1314,6 +1355,14 @@ export default function ProjectDetail() {
                           <div className="text-sm text-gray-600 dark:text-gray-400">
                             {project.projectLocationCity}, {project.projectLocationState} {project.projectLocationZip}
                           </div>
+                          {project.costIndex !== null && (
+                            <div className="text-sm font-medium text-primary mt-1">
+                              Cost Index: {project.costIndex.toFixed(2)}
+                              <div className="text-xs text-gray-500">
+                                (Debug: {JSON.stringify({ costIndex: project.costIndex })})
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

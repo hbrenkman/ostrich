@@ -40,7 +40,18 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
     
-    return NextResponse.json(data);
+    console.log('Database response:', data);
+    console.log('Cost index from database:', data.cost_index);
+    
+    // Map the database response to match our interface
+    const mappedData = {
+      ...data,
+      costIndex: data.cost_index,
+      // Remove the snake_case version to avoid confusion
+      cost_index: undefined
+    };
+    
+    return NextResponse.json(mappedData);
   } catch (error) {
     console.error('Error fetching project:', error);
     return NextResponse.json({ error: 'Failed to fetch project' }, { status: 500 });

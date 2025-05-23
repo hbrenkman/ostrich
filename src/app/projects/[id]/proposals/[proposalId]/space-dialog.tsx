@@ -34,6 +34,7 @@ interface ConstructionCost {
 }
 
 interface DisciplineFee {
+  id: string;
   discipline: string;
   isActive: boolean;
   costPerSqft: number;
@@ -42,14 +43,22 @@ interface DisciplineFee {
 
 interface Space {
   id: string;
-  buildingTypeId: string;
   name: string;
+  floorArea: number;
   description: string;
+  buildingType: string;
+  buildingTypeId: string;
   spaceType: string;
   discipline: string;
   hvacSystem: string;
-  fees: DisciplineFee[];
-  floorArea: string;
+  fees: {
+    id: string;
+    discipline: string;
+    totalFee: number;
+    isActive: boolean;
+    costPerSqft: number;
+  }[];
+  splitFees: boolean;
 }
 
 interface SpaceDialogProps {
@@ -57,31 +66,42 @@ interface SpaceDialogProps {
   onOpenChange: (open: boolean) => void;
   onSave: (space: Omit<Space, 'id'>) => void;
   defaultValues?: Partial<Space>;
+  costIndex: number | null;
+  initialSpace: Space | null;
 }
 
-export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: SpaceDialogProps) {
+export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costIndex, initialSpace }: SpaceDialogProps) {
   const [buildingTypes, setBuildingTypes] = useState<BuildingType[]>([]);
   const [constructionCosts, setConstructionCosts] = useState<ConstructionCost[]>([]);
   const [selectedBuildingType, setSelectedBuildingType] = useState<BuildingType | null>(null);
   const [openCombobox, setOpenCombobox] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [space, setSpace] = useState<Omit<Space, 'id'>>({
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Initialize space state with initialSpace or defaultValues
+  const [space, setSpace] = useState<Omit<Space, 'id'>>(() => ({
     name: '',
     buildingTypeId: '',
-    floorArea: '',
+    buildingType: '',
+    floorArea: 0,
     description: '',
     spaceType: '',
     discipline: '',
     hvacSystem: '',
     fees: [],
-    ...defaultValues
-  });
-  const [isLoading, setIsLoading] = useState(true);
-  const [disciplineFees, setDisciplineFees] = useState<DisciplineFee[]>([
-    { discipline: 'Mechanical', isActive: true, costPerSqft: 0, totalFee: 0 },
-    { discipline: 'Plumbing', isActive: true, costPerSqft: 0, totalFee: 0 },
-    { discipline: 'Electrical', isActive: true, costPerSqft: 0, totalFee: 0 }
-  ]);
+    splitFees: false,
+    ...(initialSpace || defaultValues)
+  }));
+
+  // Initialize disciplineFees state with initialSpace fees or defaults
+  const [disciplineFees, setDisciplineFees] = useState<DisciplineFee[]>(() => 
+    initialSpace?.fees || [
+      { id: crypto.randomUUID(), discipline: 'Mechanical', isActive: true, costPerSqft: 0, totalFee: 0 },
+      { id: crypto.randomUUID(), discipline: 'Plumbing', isActive: true, costPerSqft: 0, totalFee: 0 },
+      { id: crypto.randomUUID(), discipline: 'Electrical', isActive: true, costPerSqft: 0, totalFee: 0 }
+    ]
+  );
+
   const supabase = createClientComponentClient();
 
   // Filter building types based on search query
@@ -199,7 +219,13 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
 
     const updatedFees = disciplineFees.map(fee => {
       const cost = recentCosts.find(c => c.cost_type.toLowerCase() === fee.discipline.toLowerCase());
-      const costPerSqft = cost?.cost_per_sqft || 0;
+      let costPerSqft = cost?.cost_per_sqft || 0;
+      
+      // Apply cost index adjustment if available
+      if (costIndex !== null) {
+        costPerSqft = costPerSqft * (costIndex / 100);
+      }
+      
       const totalFee = costPerSqft * floorArea;
       return {
         ...fee,
@@ -213,7 +239,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
 
   useEffect(() => {
     if (selectedBuildingType && space.floorArea) {
-      const floorArea = parseFloat(space.floorArea);
+      const floorArea = parseFloat(space.floorArea.toString());
       if (!isNaN(floorArea)) {
         calculateDisciplineFees(selectedBuildingType.id, floorArea);
       }
@@ -222,19 +248,55 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
 
   useEffect(() => {
     if (selectedBuildingType) {
-      setSpace(prev => ({
-        ...prev,
-        buildingTypeId: selectedBuildingType.id,
-        name: selectedBuildingType.name || '',
-        description: selectedBuildingType.description || '',
-        spaceType: selectedBuildingType.space_type || '',
-        discipline: selectedBuildingType.discipline || '',
-        hvacSystem: selectedBuildingType.hvac_system || '',
-        fees: disciplineFees,
-        floorArea: prev.floorArea || (selectedBuildingType.default_area?.toString() || '')
-      }));
+      setSpace(prev => {
+        // If we're editing an existing space (initialSpace exists), preserve its values
+        if (initialSpace) {
+          return {
+            ...prev,
+            buildingTypeId: selectedBuildingType.id,
+            buildingType: selectedBuildingType.name || '',
+            name: prev.name || selectedBuildingType.name || '',
+            description: prev.description || selectedBuildingType.description || '',
+            spaceType: prev.spaceType || selectedBuildingType.space_type || '',
+            discipline: prev.discipline || selectedBuildingType.discipline || '',
+            hvacSystem: prev.hvacSystem || selectedBuildingType.hvac_system || '',
+            fees: prev.fees.length > 0 ? prev.fees : disciplineFees,
+            floorArea: prev.floorArea || (selectedBuildingType.default_area || 0),
+            splitFees: prev.splitFees
+          };
+        }
+        // For new spaces, use the building type values
+        return {
+          ...prev,
+          buildingTypeId: selectedBuildingType.id,
+          buildingType: selectedBuildingType.name || '',
+          name: selectedBuildingType.name || '',
+          description: selectedBuildingType.description || '',
+          spaceType: selectedBuildingType.space_type || '',
+          discipline: selectedBuildingType.discipline || '',
+          hvacSystem: selectedBuildingType.hvac_system || '',
+          fees: disciplineFees,
+          floorArea: prev.floorArea || (selectedBuildingType.default_area || 0),
+          splitFees: prev.splitFees
+        };
+      });
     }
-  }, [selectedBuildingType, constructionCosts, disciplineFees]);
+  }, [selectedBuildingType, constructionCosts, disciplineFees, initialSpace]);
+
+  // Update useEffect to handle initialSpace and set selected building type
+  useEffect(() => {
+    if (initialSpace && buildingTypes.length > 0) {
+      const matchingBuildingType = buildingTypes.find(type => type.id === initialSpace.buildingTypeId);
+      if (matchingBuildingType) {
+        setSelectedBuildingType(matchingBuildingType);
+        // Set the initial space values
+        setSpace({
+          ...initialSpace,
+          fees: initialSpace.fees || disciplineFees
+        });
+      }
+    }
+  }, [initialSpace, buildingTypes]);
 
   const formatCurrency = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined) return '';
@@ -254,7 +316,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
     return formatted;
   };
 
-  // Update the handleFloorAreaChange function with logging
+  // Update the handleFloorAreaChange function
   const handleFloorAreaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log('handleFloorAreaChange - raw input value:', e.target.value);
     const value = e.target.value;
@@ -264,19 +326,17 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
     // Log the current state before update
     console.log('Current space state before update:', space);
     
+    const numericValue = parseFloat(formattedValue) || 0;
     setSpace(prev => {
-      const newState = { ...prev, floorArea: formattedValue };
+      const newState = { ...prev, floorArea: numericValue };
       console.log('New space state:', newState);
       return newState;
     });
     
     // Update fees if we have a valid number
-    if (selectedBuildingType && formattedValue) {
-      const floorArea = parseInt(formattedValue, 10);
-      console.log('Calculating fees for floor area:', floorArea);
-      if (!isNaN(floorArea)) {
-        calculateDisciplineFees(selectedBuildingType.id, floorArea);
-      }
+    if (selectedBuildingType && numericValue > 0) {
+      console.log('Calculating fees for floor area:', numericValue);
+      calculateDisciplineFees(selectedBuildingType.id, numericValue);
     }
   };
 
@@ -291,24 +351,33 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
     
     onSave({
       ...space,
-      fees: disciplineFees
+      floorArea: parseFloat(space.floorArea.toString()) || 0,
+      fees: disciplineFees.map(fee => ({
+        id: fee.id,
+        discipline: fee.discipline,
+        totalFee: fee.totalFee,
+        isActive: fee.isActive,
+        costPerSqft: fee.costPerSqft
+      }))
     });
     
     setSpace({
       name: '',
       buildingTypeId: '',
-      floorArea: '',
+      buildingType: '',
+      floorArea: 0,
       description: '',
       spaceType: '',
       discipline: '',
       hvacSystem: '',
-      fees: []
+      fees: [],
+      splitFees: false
     });
     setSelectedBuildingType(null);
     setDisciplineFees([
-      { discipline: 'Mechanical', isActive: true, costPerSqft: 0, totalFee: 0 },
-      { discipline: 'Plumbing', isActive: true, costPerSqft: 0, totalFee: 0 },
-      { discipline: 'Electrical', isActive: true, costPerSqft: 0, totalFee: 0 }
+      { id: crypto.randomUUID(), discipline: 'Mechanical', isActive: true, costPerSqft: 0, totalFee: 0 },
+      { id: crypto.randomUUID(), discipline: 'Plumbing', isActive: true, costPerSqft: 0, totalFee: 0 },
+      { id: crypto.randomUUID(), discipline: 'Electrical', isActive: true, costPerSqft: 0, totalFee: 0 }
     ]);
     onOpenChange(false);
   };
@@ -317,9 +386,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Add Space</DialogTitle>
+          <DialogTitle>{initialSpace ? 'Update Space' : 'Add Space'}</DialogTitle>
           <DialogDescription>
-            Select a building type and enter the space details.
+            {initialSpace ? 'Update the space details.' : 'Select a building type and enter the space details.'}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -373,13 +442,15 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
                               setSpace(prev => ({
                                 ...prev,
                                 buildingTypeId: type.id,
+                                buildingType: type.name || '',
                                 name: type.name || '',
                                 description: type.description || '',
                                 spaceType: type.space_type || '',
                                 discipline: type.discipline || '',
                                 hvacSystem: type.hvac_system || '',
                                 fees: disciplineFees,
-                                floorArea: (type.default_area?.toString()) || ''
+                                floorArea: prev.floorArea || (type.default_area || 0),
+                                splitFees: prev.splitFees
                               }));
                             }}
                             className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
@@ -420,7 +491,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
             <Label htmlFor="floorArea">Floor Area (sq ft)</Label>
             <Input
               id="floorArea"
-            value={space.floorArea}
+              value={space.floorArea.toString()}
               onChange={handleFloorAreaChange}
               onFocus={(e) => console.log('Input focused, current value:', e.target.value)}
               onBlur={(e) => console.log('Input blurred, final value:', e.target.value)}
@@ -436,7 +507,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
             <Label>Construction Cost by Discipline</Label>
             <div className="space-y-4">
               {disciplineFees.map((fee, index) => (
-                <div key={fee.discipline} className="rounded-lg border p-4">
+                <div key={fee.id} className="rounded-lg border p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-medium">{fee.discipline}</div>
                     <Switch
@@ -478,7 +549,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues }: Space
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={!selectedBuildingType}>
-            Add Space
+            {initialSpace ? 'Update Space' : 'Add Space'}
           </Button>
         </DialogFooter>
       </DialogContent>

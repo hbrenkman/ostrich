@@ -12,6 +12,10 @@ export function createSupabaseClient() {
     auth: {
       autoRefreshToken: false,
       persistSession: false
-    }
+    },
+    global: {
+      headers: { 'x-application-name': 'ostrich' },
+    },
+    debug: false
   });
 }

@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 const GEOCODIO_API_KEY = process.env.NEXT_PUBLIC_GEOCODIO_API_KEY;
 const GEOCODIO_BASE_URL = 'https://api.geocod.io/v1.7/geocode';
 
@@ -43,6 +45,7 @@ interface AddressObject {
   city: string;
   state: string;
   zip: string;
+  cost_index?: number | null;
 }
 
 // Debounce function to limit API calls
@@ -120,6 +123,7 @@ function formatAddressForApi(address: string): string {
 
 export async function verifyAddress(address: string | AddressObject): Promise<AddressObject | null> {
   try {
+    console.log('verifyAddress called with:', address);
     let addressString: string;
     
     if (typeof address === 'string') {
@@ -133,6 +137,8 @@ export async function verifyAddress(address: string | AddressObject): Promise<Ad
       ].filter(Boolean).join(', ');
     }
 
+    console.log('Formatted address string:', addressString);
+
     // Make API call to Geocodio
     const response = await fetch(`https://api.geocod.io/v1.7/geocode?q=${encodeURIComponent(addressString)}&api_key=${process.env.NEXT_PUBLIC_GEOCODIO_API_KEY}`);
     
@@ -142,23 +148,87 @@ export async function verifyAddress(address: string | AddressObject): Promise<Ad
     }
 
     const data = await response.json();
+    console.log('Geocodio API response:', data);
     
     if (!data.results || data.results.length === 0) {
+      console.log('No results from Geocodio API');
       return null;
     }
 
     const result = data.results[0];
     const components = result.address_components;
+    console.log('Address components:', components);
 
-    return {
+    // Get the verified address
+    const verifiedAddress = {
       address_line1: components.number + ' ' + components.street,
       address_line2: components.secondary_unit || null,
       city: components.city,
       state: components.state,
       zip: components.zip
     };
+    console.log('Verified address:', verifiedAddress);
+
+    // Look up the cost index for this location
+    console.log('Looking up cost index for:', { city: components.city, state: components.state });
+    const { data: costIndexData, error: costIndexError } = await supabase
+      .from('construction_index')
+      .select(`
+        index_value,
+        metro_area:metro_areas (
+          name,
+          state:states (
+            name
+          )
+        )
+      `)
+      .eq('metro_area.state.name', components.state)
+      .eq('metro_area.name', components.city)
+      .single();
+
+    console.log('Cost index lookup result:', { data: costIndexData, error: costIndexError });
+
+    if (costIndexError) {
+      console.log('Error looking up cost index, trying "Other" metro area');
+      // Try to find the "Other" metro area for this state
+      const { data: otherCostIndexData, error: otherCostIndexError } = await supabase
+        .from('construction_index')
+        .select(`
+          index_value,
+          metro_area:metro_areas (
+            name,
+            state:states (
+              name
+            )
+          )
+        `)
+        .eq('metro_area.state.name', components.state)
+        .eq('metro_area.name', 'Other')
+        .single();
+
+      console.log('"Other" metro area lookup result:', { data: otherCostIndexData, error: otherCostIndexError });
+
+      if (otherCostIndexError) {
+        console.error('Error looking up "Other" cost index:', otherCostIndexError);
+        return verifiedAddress;
+      }
+
+      const otherResult = {
+        ...verifiedAddress,
+        cost_index: otherCostIndexData.index_value
+      };
+      console.log('Returning address with "Other" cost index:', otherResult);
+      return otherResult;
+    }
+
+    const finalResult = {
+      ...verifiedAddress,
+      cost_index: costIndexData.index_value
+    };
+    console.log('Returning address with cost index:', finalResult);
+    return finalResult;
   } catch (error) {
-    console.error('Error verifying address:', error);
+    console.error('Error in verifyAddress:', error);
     return null;
   }
 } 
