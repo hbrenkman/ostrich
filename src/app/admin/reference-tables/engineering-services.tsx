@@ -686,8 +686,8 @@ export function EngineeringServicesTable() {
       <div className="grid grid-cols-2 gap-6 h-[calc(100vh-100px)]">
         {/* Standard Services Panel */}
         <div className="overflow-auto">
-          <Card className="flex flex-col h-full">
-            <CardHeader className="flex-none space-y-4 sticky top-0 bg-[#FFFFFF] border-b z-20 shadow-sm">
+          <Card className="flex flex-col h-full border-border">
+            <CardHeader className="flex-none space-y-4 sticky top-0 bg-pure-white border-b z-20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CardTitle>Standard Services</CardTitle>
@@ -738,111 +738,114 @@ export function EngineeringServicesTable() {
                 )}
               </div>
             </CardHeader>
-            <CardContent>
-              {Object.entries(groupedStandardServices).map(([discipline, services]) => (
-                <div key={discipline} className="mb-6 last:mb-0">
-                  <h3 className="text-sm font-semibold mb-2 text-muted-foreground sticky top-0 bg-background py-1 z-10">
-                    {discipline}
-                  </h3>
-                  <div className="space-y-2">
-                    {services.map(service => {
-                      const linkedServices = getLinkedServices(service.id);
-                      return (
-                        <div
-                          key={service.id}
-                          className={`p-3 rounded-lg border transition-colors ${
-                            hoveredStandardService === service.id
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border'
-                          }`}
-                          onDragOver={(e) => handleDragOver(e, service.id)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, service.id)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="font-medium">{service.service_name}</h4>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {service.description}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-primary"
-                                onClick={() => handleEditStandardService(service)}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleDeleteStandardService(service.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger>
-                                    <Badge variant={service.default_setting ? "default" : "secondary"}>
-                                      {service.phase || 'No phase'}
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Phase: {service.phase || 'Not set'}</p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                      {service.default_setting 
-                                        ? "This service is included by default in projects"
-                                        : "This service is not included by default"}
-                                    </p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </div>
-                          </div>
-                          {linkedServices.length > 0 && (
-                            <div className="mt-2 space-y-1">
-                              <Separator className="my-2" />
-                              <div className="text-sm text-muted-foreground">
-                                Linked Services:
+            <CardContent className="flex-1 overflow-auto">
+              <div className="space-y-6">
+                {Object.entries(groupedStandardServices).map(([discipline, services]) => (
+                  <div key={discipline} className="mb-6 last:mb-0">
+                    <h3 className="text-sm font-semibold mb-2 text-muted-foreground bg-background py-1">
+                      {discipline}
+                    </h3>
+                    <div className="space-y-2">
+                      {services.map(service => {
+                        const linkedServices = getLinkedServices(service.id);
+                        return (
+                          <div
+                            key={service.id}
+                            className={`p-3 rounded-lg border transition-colors flex flex-col ${
+                              hoveredStandardService === service.id
+                                ? 'border-primary bg-primary/5'
+                                : 'border-border'
+                            }`}
+                            onDragOver={(e) => handleDragOver(e, service.id)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, service.id)}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <h4 className="font-medium">{service.service_name}</h4>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {service.description}
+                                </p>
                               </div>
-                              {linkedServices.map(linkedService => (
-                                <div
-                                  key={linkedService.id}
-                                  className="flex items-center justify-between p-2 bg-muted/5 rounded-md"
+                              <div className="flex items-center gap-2 ml-4">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                  onClick={() => handleEditStandardService(service)}
                                 >
-                                  <span className="text-sm">{linkedService.name}</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDeleteLink(
-                                      serviceLinks.find(
-                                        link => link.engineering_service_id === service.id && 
-                                               link.additional_item_id === linkedService.id
-                                      )?.id || ''
-                                    )}
-                                  >
-                                    <Unlink className="w-4 h-4 text-destructive" />
-                                  </Button>
-                                </div>
-                              ))}
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => handleDeleteStandardService(service.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger>
+                                      <Badge variant={service.default_setting ? "default" : "secondary"}>
+                                        {service.phase || 'No phase'}
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Phase: {service.phase || 'Not set'}</p>
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        {service.default_setting 
+                                          ? "Blue badge indicates this service is included by default in projects"
+                                          : "Gray badge indicates this service is not included by default"}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                            {linkedServices.length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-border">
+                                <div className="text-sm text-muted-foreground mb-2">
+                                  Linked Services:
+                                </div>
+                                <div className="space-y-1">
+                                  {linkedServices.map(linkedService => (
+                                    <div
+                                      key={linkedService.id}
+                                      className="flex items-center justify-between p-2 bg-muted/5 rounded-md"
+                                    >
+                                      <span className="text-sm">{linkedService.name}</span>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleDeleteLink(
+                                          serviceLinks.find(
+                                            link => link.engineering_service_id === service.id && 
+                                                   link.additional_item_id === linkedService.id
+                                          )?.id || ''
+                                        )}
+                                      >
+                                        <Unlink className="w-4 h-4 text-destructive" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {Object.keys(groupedStandardServices).length === 0 && (
-                <div className="text-center py-4 text-muted-foreground">
-                  {searchQuery 
-                    ? "No services found matching your search."
-                    : "No standard services found for the selected discipline."}
-                </div>
-              )}
+                ))}
+                {Object.keys(groupedStandardServices).length === 0 && (
+                  <div className="text-center py-4 text-muted-foreground">
+                    {searchQuery 
+                      ? "No services found matching your search."
+                      : "No standard services found for the selected discipline."}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -850,7 +853,7 @@ export function EngineeringServicesTable() {
         {/* Additional Services Panel */}
         <div className="overflow-auto">
           <Card className="flex flex-col h-full">
-            <CardHeader className="flex-none space-y-4 sticky top-0 bg-[#FFFFFF] border-b z-20 shadow-sm">
+            <CardHeader className="flex-none space-y-4 sticky top-0 bg-pure-white border-b z-20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CardTitle>Additional Services</CardTitle>
@@ -913,7 +916,7 @@ export function EngineeringServicesTable() {
                     key={service.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, service)}
-                    className="p-3 rounded-lg border mb-2 last:mb-0 cursor-move hover:bg-muted/5 transition-colors"
+                    className="p-3 rounded-lg border border-border mb-2 last:mb-0 cursor-move hover:bg-muted/5 transition-colors"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
@@ -933,8 +936,8 @@ export function EngineeringServicesTable() {
                                     <p>Phase: {service.phase}</p>
                                     <p className="text-xs text-muted-foreground mt-1">
                                       {service.is_active 
-                                        ? "This service is currently active and available for selection"
-                                        : "This service is currently inactive and not available for selection"}
+                                        ? "Blue badge indicates this service is currently active and available for selection"
+                                        : "Gray badge indicates this service is currently inactive and not available for selection"}
                                     </p>
                                   </TooltipContent>
                                 </Tooltip>
