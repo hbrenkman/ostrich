@@ -711,6 +711,15 @@ export default function ProjectDetail() {
     router.push(`/projects/${projectUUID}/proposals/new`);
   };
 
+  const handleAddDemoProposal = async () => {
+    if (!projectUUID) {
+      toast.error('Project not found');
+      return;
+    }
+
+    router.push(`/projects/${projectUUID}/proposals/new-demo`);
+  };
+
   const formatCurrency = (amount: number | null) => {
     if (amount === null) return '$0.00';
     return new Intl.NumberFormat('en-US', {
@@ -1436,14 +1445,24 @@ export default function ProjectDetail() {
           <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#D1D5DB] dark:border-[#4DB6AC]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E5E7EB]">Fee Proposals</h2>
-              <button
-                type="button"
-                onClick={handleAddProposal}
-                className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                Add Proposal
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddDemoProposal}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Demo Proposal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddProposal}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Proposal
+                </button>
+              </div>
             </div>
 
             {loadingProposals ? (

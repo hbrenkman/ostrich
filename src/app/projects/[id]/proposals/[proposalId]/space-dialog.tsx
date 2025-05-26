@@ -459,24 +459,16 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
   // Update the handleFloorAreaChange function
   const handleFloorAreaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('handleFloorAreaChange - raw input value:', e.target.value);
     const value = e.target.value;
-    const formattedValue = formatFloorArea(value);
-    console.log('handleFloorAreaChange - formatted value:', formattedValue);
+    const numericValue = parseFloat(value) || 0;
     
-    // Log the current state before update
-    console.log('Current space state before update:', space);
+    setSpace(prev => ({
+      ...prev,
+      floorArea: numericValue
+    }));
     
-    const numericValue = parseFloat(formattedValue) || 0;
-    setSpace(prev => {
-      const newState = { ...prev, floorArea: numericValue };
-      console.log('New space state:', newState);
-      return newState;
-    });
-    
-    // Update fees if we have a valid number
+    // Update fees if we have a valid number and building type
     if (selectedBuildingType && numericValue > 0) {
-      console.log('Calculating fees for floor area:', numericValue);
       calculateDisciplineFees(selectedBuildingType.id, numericValue);
     }
   };
@@ -486,10 +478,33 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     console.log('space.floorArea changed:', space.floorArea);
   }, [space.floorArea]);
 
-  // Update the handleSave function to handle null checks
+  // Update the handleSave function to include floor area validation
   const handleSave = () => {
-    if (!selectedBuildingType || !selectedConstructionType) {
+    if (!selectedBuildingType || !selectedConstructionType || space.floorArea <= 0) {
       return;
+    }
+
+    // Get active disciplines from fees
+    const activeDisciplines = disciplineFees
+      .filter(fee => fee.isActive)
+      .map(fee => fee.discipline);
+
+    // Set the space discipline based on active disciplines
+    let primaryDiscipline = '';
+    if (activeDisciplines.length === 0) {
+      // If no active disciplines, use building type discipline
+      primaryDiscipline = selectedBuildingType.discipline || '';
+    } else if (activeDisciplines.length === 1) {
+      // If only one discipline is active, use that
+      primaryDiscipline = activeDisciplines[0];
+    } else if (activeDisciplines.includes('Mechanical') && 
+               activeDisciplines.includes('Electrical') && 
+               activeDisciplines.includes('Plumbing')) {
+      // If all three disciplines are active, use MEP
+      primaryDiscipline = 'MEP';
+    } else {
+      // For any other combination, use the first active discipline
+      primaryDiscipline = activeDisciplines[0];
     }
 
     const spaceToSave = {
@@ -497,8 +512,16 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       buildingType: selectedBuildingType.name,
       buildingTypeId: selectedBuildingType.id,
       projectConstructionType: selectedConstructionType.project_type,
-      projectConstructionTypeId: selectedConstructionType.id
+      projectConstructionTypeId: selectedConstructionType.id,
+      discipline: primaryDiscipline,
+      fees: disciplineFees  // Ensure we're using the latest discipline fees
     };
+
+    console.log('Saving space with disciplines:', {
+      activeDisciplines,
+      primaryDiscipline,
+      fees: disciplineFees
+    });
 
     onSave(spaceToSave);
     onOpenChange(false);
@@ -506,21 +529,35 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
   // Update the discipline fee toggle handler
   const handleDisciplineFeeToggle = (discipline: string, isActive: boolean) => {
-    // Update discipline fees state
-    const updatedFees = disciplineFees.map(fee => 
-      fee.discipline === discipline ? { ...fee, isActive } : fee
-    );
-    setDisciplineFees(updatedFees);
+    try {
+      // Update discipline fees state
+      const updatedFees = disciplineFees.map(fee => 
+        fee.discipline === discipline ? { ...fee, isActive } : fee
+      );
+      setDisciplineFees(updatedFees);
 
-    // Update space state to keep fees in sync
-    setSpace(prev => ({
-      ...prev,
-      fees: updatedFees
-    }));
+      // Update space state to keep fees in sync
+      setSpace(prev => ({
+        ...prev,
+        fees: updatedFees
+      }));
 
-    // Call the parent component's toggle handler if we have a structure ID
-    if (initialSpace?.id) {
-      onDisciplineFeeToggle(initialSpace.id, discipline, isActive);
+      // Call the parent component's toggle handler if we have a structure ID
+      if (initialSpace?.id) {
+        try {
+          onDisciplineFeeToggle(initialSpace.id, discipline, isActive);
+        } catch (error) {
+          console.error('Error calling parent toggle handler:', error);
+          // Revert the local state if the parent handler fails
+          setDisciplineFees(disciplineFees);
+          setSpace(prev => ({
+            ...prev,
+            fees: disciplineFees
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling discipline fee in dialog:', error);
     }
   };
 
@@ -705,7 +742,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
             <Input
               id="floorArea"
               type="number"
-              value={space.floorArea.toString()}
+              min="0"
+              step="1"
+              value={space.floorArea}
               onChange={handleFloorAreaChange}
               className="w-full"
             />
@@ -731,7 +770,15 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                     <div className="font-medium">{fee.discipline}</div>
                     <button
                       type="button"
-                      onClick={() => handleDisciplineFeeToggle(fee.discipline, !fee.isActive)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        try {
+                          handleDisciplineFeeToggle(fee.discipline, !fee.isActive);
+                        } catch (error) {
+                          console.error('Error toggling discipline:', error);
+                        }
+                      }}
                       className={`p-1.5 rounded-md transition-colors ${
                         fee.isActive
                           ? 'bg-primary/10 text-primary hover:bg-primary/20' 
@@ -782,7 +829,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           </Button>
           <Button 
             onClick={handleSave} 
-            disabled={!selectedBuildingType || !selectedConstructionType}
+            disabled={!selectedBuildingType || !selectedConstructionType || space.floorArea <= 0}
           >
             {initialSpace ? 'Update Space' : 'Add Space'}
           </Button>

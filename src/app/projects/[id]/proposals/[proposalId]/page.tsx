@@ -17,6 +17,12 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { StructureDialog } from './structure-dialog';
 import { SpaceDialog } from './space-dialog';
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 interface Contact {
   id: string;
@@ -127,8 +133,10 @@ interface FeeItem {
   isActive: boolean;
   discipline?: string;
   parentDiscipline?: string;
-  type: 'rescheck' | 'nested' | 'multi' | 'discipline';
+  type: 'rescheck' | 'nested' | 'multi' | 'discipline' | 'additional_service';
   phase: 'design' | 'construction';  // Add phase field
+  service_name?: string;  // Optional for additional_service type
+  estimated_fee?: string | null;  // Optional for additional_service type
 }
 
 interface ProposalFormData {
@@ -194,6 +202,7 @@ interface ManualFeeOverride {
   discipline: string;
   designFee?: number;
   constructionSupportFee?: number;
+  spaceId?: string;
 }
 
 interface EngineeringStandardService {
@@ -313,6 +322,41 @@ const contacts: Contact[] = [
   },
 ];
 
+// Add interface for service links
+interface EngineeringServiceLink {
+  id: string;
+  engineering_service_id: string;
+  additional_item_id: string;
+  link_type: 'engineering_service' | 'fee_additional_item';
+  created_at: string;
+  updated_at: string;
+}
+
+// Add function to fetch service links
+const fetchServiceLinks = async (standardServiceIds: string[]): Promise<EngineeringServiceLink[]> => {
+  try {
+    const response = await fetch('/api/engineering-service-links', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ standardServiceIds }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error('Error fetching service links:', errorData?.error || 'Failed to fetch service links');
+      throw new Error(errorData?.error || 'Failed to fetch service links');
+    }
+    
+    const data = await response.json();
+    return data.links || [];
+  } catch (error) {
+    console.error('Error fetching service links:', error);
+    return [];
+  }
+};
+
 export default function EditProposalPage() {
   const router = useRouter();
   const params = useParams();
@@ -336,17 +380,16 @@ export default function EditProposalPage() {
   const [editingStructureId, setEditingStructureId] = useState<string | null>(null);
   const [editingStructureName, setEditingStructureName] = useState('');
   const [designFeeScale, setDesignFeeScale] = useState<DesignFeeScale[]>([]);
-  const [EngineeringAdditionalServices, setEngineeringAdditionalServices] = useState<EngineeringAdditionalServices[]>([]);
+  const [engineeringAdditionalServices, setEngineeringAdditionalServices] = useState<EngineeringAdditionalServices[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [dragData, setDragData] = useState<any>(null);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [duplicateStructureRates, setDuplicateStructureRates] = useState<FeeDuplicateStructure[]>([]);
-  // Add collapsed state to the component's state
   const [collapsedDuplicates, setCollapsedDuplicates] = useState<Set<string>>(new Set());
-  // Add new state for manual fee overrides
   const [manualFeeOverrides, setManualFeeOverrides] = useState<ManualFeeOverride[]>([]);
   const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringStandardService[]>([]);
   const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(true);
+  const [isLoadingAdditionalServices, setIsLoadingAdditionalServices] = useState(true);
 
   const [proposal, setProposal] = useState<ProposalFormData>({
     number: proposalId === 'new' ? '' : proposalId,
@@ -383,8 +426,8 @@ export default function EditProposalPage() {
           throw new Error(`Failed to fetch project: ${response.statusText}`);
         }
         const data = await response.json();
-        console.log('API Response data:', data);
-        console.log('API Response costIndex:', data.costIndex);
+        // console.log('API Response data:', data);
+        // console.log('API Response costIndex:', data.costIndex);
         setProject(data);
         setProposal(prev => {
           const updatedProposal = {
@@ -394,7 +437,7 @@ export default function EditProposalPage() {
             company: data.company,
             costIndex: data.costIndex,
           };
-          console.log('Updated proposal state:', updatedProposal);
+          // console.log('Updated proposal state:', updatedProposal);
           return updatedProposal;
         });
         setIsLoading(false);
@@ -430,21 +473,21 @@ export default function EditProposalPage() {
   }, [id, proposalId]);
 
   useEffect(() => {
-    console.log('Project cost index:', project?.costIndex);
-    console.log('Proposal cost index:', proposal.costIndex);
+    // console.log('Project cost index:', project?.costIndex);
+    // console.log('Proposal cost index:', proposal.costIndex);
   }, [project?.costIndex, proposal.costIndex]);
 
   useEffect(() => {
     const fetchDesignFeeScale = async () => {
       try {
-        console.log('Fetching design fee scale from frontend...');
+        // console.log('Fetching design fee scale from frontend...');
         const response = await fetch('/api/design-fee-scale');
         if (!response.ok) {
           console.error('Failed to fetch design fee scale:', response.status, response.statusText);
           throw new Error('Failed to fetch design fee scale');
         }
         const data = await response.json();
-        console.log('Received design fee scale data:', data);
+        // console.log('Received design fee scale data:', data);
         if (!data || data.length === 0) {
           console.warn('No design fee scale data received from API');
         }
@@ -457,51 +500,73 @@ export default function EditProposalPage() {
     fetchDesignFeeScale();
   }, []);
 
-  useEffect(() => {
-    const fetchEngineeringAdditionalServices = async () => {
-      console.log('Fetching additional items...');
-      try {
-        const response = await fetch('/api/fee-additional-items');
-        console.log('Response status:', response.status);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch additional items: ${response.statusText}`);
+  // Remove or consolidate these logs in fetchEngineeringAdditionalServices
+  const fetchEngineeringAdditionalServices = async () => {
+    try {
+      setIsLoadingAdditionalServices(true);
+      console.log('Fetching engineering additional services...');
+      const response = await fetch('/api/fee-additional-items', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
         }
-        const data = await response.json();
-        console.log('Raw data from API:', data);
-        console.log('Number of items before normalization:', data.length);
-        console.log('All item phases before normalization:', data.map((item: EngineeringAdditionalServices) => item.phase));
-        
-        // Convert phase values to lowercase before setting state
-        const normalizedData = data.map((item: EngineeringAdditionalServices) => ({
-          ...item,
-          phase: item.phase.toLowerCase() as 'design' | 'construction'
-        }));
-        
-        console.log('Number of items after normalization:', normalizedData.length);
-        console.log('Normalized phases:', normalizedData.map((item: EngineeringAdditionalServices) => item.phase));
-        console.log('Design phase items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.phase === 'design'));
-        console.log('Construction phase items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.phase === 'construction'));
-        console.log('Active items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.is_active));
-        console.log('Inactive items:', normalizedData.filter((item: EngineeringAdditionalServices) => !item.is_active));
-        
-        setEngineeringAdditionalServices(normalizedData);
-        setIsLoadingItems(false);
-      } catch (error) {
-        console.error('Error fetching additional items:', error);
-        setIsLoadingItems(false);
-      }
-    };
+      });
 
-    fetchEngineeringAdditionalServices();
-  }, []);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        console.error('Error fetching additional services:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        });
+        throw new Error(errorData?.error || `Failed to fetch additional services: ${response.status} ${response.statusText}`);
+      }
+      
+      const rawData = await response.json();
+      console.log('Raw additional services data:', rawData);
+      
+      const normalizedItems = rawData.map((item: any) => ({
+        ...item,
+        phase: item.phase || 'design',
+        is_active: item.is_active ?? true
+      }));
+
+      console.log('Normalized additional services:', normalizedItems);
+      setEngineeringAdditionalServices(normalizedItems);
+    } catch (error) {
+      console.error('Error in fetchEngineeringAdditionalServices:', error);
+      setEngineeringAdditionalServices([]); // Reset to empty array on error
+    } finally {
+      setIsLoadingAdditionalServices(false);
+    }
+  };
+
+  // Remove redundant state logging in useEffect
+  useEffect(() => {
+    if (engineeringAdditionalServices.length > 0) {
+      // Only log state changes when items are actually added/removed
+      const designCount = engineeringAdditionalServices.filter(item => item.phase === 'design').length;
+      const constructionCount = engineeringAdditionalServices.filter(item => item.phase === 'construction').length;
+      const activeCount = engineeringAdditionalServices.filter(item => item.is_active).length;
+      const inactiveCount = engineeringAdditionalServices.filter(item => !item.is_active).length;
+
+      console.log('Engineering Additional Services updated:', {
+        total: engineeringAdditionalServices.length,
+        design: designCount,
+        construction: constructionCount,
+        active: activeCount,
+        inactive: inactiveCount
+      });
+    }
+  }, [engineeringAdditionalServices]);
 
   // Add a debug log when rendering the items
-  console.log('Current EngineeringAdditionalServices state:', EngineeringAdditionalServices);
-  console.log('Total items count:', EngineeringAdditionalServices.length);
-  console.log('Design phase items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'design').length);
-  console.log('Construction phase items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'construction').length);
-  console.log('Active items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.is_active).length);
-  console.log('Inactive items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => !item.is_active).length);
+  // console.log('Current EngineeringAdditionalServices state:', engineeringAdditionalServices);
+  // console.log('Total items count:', engineeringAdditionalServices.length);
+  // console.log('Design phase items count:', engineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'design').length);
+  // console.log('Construction phase items count:', engineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'construction').length);
+  // console.log('Active items count:', engineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.is_active).length);
+  // console.log('Inactive items count:', engineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => !item.is_active).length);
 
   // Add logging to track feeItems state
   useEffect(() => {
@@ -527,8 +592,8 @@ export default function EditProposalPage() {
   useEffect(() => {
     const fetchDuplicateStructureRates = async () => {
       try {
-        console.log('=== Fetching duplicate structure rates ===');
-        console.log('Making API request to /api/fee-duplicate-structures...');
+        // console.log('=== Fetching duplicate structure rates ===');
+        // console.log('Making API request to /api/fee-duplicate-structures...');
         
         const response = await fetch('/api/fee-duplicate-structures');
         console.log('API Response:', {
@@ -811,145 +876,213 @@ export default function EditProposalPage() {
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleAddSpace = (space: Omit<Space, 'id'>) => {
-    console.log('=== Adding/Editing Space ===');
-    console.log('Selected Structure ID:', selectedStructureId);
-    console.log('Selected Level ID:', selectedLevelId);
-    console.log('Editing Space:', editingSpace);
-    
+  const processLinkedServices = async (structureId: string, levelId: string, disciplines: string[]) => {
+    console.log('=== Processing Linked Services ===');
+    console.log('Structure ID:', structureId);
+    console.log('Level ID:', levelId);
+    console.log('Disciplines:', disciplines);
+
+    // Get standard services for these disciplines
+    const standardServices = engineeringStandardServices.filter(service => 
+      disciplines.includes(service.discipline)
+    );
+
+    console.log('Found standard services:', standardServices.length);
+
+    // Process each standard service
+    for (const service of standardServices) {
+      const serviceLinks = await fetchServiceLinks([service.id]);
+      console.log(`Processing service: ${service.service_name} with ${serviceLinks.length} links`);
+
+      for (const link of serviceLinks) {
+        const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
+        if (additionalService) {
+          console.log(`Creating fee item for: ${additionalService.name}`);
+          // Create a mock drag event for the additional service
+          const dragData = {
+            type: 'additional_service',
+            item: additionalService,
+            source: 'engineering_services'
+          };
+
+          // Add the fee item directly
+          await handleFeeTableDrop(
+            {} as DragEvent<HTMLDivElement>,
+            structureId,
+            levelId,
+            '',  // No space ID needed
+            service.discipline,
+            additionalService.phase || 'design',
+            dragData
+          );
+        }
+      }
+    }
+  };
+
+  // Remove redundant logging in handleAddSpace
+  const handleAddSpace = async (space: Omit<Space, 'id'>) => {
     if (!selectedStructureId || !selectedLevelId) {
-      console.log('Missing structure or level ID');
+      console.error('No structure or level selected');
       return;
     }
 
-    // Find the parent structure and its level
-    const parentStructure = proposal.structures.find(s => s.id === selectedStructureId);
-    if (!parentStructure) {
-      console.log('Parent structure not found:', selectedStructureId);
-      return;
-    }
-
-    const parentLevel = parentStructure.levels.find(l => l.id === selectedLevelId);
-    if (!parentLevel) {
-      console.log('Parent level not found:', selectedLevelId);
-      return;
-    }
-
-    // If we're editing an existing space
+    // If we're editing an existing space, update it instead of creating a new one
     if (editingSpace) {
-      console.log('Updating existing space:', editingSpace.id);
-      console.log('New space data:', {
-        ...space,
-        fees: space.fees,
-        engineeringServices: space.engineeringServices
-      });
-      
       setProposal(prev => ({
         ...prev,
         structures: prev.structures.map(structure => {
           if (structure.id === selectedStructureId) {
             return {
               ...structure,
-              levels: structure.levels.map(level =>
-                level.id === selectedLevelId
-                  ? {
-                      ...level,
-                      spaces: level.spaces.map(sp =>
-                        sp.id === editingSpace.id
-                          ? { 
-                              ...space, 
-                              id: sp.id, 
-                              splitFees: sp.splitFees,
-                              engineeringServices: space.engineeringServices || []
-                            }
-                          : sp
-                      )
-                    }
-                  : level
-              )
-            };
-          }
-          if (structure.parentId === selectedStructureId) {
-            return {
-              ...structure,
-              levels: structure.levels.map(level =>
-                level.name === parentLevel.name
-                  ? {
-                      ...level,
-                      spaces: level.spaces.map(sp =>
-                        sp.name === editingSpace.name
-                          ? { 
-                              ...space, 
-                              id: sp.id, 
-                              splitFees: sp.splitFees,
-                              engineeringServices: space.engineeringServices || []
-                            }
-                          : sp
-                      )
-                    }
-                  : level
-              )
+              levels: structure.levels.map(level => {
+                if (level.id === selectedLevelId) {
+                  return {
+                    ...level,
+                    spaces: level.spaces.map(sp => {
+                      if (sp.id === editingSpace.id) {
+                        return {
+                          ...space,
+                          id: sp.id, // Keep the original ID
+                          fees: space.fees.map(fee => ({
+                            ...fee,
+                            id: fee.id || crypto.randomUUID() // Keep existing fee IDs or generate new ones
+                          }))
+                        };
+                      }
+                      return sp;
+                    })
+                  };
+                }
+                return level;
+              })
             };
           }
           return structure;
         })
       }));
-      setEditingSpace(null);
-    } else {
-      // Create a new space with a unique ID and default splitFees to false
-      const newSpaceId = crypto.randomUUID();
-      const newSpace = { 
-        ...space, 
-        id: newSpaceId, 
-        splitFees: false,
-        engineeringServices: space.engineeringServices || []
-      };
-      console.log('Created new space:', {
-        id: newSpaceId,
-        name: newSpace.name,
-        floorArea: newSpace.floorArea,
-        splitFees: newSpace.splitFees,
-        fees: newSpace.fees,
-        engineeringServices: newSpace.engineeringServices
-      });
 
-      setProposal(prev => ({
-        ...prev,
-        structures: prev.structures.map(structure => {
-          if (structure.id === selectedStructureId) {
-            return {
-              ...structure,
-              levels: structure.levels.map(level =>
-                level.id === selectedLevelId
-                  ? {
-                      ...level,
-                      spaces: [...(level.spaces || []), newSpace]
-                    }
-                  : level
-              )
-            };
+      // Process linked services for updated space
+      try {
+        const activeDisciplines = space.fees
+          .filter(fee => fee.isActive)
+          .map(fee => fee.discipline);
+
+        const standardServices = engineeringStandardServices.filter(service => 
+          activeDisciplines.includes(service.discipline)
+        );
+
+        for (const service of standardServices) {
+          const serviceLinks = await fetchServiceLinks([service.id]);
+          if (serviceLinks.length > 0) {
+            console.log(`Processing "${service.service_name}" with ${serviceLinks.length} linked services`);
           }
-          if (structure.parentId === selectedStructureId) {
-            const duplicateSpace = { 
-              ...newSpace, 
-              id: crypto.randomUUID(),
-              engineeringServices: [...(newSpace.engineeringServices || [])]
-            };
-            return {
-              ...structure,
-              levels: structure.levels.map((level, index) =>
-                index === structure.levels.findIndex(l => l.name === parentLevel.name)
-                  ? {
-                      ...level,
-                      spaces: [...(level.spaces || []), duplicateSpace]
-                    }
-                  : level
-              )
-            };
+
+          for (const link of serviceLinks) {
+            const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
+            if (additionalService) {
+              const dragData = {
+                type: 'additional_service',
+                item: additionalService,
+                source: 'engineering_services'
+              };
+
+              await handleFeeTableDrop(
+                {} as DragEvent<HTMLDivElement>,
+                selectedStructureId,
+                selectedLevelId,
+                editingSpace.id,
+                service.discipline,
+                additionalService.phase || 'design',
+                dragData
+              );
+            }
           }
-          return structure;
-        })
-      }));
+        }
+      } catch (error) {
+        console.error('Error processing linked services:', error);
+      } finally {
+        setIsSpaceDialogOpen(false);
+        setEditingSpace(null);
+      }
+      return;
+    }
+
+    // Create a new space with a unique ID (original code for adding new spaces)
+    const newSpace: Space = {
+      ...space,
+      id: crypto.randomUUID(),
+      fees: space.fees.map(fee => ({
+        ...fee,
+        id: crypto.randomUUID()
+      }))
+    };
+
+    // Get active disciplines before updating state
+    const activeDisciplines = space.fees
+      .filter(fee => fee.isActive)
+      .map(fee => fee.discipline);
+
+    // Update the proposal state
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.map(structure => {
+        if (structure.id === selectedStructureId) {
+          return {
+            ...structure,
+            levels: structure.levels.map(level => {
+              if (level.id === selectedLevelId) {
+                return {
+                  ...level,
+                  spaces: [...level.spaces, newSpace]
+                };
+              }
+              return level;
+            })
+          };
+        }
+        return structure;
+      })
+    }));
+
+    // Process linked services for new space
+    try {
+      const standardServices = engineeringStandardServices.filter(service => 
+        activeDisciplines.includes(service.discipline)
+      );
+
+      for (const service of standardServices) {
+        const serviceLinks = await fetchServiceLinks([service.id]);
+        if (serviceLinks.length > 0) {
+          console.log(`Processing "${service.service_name}" with ${serviceLinks.length} linked services`);
+        }
+
+        for (const link of serviceLinks) {
+          const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
+          if (additionalService) {
+            const dragData = {
+              type: 'additional_service',
+              item: additionalService,
+              source: 'engineering_services'
+            };
+
+            await handleFeeTableDrop(
+              {} as DragEvent<HTMLDivElement>,
+              selectedStructureId,
+              selectedLevelId,
+              newSpace.id,
+              service.discipline,
+              additionalService.phase || 'design',
+              dragData
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error processing linked services:', error);
+    } finally {
+      setIsSpaceDialogOpen(false);
+      setEditingSpace(null);
     }
   };
 
@@ -1010,8 +1143,8 @@ export default function EditProposalPage() {
   };
 
   const handleAddUpperLevel = (structureId: string) => {
-    console.log('=== Adding Upper Level ===');
-    console.log('Structure ID:', structureId);
+    // console.log('=== Adding Upper Level ===');
+    // console.log('Structure ID:', structureId);
     
     const parentStructure = proposal.structures.find(s => s.id === structureId);
     if (!parentStructure) {
@@ -1029,7 +1162,7 @@ export default function EditProposalPage() {
       const levelNum = parseInt(level.name.split(' ')[1]);
       return isNaN(levelNum) ? highest : Math.max(highest, levelNum);
     }, -1);
-    console.log('Current highest level:', highestLevel);
+    // console.log('Current highest level:', highestLevel);
 
     const newLevelName = `Level ${highestLevel + 1}`;
     const newLevelId = crypto.randomUUID();
@@ -1134,9 +1267,9 @@ export default function EditProposalPage() {
   };
 
   const handleDuplicateLevel = (structureId: string, levelId: string) => {
-    console.log('=== Duplicating Level ===');
-    console.log('Structure ID:', structureId);
-    console.log('Level ID:', levelId);
+    // console.log('=== Duplicating Level ===');
+    // console.log('Structure ID:', structureId);
+    // console.log('Level ID:', levelId);
     
     // Log current state of structures
     console.log('Current structures state:', proposal.structures.map(s => ({
@@ -1671,75 +1804,21 @@ export default function EditProposalPage() {
     discipline: string | number,
     structure: Structure
   ): { fee: number; rate: number } => {
-    // Convert discipline to string for logging and comparison
-    const disciplineStr = typeof discipline === 'number' ? 'total' : discipline;
-    console.log(`=== Calculating ${disciplineStr} Fee ===`);
-    console.log('Construction Cost:', constructionCost);
-    
-    if (!designFeeScale.length) {
-      console.log('No design fee scale available');
-      return { fee: 0, rate: 0 };
-    }
-
-    // Find the appropriate fee scale row
-    const scale = designFeeScale.find((row, index) => {
-      const nextRow = designFeeScale[index + 1];
-      return !nextRow || constructionCost <= nextRow.construction_cost;
-    });
-
-    if (!scale) {
-      console.log('No valid fee scale found');
-      return { fee: 0, rate: 0 };
-    }
-
-    // Get the duplicate rate for this structure
+    // Remove redundant logging
     const duplicateRate = getDuplicateRate(structure);
-    console.log('Duplicate Rate:', duplicateRate);
-
-    // If discipline is a number or 'total', use the prime consultant fee
-    if (typeof discipline === 'number' || discipline === 'total') {
-      const baseRate = scale.prime_consultant_fee;
-      const adjustedRate = baseRate * duplicateRate;
-      const fee = constructionCost * (adjustedRate / 100);
-      return { fee, rate: adjustedRate };
-    }
-
-    // Get the appropriate fraction based on discipline
-    let fractionRate: number;
-    const disciplineLower = discipline.toLowerCase();
-    switch (disciplineLower) {
-      case 'mechanical':
-        fractionRate = scale.fraction_of_prime_rate_mechanical;
-        break;
-      case 'plumbing':
-        fractionRate = scale.fraction_of_prime_rate_plumbing;
-        break;
-      case 'electrical':
-        fractionRate = scale.fraction_of_prime_rate_electrical;
-        break;
-      case 'structural':
-        fractionRate = scale.fraction_of_prime_rate_structural;
-        break;
-      default:
-        fractionRate = 1;
-    }
-
-    // Calculate the fee using the discipline's fraction of the prime consultant fee
-    const baseRate = scale.prime_consultant_fee;
-    const disciplineRate = baseRate * (fractionRate / 100);
-    const adjustedRate = disciplineRate * duplicateRate;
-    const disciplineFee = constructionCost * (adjustedRate / 100);
-
-    console.log('Fee Scale:', {
-      baseRate,
-      fractionRate,
-      disciplineRate,
-      duplicateRate,
-      adjustedRate,
-      disciplineFee
+    const feeScale = getFeeScale(constructionCost, discipline, duplicateRate);
+    
+    // Only log the final result
+    console.log(`${discipline} Fee Calculation:`, {
+      constructionCost,
+      rate: feeScale.adjustedRate,
+      fee: constructionCost * (feeScale.adjustedRate / 100)
     });
 
-    return { fee: disciplineFee, rate: adjustedRate };
+    return {
+      fee: constructionCost * (feeScale.adjustedRate / 100),
+      rate: feeScale.adjustedRate
+    };
   };
 
   const calculateTotalDesignFee = (structure: Structure): number => {
@@ -1859,77 +1938,212 @@ export default function EditProposalPage() {
     return 'multi';
   };
 
-  // Update the handleFeeTableDrop function to validate phase
-  const handleFeeTableDrop = (e: DragEvent<HTMLDivElement>, structureId: string, levelId: string, spaceId: string, discipline: string, phase: 'design' | 'construction') => {
-    e.preventDefault();
-    if (!dragData) {
-      console.log('No drag data available');
-      return;
+  // Add the getFeeScale function
+  const getFeeScale = (
+    constructionCost: number,
+    discipline: string | number,
+    duplicateRate: number
+  ) => {
+    if (!designFeeScale.length) {
+      return { adjustedRate: 0 };
     }
 
-    console.log('Drop data received:', dragData);
+    // Find the appropriate fee scale row
+    const scale = designFeeScale.find((row, index) => {
+      const nextRow = designFeeScale[index + 1];
+      return !nextRow || constructionCost <= nextRow.construction_cost;
+    });
+
+    if (!scale) {
+      return { adjustedRate: 0 };
+    }
+
+    // If discipline is a number or 'total', use the prime consultant fee
+    if (typeof discipline === 'number' || discipline === 'total') {
+      const baseRate = scale.prime_consultant_fee;
+      return { adjustedRate: baseRate * duplicateRate };
+    }
+
+    // Get the appropriate fraction based on discipline
+    let fractionRate: number;
+    const disciplineLower = discipline.toLowerCase();
+    switch (disciplineLower) {
+      case 'mechanical':
+        fractionRate = scale.fraction_of_prime_rate_mechanical;
+        break;
+      case 'plumbing':
+        fractionRate = scale.fraction_of_prime_rate_plumbing;
+        break;
+      case 'electrical':
+        fractionRate = scale.fraction_of_prime_rate_electrical;
+        break;
+      case 'structural':
+        fractionRate = scale.fraction_of_prime_rate_structural;
+        break;
+      default:
+        fractionRate = 1;
+    }
+
+    // Calculate the fee using the discipline's fraction of the prime consultant fee
+    const baseRate = scale.prime_consultant_fee;
+    const disciplineRate = baseRate * (fractionRate / 100);
+    return { adjustedRate: disciplineRate * duplicateRate };
+  };
+
+  const handleFeeTableDrop = (
+    e: DragEvent<HTMLDivElement>,
+    structureId: string,
+    levelId: string,
+    spaceId: string,
+    discipline: string,
+    phase: 'design' | 'construction',
+    dragDataOverride?: any
+  ) => {
+    // Parse drag data from event or use override
+    const parsedDragData = dragDataOverride || (e.dataTransfer?.getData('application/json') ? JSON.parse(e.dataTransfer.getData('application/json')) : null);
     
-    if (dragData.type !== 'additional_item') {
-      console.log('Not an additional item, ignoring drop');
+    if (!parsedDragData) {
+      console.error('Invalid drag data');
       return;
     }
 
-    const item = dragData.item as EngineeringAdditionalServices;
-    const itemPhase = dragData.phase as 'design' | 'construction';
-
-    console.log('Validating phase match:', {
-      itemName: item.name,
-      itemPhase,
-      targetPhase: phase,
-      matches: itemPhase === phase
-    });
-
-    // Validate that the item's phase matches the drop target phase
-    if (itemPhase !== phase) {
-      console.log('Phase mismatch - drop rejected:', {
-        itemPhase,
-        targetPhase: phase,
-        itemName: item.name
-      });
-      return; // Don't allow the drop if phases don't match
+    if (parsedDragData.type !== 'fee_item' && parsedDragData.type !== 'additional_service') {
+      console.error('Invalid drag data type:', parsedDragData.type);
+      return;
     }
 
-    console.log('Phase match confirmed, proceeding with drop:', {
-        name: item.name,
-        discipline: item.discipline,
-        targetDiscipline: discipline,
-      phase: phase,
-      itemPhase: itemPhase
-    });
+    if (parsedDragData.type === 'fee_item') {
+      const item = parsedDragData.item as FeeItem;
+      const itemPhase = parsedDragData.phase as 'design' | 'construction';
 
-    // Determine the item type based on the item name, target discipline, and item's discipline
-    const itemType = getItemType(item.name, discipline, item.discipline);
+      if (itemPhase !== phase) {
+        console.log('Phase mismatch:', { itemPhase, targetPhase: phase });
+        return;
+      }
+
+      const itemType = getItemType(item.name, discipline, item.discipline);
       console.log('Determined item type:', itemType);
 
-    // Create the new fee item with appropriate discipline handling and phase
       const newFeeItem: FeeItem = {
-      id: crypto.randomUUID(),
+        id: crypto.randomUUID(),
         name: item.name,
         description: item.description,
         default_min_value: item.default_min_value,
         isActive: true,
         type: itemType,
-        discipline: itemType === 'nested' ? discipline : 
-                  itemType === 'discipline' ? item.name : 
-                  item.discipline || undefined,
-      parentDiscipline: itemType === 'nested' ? discipline : undefined,
-      phase: itemPhase  // Include the phase from the dragged item
+        discipline: itemType === 'nested' ? discipline : itemType === 'discipline' ? item.name : item.discipline || discipline,
+        parentDiscipline: itemType === 'nested' ? discipline : undefined,
+        phase: itemPhase
       };
 
-      console.log('Creating new fee item:', newFeeItem);
+      // Update the proposal state with the new fee item
+      setProposal(prev => {
+        const updatedStructures = prev.structures.map(structure => {
+          if (structure.id === structureId) {
+            return {
+              ...structure,
+              levels: structure.levels.map(level => {
+                if (level.id === levelId) {
+                  return {
+                    ...level,
+                    spaces: level.spaces.map(space => {
+                      if (space.id === spaceId) {
+                        const updatedServices = [...(space.engineeringServices || [])];
+                        // Convert FeeItem to EngineeringService format
+                        const engineeringService = {
+                          id: newFeeItem.id,
+                          discipline: newFeeItem.discipline || '',
+                          service_name: newFeeItem.name,
+                          description: newFeeItem.description,
+                          estimated_fee: null,
+                          isActive: newFeeItem.isActive
+                        };
+                        updatedServices.push(engineeringService);
+                        return {
+                          ...space,
+                          engineeringServices: updatedServices
+                        };
+                      }
+                      return space;
+                    })
+                  };
+                }
+                return level;
+              })
+            };
+          }
+          return structure;
+        });
 
-      setProposal(prev => ({
-        ...prev,
-        feeItems: [...prev.feeItems, newFeeItem]
-      }));
+        return {
+          ...prev,
+          structures: updatedStructures
+        };
+      });
+    } else if (parsedDragData.type === 'additional_service') {
+      const item = parsedDragData.item as EngineeringAdditionalServices;
+      const itemPhase = item.phase || 'design';
 
-    // Clear the drag data after successful drop
-    setDragData(null);
+      if (itemPhase !== phase) {
+        console.log('Phase mismatch:', { itemPhase, targetPhase: phase });
+        return;
+      }
+
+      if (!item.discipline) {
+        console.error('Additional service missing discipline');
+        return;
+      }
+
+      console.log('Processing additional service:', {
+        name: item.name,
+        phase: itemPhase,
+        discipline: item.discipline
+      });
+
+      // Convert EngineeringAdditionalService to EngineeringService format
+      const engineeringService = {
+        id: crypto.randomUUID(),
+        discipline: item.discipline,
+        service_name: item.name,
+        description: item.description,
+        estimated_fee: null,
+        isActive: true
+      };
+
+      // Update the proposal state
+      setProposal(prev => {
+        const updatedStructures = prev.structures.map(structure => {
+          if (structure.id === structureId) {
+            return {
+              ...structure,
+              levels: structure.levels.map(level => {
+                if (level.id === levelId) {
+                  return {
+                    ...level,
+                    spaces: level.spaces.map(space => {
+                      if (space.id === spaceId) {
+                        return {
+                          ...space,
+                          engineeringServices: [...(space.engineeringServices || []), engineeringService]
+                        };
+                      }
+                      return space;
+                    })
+                  };
+                }
+                return level;
+              })
+            };
+          }
+          return structure;
+        });
+
+        return {
+          ...prev,
+          structures: updatedStructures
+        };
+      });
+    }
   };
 
   // Add a helper function to determine if a drop is allowed
@@ -2019,79 +2233,216 @@ export default function EditProposalPage() {
   };
 
   // Add helper function to get manual override
-  const getManualOverride = (structureId: string, discipline: string): ManualFeeOverride | undefined => {
-    return manualFeeOverrides.find(o => o.structureId === structureId && o.discipline === discipline);
+  const getManualOverride = (structureId: string, discipline: string, spaceId?: string): ManualFeeOverride | undefined => {
+    return manualFeeOverrides.find(o => 
+      o.structureId === structureId && 
+      o.discipline === discipline && 
+      (!spaceId || o.spaceId === spaceId)
+    );
   };
 
   // Add helper function to handle fee updates
-  const handleFeeUpdate = (structureId: string, discipline: string, type: 'design' | 'construction', value: number) => {
-    setManualFeeOverrides(prev => {
-      const existing = prev.find(o => o.structureId === structureId && o.discipline === discipline);
+  const handleFeeUpdate = (structureId: string, discipline: string, type: 'design' | 'construction', value: number | null, spaceId?: string) => {
+    // Only allow overrides for space-level fees
+    if (!spaceId) return;
+
+    // Treat empty/null values as 0 for calculations
+    const effectiveValue = value === null ? 0 : value;
+
+    // Update the manual override
+    setManualFeeOverrides((prev: ManualFeeOverride[]) => {
+      const existing = prev.find(o => 
+        o.structureId === structureId && 
+        o.discipline === discipline && 
+        o.spaceId === spaceId
+      );
       if (existing) {
         return prev.map(o => 
-          o.structureId === structureId && o.discipline === discipline
-            ? { ...o, [type === 'design' ? 'designFee' : 'constructionSupportFee']: value }
+          o.structureId === structureId && o.discipline === discipline && o.spaceId === spaceId
+            ? { ...o, [type === 'design' ? 'designFee' : 'constructionSupportFee']: effectiveValue }
             : o
         );
       }
       return [...prev, {
         structureId,
         discipline,
-        [type === 'design' ? 'designFee' : 'constructionSupportFee']: value
+        spaceId,
+        [type === 'design' ? 'designFee' : 'constructionSupportFee']: effectiveValue
       }];
+    });
+
+    // Update the proposal state with new space fee and recalculate discipline total
+    setProposal(prev => {
+      const structure = prev.structures.find(s => s.id === structureId);
+      if (!structure) return prev;
+
+      // First update the space's fee
+      const updatedStructures = prev.structures.map(s => {
+        if (s.id === structureId) {
+          return {
+            ...s,
+            levels: s.levels.map(l => ({
+              ...l,
+              spaces: l.spaces.map(sp => {
+                if (sp.id === spaceId) {
+                  return {
+                    ...sp,
+                    fees: sp.fees.map(f => {
+                      if (f.discipline === discipline) {
+                        return { ...f, totalFee: effectiveValue };
+                      }
+                      return f;
+                    })
+                  };
+                }
+                return sp;
+              })
+            }))
+          };
+        }
+        return s;
+      });
+
+      // Then calculate the discipline total by summing all active spaces
+      const updatedStructuresWithTotals = updatedStructures.map(s => {
+        if (s.id === structureId) {
+          // Get all spaces with this discipline
+          const spacesWithDiscipline = s.levels.flatMap(level => 
+            level.spaces.filter(space => 
+              space.fees.some(fee => fee.discipline === discipline && fee.isActive)
+            )
+          );
+
+          // Calculate total for this discipline by summing all active spaces
+          const disciplineTotal = spacesWithDiscipline.reduce((sum, space) => {
+            // Get the fee for this discipline in this space
+            const spaceFee = space.fees.find(f => f.discipline === discipline);
+            // Add the fee to the sum (use 0 if no fee found)
+            const feeValue = spaceFee?.totalFee ?? 0;
+            console.log(`Space ${space.name} fee: ${feeValue}`); // Debug log
+            return sum + feeValue;
+          }, 0);
+
+          console.log(`Total for discipline ${discipline}: ${disciplineTotal}`); // Debug log
+
+          // Update the discipline total in all spaces
+          return {
+            ...s,
+            levels: s.levels.map(l => ({
+              ...l,
+              spaces: l.spaces.map(sp => ({
+                ...sp,
+                fees: sp.fees.map(f => {
+                  if (f.discipline === discipline) {
+                    // Update the discipline total in the fee item
+                    return { ...f, costPerSqft: disciplineTotal };
+                  }
+                  return f;
+                })
+              }))
+            }))
+          };
+        }
+        return s;
+      });
+
+      return {
+        ...prev,
+        structures: updatedStructuresWithTotals
+      };
     });
   };
 
   // Add helper function to reset fees
-  const handleResetFees = (structureId: string, discipline: string) => {
-    setManualFeeOverrides(prev => 
-      prev.filter(o => !(o.structureId === structureId && o.discipline === discipline))
+  const handleResetFees = (structureId: string, discipline: string, spaceId?: string) => {
+    setManualFeeOverrides((prev: ManualFeeOverride[]) => 
+      prev.filter(o => !(o.structureId === structureId && o.discipline === discipline && (!spaceId || o.spaceId === spaceId)))
     );
   };
 
   // Add helper function to format input value
-  const formatInputValue = (value: number): string => {
-    return Math.round(value).toString();
+  const formatInputValue = (value: number | null): string => {
+    if (value === null) return '';
+    return value.toString();
   };
 
-  // Add helper function to parse input value
-  const parseInputValue = (value: string): number => {
-    const numericValue = value.replace(/[^0-9]/g, '');
-    return numericValue ? parseInt(numericValue, 10) : 0;
+  const parseInputValue = (value: string): number | null => {
+    if (!value.trim()) return null;
+    const num = Number(value);
+    return isNaN(num) ? null : num;
   };
 
   // Add a handler for toggling discipline fees that will be passed to SpaceDialog
   const handleDisciplineFeeToggle = (structureId: string, discipline: string, isActive: boolean) => {
-    setProposal(prev => ({
-      ...prev,
-      structures: prev.structures.map(s => {
-        if (s.id === structureId) {
-          return {
-            ...s,
-            levels: s.levels.map(l => ({
-              ...l,
-              spaces: l.spaces.map(sp => ({
-                ...sp,
-                fees: sp.fees.map(f => {
+    try {
+      setProposal((prev: ProposalFormData) => {
+        // Find the structure first to validate it exists
+        const structure = prev.structures.find((s: Structure) => s.id === structureId);
+        if (!structure) {
+          console.error('Structure not found:', structureId);
+          return prev;
+        }
+
+        const updatedStructures = prev.structures.map((s: Structure) => {
+          if (s.id === structureId) {
+            // Create a new levels array with updated spaces
+            const updatedLevels = s.levels.map((l: Level) => {
+              // Create a new spaces array with updated fees
+              const updatedSpaces = l.spaces.map((sp: Space) => {
+                // Create a new fees array with the toggled discipline
+                const updatedFees = sp.fees.map((f: { id: string; discipline: string; totalFee: number; isActive: boolean; costPerSqft: number; }) => {
                   if (f.discipline === discipline) {
                     return { ...f, isActive };
                   }
                   return f;
-                })
-              }))
-            }))
-          };
-        }
-        return s;
-      })
-    }));
+                });
+
+                return {
+                  ...sp,
+                  fees: updatedFees
+                };
+              });
+
+              return {
+                ...l,
+                spaces: updatedSpaces
+              };
+            });
+
+            return {
+              ...s,
+              levels: updatedLevels
+            };
+          }
+          return s;
+        });
+
+        return {
+          ...prev,
+          structures: updatedStructures
+        };
+      });
+    } catch (error) {
+      console.error('Error toggling discipline fee:', error);
+    }
   };
 
   // Update the fee table toggle handler to properly update space fees
   const handleFeeTableToggle = (structureId: string, discipline: string, isActive: boolean) => {
-    setProposal(prev => ({
-      ...prev,
-      structures: prev.structures.map(s => {
+    setProposal(prev => {
+      const structure = prev.structures.find(s => s.id === structureId);
+      if (!structure) return prev;
+
+      // Get all spaces under this discipline
+      const spacesWithDiscipline = structure.levels.flatMap(level =>
+        level.spaces.filter(space => 
+          space.fees.some(fee => fee.discipline === discipline)
+        )
+      );
+
+      // If we're enabling the discipline, enable all spaces
+      // If we're disabling the discipline, disable all spaces
+      const updatedStructures = prev.structures.map(s => {
         if (s.id === structureId) {
           return {
             ...s,
@@ -2110,9 +2461,19 @@ export default function EditProposalPage() {
           };
         }
         return s;
-      })
-    }));
+      });
+
+      return {
+        ...prev,
+        structures: updatedStructures
+      };
+    });
   };
+
+  // Add useEffect to fetch engineering additional services
+  useEffect(() => {
+    fetchEngineeringAdditionalServices();
+  }, []);
 
   return (
     <div className="container mx-auto py-6 pt-24 space-y-6">
@@ -2674,13 +3035,32 @@ export default function EditProposalPage() {
                                       <div className="text-gray-500 dark:text-[#9CA3AF]">
                                         Project Construction Type: {space.projectConstructionType}
                                       </div>
-                                      <div className="text-gray-500 dark:text-[#9CA3AF] mt-1">
-                                        Disciplines:
-                                        {space.fees.map((fee, index) => (
-                                          <span key={fee.id} className={`ml-1 ${fee.isActive ? 'text-primary' : 'text-gray-400'}`}>
-                                            {fee.discipline}{index < space.fees.length - 1 ? ', ' : ''}
-                                          </span>
-                                        ))}
+                                      <div className="mt-1">
+                                        <div className="text-gray-500 dark:text-[#9CA3AF] mb-1">Disciplines:</div>
+                                        <div className="flex flex-wrap gap-2">
+                                          {space.fees.map((fee) => (
+                                            <button
+                                              key={fee.id}
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                try {
+                                                  handleDisciplineFeeToggle(structure.id, fee.discipline, !fee.isActive);
+                                                } catch (error) {
+                                                  console.error('Error toggling discipline:', error);
+                                                }
+                                              }}
+                                              className={`px-2 py-1 rounded-md text-sm transition-colors ${
+                                                fee.isActive
+                                                  ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                              }`}
+                                              title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
+                                            >
+                                              {fee.discipline}
+                                            </button>
+                                          ))}
+                                        </div>
                                       </div>
                                       <div className="mt-1 font-medium text-primary">
                                         Construction Cost: {formatCurrency(space.fees.reduce((sum, fee) => sum + (fee.isActive ? fee.totalFee : 0), 0))}
@@ -2744,6 +3124,17 @@ export default function EditProposalPage() {
                                     title="Delete space"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {/* ... existing buttons ... */}
+                                  <button
+                                    type="button"
+                                    onClick={() => processLinkedServices(structure.id, level.id, [space.discipline])}
+                                    className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                                    title="Process Linked Services"
+                                  >
+                                    <SplitSquareVertical className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                   </div>
@@ -2950,19 +3341,9 @@ export default function EditProposalPage() {
                                             </td>
                                         <td className="py-3 px-4 text-sm">
                                           <div className="flex items-center gap-2">
-                                            <input
-                                              type="number"
-                                              step="0.01"
-                                              min="0"
-                                              value={formatInputValue(displayDesignFee)}
-                                              onChange={(e) => {
-                                                const value = parseInputValue(e.target.value);
-                                                if (!isNaN(value)) {
-                                                  handleFeeUpdate(structure.id, discipline, 'design', value);
-                                                }
-                                              }}
-                                              className="w-32 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                                            />
+                                            <span className="text-sm text-gray-900 dark:text-[#E5E7EB]">
+                                              {formatCurrency(displayDesignFee)}
+                                            </span>
                                             {manualOverride?.designFee !== undefined && (
                                               <button
                                                 type="button"
@@ -2983,15 +3364,28 @@ export default function EditProposalPage() {
                                               <button
                                                 type="button"
                                               onClick={() => {
-                                                const newIsActive = !data.fees.some(f => f.isActive);
-                                                handleFeeTableToggle(structure.id, discipline, newIsActive);
+                                                // Get all spaces under this discipline
+                                                const spacesWithDiscipline = structure.levels.flatMap(level =>
+                                                  level.spaces.filter(space => 
+                                                    space.fees.some(fee => fee.discipline === discipline)
+                                                  )
+                                                );
+
+                                                // Get all fees for this discipline across all spaces
+                                                const disciplineFees = spacesWithDiscipline.flatMap(space =>
+                                                  space.fees.filter(fee => fee.discipline === discipline)
+                                                );
+
+                                                // If all fees are active, disable all. Otherwise, enable all
+                                                const allActive = disciplineFees.every(fee => fee.isActive);
+                                                handleFeeTableToggle(structure.id, discipline, !allActive);
                                               }}
                                               className={`p-1.5 rounded-md transition-colors ${
                                                 data.fees.some(f => f.isActive)
                                                   ? 'bg-primary/10 text-primary hover:bg-primary/20' 
                                                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                                               }`}
-                                              title={data.fees.some(f => f.isActive) ? 'Disable discipline' : 'Enable discipline'}
+                                              title={data.fees.some(f => f.isActive) ? 'Disable all spaces for this discipline' : 'Enable all spaces for this discipline'}
                                             >
                                               {data.fees.some(f => f.isActive) ? (
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
@@ -3027,8 +3421,37 @@ export default function EditProposalPage() {
                                                 <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
                                                   {spaceRate.toFixed(1)}%
                                                 </td>
-                                                <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                  {formatCurrency(spaceDesignFee)}
+                                                <td className="py-2 px-4 text-sm">
+                                                  <div className="flex items-center gap-2">
+                                                    <input
+                                                      type="text"
+                                                      defaultValue={getManualOverride(structure.id, fee.discipline, space.id)?.designFee ?? 
+                                                        (fee.isActive ? spaceDesignFee : '')}
+                                                      onBlur={(e) => {
+                                                        const val = e.target.value === '' ? null : Number(e.target.value);
+                                                        handleFeeUpdate(structure.id, fee.discipline, 'design', val, space.id);
+                                                      }}
+                                                      onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                          e.currentTarget.blur(); // This will trigger the onBlur handler
+                                                        }
+                                                      }}
+                                                      className="w-24 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
+                                                    />
+                                                    {getManualOverride(structure.id, fee.discipline, space.id)?.designFee !== undefined && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleResetFees(structure.id, fee.discipline, space.id)}
+                                                        className="p-1 text-gray-500 hover:text-primary"
+                                                        title="Reset to calculated value"
+                                                      >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                                          <path d="M3 3v5h5"/>
+                                                        </svg>
+                                                      </button>
+                                                    )}
+                                                  </div>
                                                 </td>
                                                 <td className="py-2 px-4">
                                                   <button
@@ -3308,22 +3731,19 @@ export default function EditProposalPage() {
                                           <td className="py-3 px-4 text-sm">
                                             <div className="flex items-center gap-2">
                                               <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0"
+                                                type="text"
                                                 value={formatInputValue(displayConstructionSupportFee)}
                                                 onChange={(e) => {
                                                   const value = parseInputValue(e.target.value);
-                                                  if (!isNaN(value)) {
-                                                    handleFeeUpdate(structure.id, fee.discipline, 'construction', value);
-                                                  }
+                                                  handleFeeUpdate(structure.id, fee.discipline, 'construction', value, space.id);
                                                 }}
                                                 className="w-32 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
+                                                placeholder="0.00"
                                               />
                                               {manualOverride?.constructionSupportFee !== undefined && (
                                                 <button
                                                   type="button"
-                                                  onClick={() => handleResetFees(structure.id, fee.discipline)}
+                                                  onClick={() => handleResetFees(structure.id, fee.discipline, space.id)}
                                                   className="p-1 text-gray-500 hover:text-primary"
                                                   title="Reset to calculated value"
                                                 >
@@ -3535,13 +3955,13 @@ export default function EditProposalPage() {
                     <div className="bg-muted/10 px-2 py-1.5">
                       <h3 className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">Design Phase</h3>
                     </div>
-                    {isLoadingItems ? (
+                    {isLoadingAdditionalServices ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : EngineeringAdditionalServices.filter(item => item.phase === 'design').length === 0 ? (
+                    ) : engineeringAdditionalServices.filter(item => item.phase === 'design').length === 0 ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No design phase items</div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 p-1">
-                        {EngineeringAdditionalServices
+                        {engineeringAdditionalServices
                           .filter(item => item.phase === 'design')
                           .map(item => (
                             <div
@@ -3564,13 +3984,13 @@ export default function EditProposalPage() {
                     <div className="bg-muted/10 px-2 py-1.5">
                       <h3 className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">Construction Phase</h3>
                     </div>
-                    {isLoadingItems ? (
+                    {isLoadingAdditionalServices ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : EngineeringAdditionalServices.filter(item => item.phase === 'construction').length === 0 ? (
+                    ) : engineeringAdditionalServices.filter(item => item.phase === 'construction').length === 0 ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No construction phase items</div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 p-1">
-                        {EngineeringAdditionalServices
+                        {engineeringAdditionalServices
                           .filter(item => item.phase === 'construction')
                           .map(item => (
                             <div

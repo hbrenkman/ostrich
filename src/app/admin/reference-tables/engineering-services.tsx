@@ -161,7 +161,7 @@ export function EngineeringServicesTable() {
 
       const linksData = await linksResponse.json();
       console.log('Service links data:', linksData);
-      setServiceLinks(linksData || []);
+      setServiceLinks(linksData.links || []);
 
       console.log('All data fetched successfully');
     } catch (err) {
