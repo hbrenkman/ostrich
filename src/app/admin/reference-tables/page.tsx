@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Calculator, Building2, DollarSign, Edit2, Trash2, MapPin, ClipboardList } from 'lucide-react';
+import { FileText, Plus, Calculator, Building2, DollarSign, Edit2, Trash2, MapPin, ClipboardList, Wrench } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { useReferenceTables, type ReferenceTable, type ReferenceTableEntry } from './hooks/useReferenceTables';
@@ -17,9 +17,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { EngineeringServicesTable } from './engineering-services';
 
 // Define table categories
-export type TableCategory = ReferenceTable['category'];
+export type TableCategory = ReferenceTable['category'] | 'Engineering Services';
 
 // Table configuration type
 type TableConfig = {
@@ -56,6 +57,14 @@ const AVAILABLE_TABLES: TableConfig[] = [
     component: ProjectTypesTable,
     description: 'View and manage different types of projects in the system.',
     icon: <ClipboardList className="w-5 h-5 text-primary" />
+  },
+  {
+    id: 'engineering-services',
+    name: 'Engineering Services',
+    category: 'Engineering Services',
+    component: EngineeringServicesTable,
+    description: 'Manage relationships between standard and additional engineering services.',
+    icon: <Wrench className="w-5 h-5 text-primary" />
   }
 ];
 
@@ -216,6 +225,13 @@ export default function ReferenceTablesPage() {
                     <Building2 className="w-4 h-4 mr-2" />
                     Construction Costs
                   </TabsTrigger>
+                  <TabsTrigger 
+                    value="Engineering Services"
+                    className="w-full justify-start px-4 py-3 text-base font-medium text-muted-foreground transition-all hover:bg-muted/10 hover:text-foreground data-[state=active]:bg-muted/20 data-[state=active]:text-foreground rounded-md"
+                  >
+                    <Wrench className="w-4 h-4 mr-2" />
+                    Engineering Services
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
             </nav>
@@ -350,6 +366,7 @@ export default function ReferenceTablesPage() {
                   <option value="Rate Categories">Rate Categories</option>
                   <option value="Cost Indices">Cost Indices</option>
                   <option value="Construction Costs">Construction Costs</option>
+                  <option value="Engineering Services">Engineering Services</option>
                 </select>
               </div>
               <div>
@@ -476,6 +493,7 @@ export default function ReferenceTablesPage() {
                     <option value="Rate Categories">Rate Categories</option>
                     <option value="Cost Indices">Cost Indices</option>
                     <option value="Construction Costs">Construction Costs</option>
+                    <option value="Engineering Services">Engineering Services</option>
                   </select>
                 </div>
                 <div>
@@ -598,6 +616,8 @@ function getCategoryIcon(category: TableCategory) {
       return <MapPin className="w-5 h-5 text-primary" />;
     case 'Construction Costs':
       return <Building2 className="w-5 h-5 text-secondary" />;
+    case 'Engineering Services':
+      return <Wrench className="w-5 h-5 text-primary" />;
     default:
       return <FileText className="w-5 h-5" />;
   }

@@ -1,30 +1,5 @@
 {
-  "node": {
-    "57eaca89237cb5fbe03ffd1ebf73079f627f9e43": {
-      "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CSynologyDrive%5C%5CUnited%20States%5C%5CBusiness%20Admin%5C%5CMarketing%5C%5COstrich%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22createLocation%22%2C%22deleteLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
-      },
-      "layer": {
-        "app/projects/[id]/page": "action-browser"
-      }
-    },
-    "71949e027a5bead0c467c83fee3c8fd62b8a5977": {
-      "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CSynologyDrive%5C%5CUnited%20States%5C%5CBusiness%20Admin%5C%5CMarketing%5C%5COstrich%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22createLocation%22%2C%22deleteLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
-      },
-      "layer": {
-        "app/projects/[id]/page": "action-browser"
-      }
-    },
-    "f76fe3241bf981321ada7fb28ecaeab3469941e2": {
-      "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CSynologyDrive%5C%5CUnited%20States%5C%5CBusiness%20Admin%5C%5CMarketing%5C%5COstrich%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22createLocation%22%2C%22deleteLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
-      },
-      "layer": {
-        "app/projects/[id]/page": "action-browser"
-      }
-    }
-  },
+  "node": {},
   "edge": {},
-  "encryptionKey": "iKe1LdV7P79bsc9cuW+gGUMmTa+Zgmsd5Bvti4eZVzQ="
+  "encryptionKey": "7tw6wQypIffF+cM9OdVLdr1AnV9FQjydodFADow2Srs="
 }

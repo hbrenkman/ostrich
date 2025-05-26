@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseClient } from '@/lib/supabase/server';
 
 interface EngineeringService {
@@ -8,103 +8,198 @@ interface EngineeringService {
   description: string;
   estimated_fee: string | null;
   default_setting: boolean;
+  phase: 'design' | 'construction' | null;
 }
 
-export async function GET() {
+interface RawServiceData {
+  id: string;
+  service_name: string;
+  default_setting: boolean;
+  phase: string | null;
+}
+
+interface ServiceData extends EngineeringService {
+  type?: string;
+  raw_value?: string;
+}
+
+export async function GET(request: NextRequest) {
   try {
+    console.log('API: Starting query for engineering services...');
+    
+    // Use server-side Supabase client with service role key
     const supabase = createSupabaseClient();
     
-    console.log('Fetching engineering services from Supabase...');
-    
-    // First, let's check the raw data with a direct query
-    const { data: rawData, error: rawError } = await supabase
-      .from('engineering_services')
-      .select('id, service_name, default_setting')
-      .order('discipline', { ascending: true })
-      .order('service_name', { ascending: true });
-
-    if (rawError) {
-      console.error('Raw data query error:', rawError);
-      return NextResponse.json({ error: rawError.message }, { status: 500 });
-    }
-
-    console.log('Raw data from Supabase (first 5 items):', rawData?.slice(0, 5).map(item => ({
-      id: item.id,
-      service_name: item.service_name,
-      default_setting: item.default_setting,
-      type: typeof item.default_setting,
-      raw_value: JSON.stringify(item.default_setting)
-    })));
-
-    // Get the full data
     const { data, error } = await supabase
-      .from('engineering_services')
-      .select('id, service_name, default_setting, discipline, description, estimated_fee')
+      .from('engineering_standard_services')
+      .select('*')
       .order('discipline', { ascending: true })
       .order('service_name', { ascending: true });
 
     if (error) {
-      console.error('Full data query error:', error);
+      console.error('API Error:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     if (!data || data.length === 0) {
-      console.log('No engineering services found');
-      return NextResponse.json({ error: 'No data found' }, { status: 404 });
+      console.log('API: No engineering services found');
+      return NextResponse.json({ services: [] });
     }
 
-    // Compare raw data with full data
-    const comparison = rawData?.map(rawItem => {
-      const fullItem = data.find(item => item.id === rawItem.id);
-      return {
-        id: rawItem.id,
-        service_name: rawItem.service_name,
-        raw_default_setting: rawItem.default_setting,
-        raw_type: typeof rawItem.default_setting,
-        full_default_setting: fullItem?.default_setting,
-        full_type: typeof fullItem?.default_setting,
-        match: rawItem.default_setting === fullItem?.default_setting
-      };
-    });
-
-    // Prepare debugging information
-    const debugInfo = {
-      rawDataSample: rawData?.slice(0, 5).map(item => ({
-        id: item.id,
-        service_name: item.service_name,
-        default_setting: item.default_setting,
-        type: typeof item.default_setting,
-        raw_value: JSON.stringify(item.default_setting)
-      })),
-      fullDataSample: data.slice(0, 5).map(item => ({
-        id: item.id,
-        service_name: item.service_name,
-        default_setting: item.default_setting,
-        type: typeof item.default_setting,
-        raw_value: JSON.stringify(item.default_setting)
-      })),
-      comparison: comparison?.slice(0, 5)
-    };
-
-    // Process the services using the raw data values
-    const services = data.map(service => {
-      const rawService = rawData?.find(item => item.id === service.id);
-      return {
-        ...service,
-        default_setting: Boolean(rawService?.default_setting ?? service.default_setting)
-      };
-    });
-
-    // Return both the services and debug info
-    return NextResponse.json({
-      services,
-      debug: debugInfo
-    });
+    console.log('API: Successfully fetched engineering services');
+    return NextResponse.json({ services: data });
   } catch (error) {
-    console.error('API Error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    console.log('API: Starting POST request for engineering service...');
+    
+    const supabase = createSupabaseClient();
+    
+    // Get the request body
+    const body = await request.json();
+    console.log('API: Request body:', body);
+
+    // Validate required fields
+    const requiredFields = ['discipline', 'service_name', 'description'];
+    const missingFields = requiredFields.filter(field => !body[field]);
+    
+    if (missingFields.length > 0) {
+      console.error('API: Missing required fields:', missingFields);
+      return NextResponse.json(
+        { error: `Missing required fields: ${missingFields.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Insert the new service
+    const { data, error } = await supabase
+      .from('engineering_standard_services')
+      .insert({
+        discipline: body.discipline,
+        service_name: body.service_name,
+        description: body.description,
+        estimated_fee: body.estimated_fee || null,
+        default_setting: body.default_setting ?? false,
+        phase: body.phase || 'design'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('API Error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    console.log('API: Successfully created engineering service');
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    console.log('API: Starting DELETE request for engineering service...');
+    
+    const supabase = createSupabaseClient();
+    
+    // Get the service ID from the URL search params
+    const searchParams = request.nextUrl.searchParams;
+    const serviceId = searchParams.get('id');
+    
+    if (!serviceId) {
+      console.error('API: No service ID provided');
+      return NextResponse.json(
+        { error: 'Service ID is required' },
+        { status: 400 }
+      );
+    }
+
+    console.log('API: Deleting service:', serviceId);
+
+    // Delete the service
+    const { error } = await supabase
+      .from('engineering_standard_services')
+      .delete()
+      .eq('id', serviceId);
+
+    if (error) {
+      console.error('API Error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    console.log('API: Successfully deleted engineering service');
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    console.log('API: Starting PUT request for engineering service...');
+    
+    const supabase = createSupabaseClient();
+    
+    // Get the service ID from the URL search params
+    const searchParams = request.nextUrl.searchParams;
+    const serviceId = searchParams.get('id');
+    
+    if (!serviceId) {
+      console.error('API: No service ID provided');
+      return NextResponse.json(
+        { error: 'Service ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get the request body
+    const body = await request.json();
+    console.log('API: Request body:', body);
+
+    // Validate required fields
+    const requiredFields = ['discipline', 'service_name', 'description'];
+    const missingFields = requiredFields.filter(field => !body[field]);
+    
+    if (missingFields.length > 0) {
+      console.error('API: Missing required fields:', missingFields);
+      return NextResponse.json(
+        { error: `Missing required fields: ${missingFields.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    // Update the service
+    const { data, error } = await supabase
+      .from('engineering_standard_services')
+      .update({
+        discipline: body.discipline,
+        service_name: body.service_name,
+        description: body.description,
+        estimated_fee: body.estimated_fee || null,
+        default_setting: body.default_setting ?? false,
+        phase: body.phase || 'design'
+      })
+      .eq('id', serviceId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('API Error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    console.log('API: Successfully updated engineering service');
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 } 

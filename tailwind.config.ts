@@ -40,6 +40,7 @@ const config = {
         }
       },
       colors: {
+        'pure-white': '#FFFFFF',
         gray: {
           DEFAULT: "hsl(var(--muted))",
           light: "hsl(var(--background))",

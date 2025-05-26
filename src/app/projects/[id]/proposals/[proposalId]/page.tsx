@@ -46,6 +46,14 @@ interface Space {
     costPerSqft: number;
   }>;
   splitFees: boolean;
+  engineeringServices?: Array<{
+    id: string;
+    discipline: string;
+    service_name: string;
+    description: string;
+    estimated_fee: string | null;
+    isActive: boolean;
+  }>;
 }
 
 interface Level {
@@ -100,7 +108,7 @@ interface NestedFeeItem {
   parentDiscipline?: string;  // For items that nest under other disciplines
 }
 
-interface FeeAdditionalItem {
+interface EngineeringAdditionalServices {
   id: string;
   name: string;
   description: string;
@@ -156,7 +164,7 @@ interface DesignFeeScale {
   fraction_of_prime_rate_structural: number;
 }
 
-interface FeeAdditionalItem {
+interface EngineeringAdditionalServices {
   id: string;
   name: string;
   description: string;
@@ -186,6 +194,99 @@ interface ManualFeeOverride {
   discipline: string;
   designFee?: number;
   constructionSupportFee?: number;
+}
+
+interface EngineeringStandardService {
+  id: string;
+  discipline: string;
+  service_name: string;
+  description: string;
+  estimated_fee: string | null;
+  default_setting: boolean;
+  phase: 'design' | 'construction' | null;
+}
+
+interface EngineeringServicesDisplayProps {
+  services: EngineeringStandardService[];
+  isLoading: boolean;
+}
+
+function EngineeringServicesDisplay({ services, isLoading }: EngineeringServicesDisplayProps) {
+  if (isLoading) {
+    return <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>;
+  }
+
+  const includedServices = services.filter(service => service.default_setting);
+  const excludedServices = services.filter(service => !service.default_setting);
+
+  const groupServicesByDiscipline = (services: EngineeringStandardService[]) => {
+    return Object.entries(
+      services.reduce((acc, service) => {
+        const discipline = service.discipline || 'Other';
+        if (!acc[discipline]) acc[discipline] = [];
+        acc[discipline].push(service);
+        return acc;
+      }, {} as Record<string, EngineeringStandardService[]>)
+    );
+  };
+
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      {/* Included Services */}
+      <div className="border border-green-500/20 rounded-md overflow-hidden">
+        <div className="bg-green-500/10 px-2 py-1">
+          <h3 className="text-sm font-medium text-green-700 dark:text-green-400">Included Services</h3>
+        </div>
+        {includedServices.length === 0 ? (
+          <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No included services</div>
+        ) : (
+          <div className="p-1 space-y-1">
+            {groupServicesByDiscipline(includedServices).map(([discipline, services]) => (
+              <div key={discipline} className="border-b border-green-500/10 last:border-0">
+                <div className="px-2 py-1 bg-green-500/5">
+                  <h4 className="text-xs font-medium text-green-600 dark:text-green-400">{discipline}</h4>
+                </div>
+                <div className="px-2 py-1">
+                  {services.map(service => (
+                    <div key={service.id} className="text-xs text-gray-700 dark:text-gray-300">
+                      {service.service_name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Excluded Services */}
+      <div className="border border-red-500/20 rounded-md overflow-hidden">
+        <div className="bg-red-500/10 px-2 py-1">
+          <h3 className="text-sm font-medium text-red-700 dark:text-red-400">Excluded Services</h3>
+        </div>
+        {excludedServices.length === 0 ? (
+          <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No excluded services</div>
+        ) : (
+          <div className="p-1 space-y-1">
+            {groupServicesByDiscipline(excludedServices).map(([discipline, services]) => (
+              <div key={discipline} className="border-b border-red-500/10 last:border-0">
+                <div className="px-2 py-1 bg-red-500/5">
+                  <h4 className="text-xs font-medium text-red-600 dark:text-red-400">{discipline}</h4>
+                </div>
+                <div className="px-2 py-1">
+                  {services.map(service => (
+                    <div key={service.id} className="text-xs text-gray-700 dark:text-gray-300">
+                      {service.service_name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const contacts: Contact[] = [
@@ -235,7 +336,7 @@ export default function EditProposalPage() {
   const [editingStructureId, setEditingStructureId] = useState<string | null>(null);
   const [editingStructureName, setEditingStructureName] = useState('');
   const [designFeeScale, setDesignFeeScale] = useState<DesignFeeScale[]>([]);
-  const [additionalItems, setAdditionalItems] = useState<FeeAdditionalItem[]>([]);
+  const [EngineeringAdditionalServices, setEngineeringAdditionalServices] = useState<EngineeringAdditionalServices[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [dragData, setDragData] = useState<any>(null);
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
@@ -244,6 +345,8 @@ export default function EditProposalPage() {
   const [collapsedDuplicates, setCollapsedDuplicates] = useState<Set<string>>(new Set());
   // Add new state for manual fee overrides
   const [manualFeeOverrides, setManualFeeOverrides] = useState<ManualFeeOverride[]>([]);
+  const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringStandardService[]>([]);
+  const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(true);
 
   const [proposal, setProposal] = useState<ProposalFormData>({
     number: proposalId === 'new' ? '' : proposalId,
@@ -355,7 +458,7 @@ export default function EditProposalPage() {
   }, []);
 
   useEffect(() => {
-    const fetchAdditionalItems = async () => {
+    const fetchEngineeringAdditionalServices = async () => {
       console.log('Fetching additional items...');
       try {
         const response = await fetch('/api/fee-additional-items');
@@ -366,22 +469,22 @@ export default function EditProposalPage() {
         const data = await response.json();
         console.log('Raw data from API:', data);
         console.log('Number of items before normalization:', data.length);
-        console.log('All item phases before normalization:', data.map((item: FeeAdditionalItem) => item.phase));
+        console.log('All item phases before normalization:', data.map((item: EngineeringAdditionalServices) => item.phase));
         
         // Convert phase values to lowercase before setting state
-        const normalizedData = data.map((item: FeeAdditionalItem) => ({
+        const normalizedData = data.map((item: EngineeringAdditionalServices) => ({
           ...item,
           phase: item.phase.toLowerCase() as 'design' | 'construction'
         }));
         
         console.log('Number of items after normalization:', normalizedData.length);
-        console.log('Normalized phases:', normalizedData.map((item: FeeAdditionalItem) => item.phase));
-        console.log('Design phase items:', normalizedData.filter((item: FeeAdditionalItem) => item.phase === 'design'));
-        console.log('Construction phase items:', normalizedData.filter((item: FeeAdditionalItem) => item.phase === 'construction'));
-        console.log('Active items:', normalizedData.filter((item: FeeAdditionalItem) => item.is_active));
-        console.log('Inactive items:', normalizedData.filter((item: FeeAdditionalItem) => !item.is_active));
+        console.log('Normalized phases:', normalizedData.map((item: EngineeringAdditionalServices) => item.phase));
+        console.log('Design phase items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.phase === 'design'));
+        console.log('Construction phase items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.phase === 'construction'));
+        console.log('Active items:', normalizedData.filter((item: EngineeringAdditionalServices) => item.is_active));
+        console.log('Inactive items:', normalizedData.filter((item: EngineeringAdditionalServices) => !item.is_active));
         
-        setAdditionalItems(normalizedData);
+        setEngineeringAdditionalServices(normalizedData);
         setIsLoadingItems(false);
       } catch (error) {
         console.error('Error fetching additional items:', error);
@@ -389,16 +492,16 @@ export default function EditProposalPage() {
       }
     };
 
-    fetchAdditionalItems();
+    fetchEngineeringAdditionalServices();
   }, []);
 
   // Add a debug log when rendering the items
-  console.log('Current additionalItems state:', additionalItems);
-  console.log('Total items count:', additionalItems.length);
-  console.log('Design phase items count:', additionalItems.filter((item: FeeAdditionalItem) => item.phase === 'design').length);
-  console.log('Construction phase items count:', additionalItems.filter((item: FeeAdditionalItem) => item.phase === 'construction').length);
-  console.log('Active items count:', additionalItems.filter((item: FeeAdditionalItem) => item.is_active).length);
-  console.log('Inactive items count:', additionalItems.filter((item: FeeAdditionalItem) => !item.is_active).length);
+  console.log('Current EngineeringAdditionalServices state:', EngineeringAdditionalServices);
+  console.log('Total items count:', EngineeringAdditionalServices.length);
+  console.log('Design phase items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'design').length);
+  console.log('Construction phase items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.phase === 'construction').length);
+  console.log('Active items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => item.is_active).length);
+  console.log('Inactive items count:', EngineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => !item.is_active).length);
 
   // Add logging to track feeItems state
   useEffect(() => {
@@ -474,6 +577,34 @@ export default function EditProposalPage() {
     };
 
     fetchDuplicateStructureRates();
+  }, []);
+
+  // Add useEffect to fetch engineering standard services
+  useEffect(() => {
+    const fetchEngineeringStandardServices = async () => {
+      try {
+        console.log('Fetching engineering standard services...');
+        const response = await fetch('/api/engineering-services');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch engineering standard services: ${response.statusText}`);
+        }
+        const data = await response.json();
+        console.log('Engineering standard services data:', data);
+        if (data.services) {
+          setEngineeringStandardServices(data.services);
+        } else {
+          console.error('No services array in response:', data);
+          setEngineeringStandardServices([]);
+        }
+      } catch (error) {
+        console.error('Error fetching engineering standard services:', error);
+        setEngineeringStandardServices([]);
+      } finally {
+        setIsLoadingStandardServices(false);
+      }
+    };
+
+    fetchEngineeringStandardServices();
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -709,7 +840,8 @@ export default function EditProposalPage() {
       console.log('Updating existing space:', editingSpace.id);
       console.log('New space data:', {
         ...space,
-        fees: space.fees
+        fees: space.fees,
+        engineeringServices: space.engineeringServices
       });
       
       setProposal(prev => ({
@@ -724,7 +856,12 @@ export default function EditProposalPage() {
                       ...level,
                       spaces: level.spaces.map(sp =>
                         sp.id === editingSpace.id
-                          ? { ...space, id: sp.id, splitFees: sp.splitFees } // Only preserve ID and splitFees
+                          ? { 
+                              ...space, 
+                              id: sp.id, 
+                              splitFees: sp.splitFees,
+                              engineeringServices: space.engineeringServices || []
+                            }
                           : sp
                       )
                     }
@@ -741,7 +878,12 @@ export default function EditProposalPage() {
                       ...level,
                       spaces: level.spaces.map(sp =>
                         sp.name === editingSpace.name
-                          ? { ...space, id: sp.id, splitFees: sp.splitFees } // Only preserve ID and splitFees
+                          ? { 
+                              ...space, 
+                              id: sp.id, 
+                              splitFees: sp.splitFees,
+                              engineeringServices: space.engineeringServices || []
+                            }
                           : sp
                       )
                     }
@@ -755,34 +897,44 @@ export default function EditProposalPage() {
       setEditingSpace(null);
     } else {
       // Create a new space with a unique ID and default splitFees to false
-    const newSpaceId = crypto.randomUUID();
-      const newSpace = { ...space, id: newSpaceId, splitFees: false };
-    console.log('Created new space:', {
-      id: newSpaceId,
-      name: newSpace.name,
+      const newSpaceId = crypto.randomUUID();
+      const newSpace = { 
+        ...space, 
+        id: newSpaceId, 
+        splitFees: false,
+        engineeringServices: space.engineeringServices || []
+      };
+      console.log('Created new space:', {
+        id: newSpaceId,
+        name: newSpace.name,
         floorArea: newSpace.floorArea,
         splitFees: newSpace.splitFees,
-        fees: newSpace.fees
-    });
+        fees: newSpace.fees,
+        engineeringServices: newSpace.engineeringServices
+      });
 
       setProposal(prev => ({
         ...prev,
         structures: prev.structures.map(structure => {
-        if (structure.id === selectedStructureId) {
-          return {
-            ...structure,
-            levels: structure.levels.map(level =>
-              level.id === selectedLevelId
-                ? {
-                    ...level,
-                    spaces: [...(level.spaces || []), newSpace]
-                  }
-                : level
-            )
-          };
-        }
-        if (structure.parentId === selectedStructureId) {
-            const duplicateSpace = { ...newSpace, id: crypto.randomUUID() };
+          if (structure.id === selectedStructureId) {
+            return {
+              ...structure,
+              levels: structure.levels.map(level =>
+                level.id === selectedLevelId
+                  ? {
+                      ...level,
+                      spaces: [...(level.spaces || []), newSpace]
+                    }
+                  : level
+              )
+            };
+          }
+          if (structure.parentId === selectedStructureId) {
+            const duplicateSpace = { 
+              ...newSpace, 
+              id: crypto.randomUUID(),
+              engineeringServices: [...(newSpace.engineeringServices || [])]
+            };
             return {
               ...structure,
               levels: structure.levels.map((level, index) =>
@@ -794,9 +946,9 @@ export default function EditProposalPage() {
                   : level
               )
             };
-        }
-        return structure;
-      })
+          }
+          return structure;
+        })
       }));
     }
   };
@@ -1647,7 +1799,7 @@ export default function EditProposalPage() {
   };
 
   // Add drag handlers for additional items
-  const handleAdditionalItemDragStart = (e: DragEvent<HTMLDivElement>, item: FeeAdditionalItem) => {
+  const handleAdditionalItemDragStart = (e: DragEvent<HTMLDivElement>, item: EngineeringAdditionalServices) => {
     console.log('Starting drag of item:', {
       name: item.name,
       phase: item.phase,
@@ -1722,7 +1874,7 @@ export default function EditProposalPage() {
       return;
     }
 
-    const item = dragData.item as FeeAdditionalItem;
+    const item = dragData.item as EngineeringAdditionalServices;
     const itemPhase = dragData.phase as 'design' | 'construction';
 
     console.log('Validating phase match:', {
@@ -2195,6 +2347,12 @@ export default function EditProposalPage() {
                     <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
                       {structure.constructionType} • {calculateTotalSquareFootage(structure).toLocaleString()} sq ft • {formatCurrency(calculateTotalConstructionCost(structure))}
                     </div>
+                    {!structure.parentId && (
+                      <EngineeringServicesDisplay
+                        services={engineeringStandardServices}
+                        isLoading={isLoadingStandardServices}
+                      />
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {!structure.parentId && (
@@ -3370,7 +3528,7 @@ export default function EditProposalPage() {
             {/* Additional Items Container - Make it sticky */}
             <div className="w-80 flex-shrink-0">
               <div className="sticky top-24 bg-muted/5 rounded-lg border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 p-2">
-                <h2 className="text-lg font-semibold mb-2 px-2 dark:text-[#E5E7EB]">Additional Items</h2>
+                <h2 className="text-lg font-semibold mb-2 px-2 dark:text-[#E5E7EB]">Additional Engineering Services</h2>
                 <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
                   {/* Design Phase Items */}
                   <div className="border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 rounded-md overflow-hidden">
@@ -3379,11 +3537,11 @@ export default function EditProposalPage() {
                     </div>
                     {isLoadingItems ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : additionalItems.filter(item => item.phase === 'design').length === 0 ? (
+                    ) : EngineeringAdditionalServices.filter(item => item.phase === 'design').length === 0 ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No design phase items</div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 p-1">
-                        {additionalItems
+                        {EngineeringAdditionalServices
                           .filter(item => item.phase === 'design')
                           .map(item => (
                             <div
@@ -3408,11 +3566,11 @@ export default function EditProposalPage() {
                     </div>
                     {isLoadingItems ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : additionalItems.filter(item => item.phase === 'construction').length === 0 ? (
+                    ) : EngineeringAdditionalServices.filter(item => item.phase === 'construction').length === 0 ? (
                       <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No construction phase items</div>
                     ) : (
                       <div className="grid grid-cols-1 gap-1 p-1">
-                        {additionalItems
+                        {EngineeringAdditionalServices
                           .filter(item => item.phase === 'construction')
                           .map(item => (
                             <div

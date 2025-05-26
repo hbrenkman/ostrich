@@ -72,16 +72,6 @@ interface Space {
   splitFees: boolean;
 }
 
-interface EngineeringService {
-  id: string;
-  discipline: string;
-  service_name: string;
-  description: string;
-  estimated_fee: string | null;
-  default_setting: boolean;
-  isActive?: boolean;
-}
-
 interface SpaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -96,7 +86,6 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   const [buildingTypes, setBuildingTypes] = useState<BuildingType[]>([]);
   const [constructionCosts, setConstructionCosts] = useState<ConstructionCost[]>([]);
   const [projectConstructionTypes, setProjectConstructionTypes] = useState<ProjectConstructionType[]>([]);
-  const [engineeringServices, setEngineeringServices] = useState<EngineeringService[]>([]);
   const [selectedBuildingType, setSelectedBuildingType] = useState<BuildingType | null>(null);
   const [selectedConstructionType, setSelectedConstructionType] = useState<ProjectConstructionType | null>(null);
   const [openCombobox, setOpenCombobox] = useState(false);
@@ -106,21 +95,23 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   const [isLoading, setIsLoading] = useState(true);
   
   // Initialize space state with initialSpace or defaultValues
-  const [space, setSpace] = useState<Omit<Space, 'id'>>(() => ({
-    name: '',
-    buildingTypeId: '',
-    buildingType: '',
-    floorArea: 0,
-    description: '',
-    spaceType: '',
-    discipline: '',
-    hvacSystem: '',
-    projectConstructionType: '',
-    projectConstructionTypeId: 0,
-    fees: [],
-    splitFees: false,
-    ...(initialSpace || defaultValues)
-  }));
+  const [space, setSpace] = useState<Omit<Space, 'id'>>(() => {
+    const initialName = initialSpace?.name || defaultValues?.name || '';
+    return {
+      name: initialName,
+      buildingTypeId: initialSpace?.buildingTypeId || defaultValues?.buildingTypeId || '',
+      buildingType: initialSpace?.buildingType || defaultValues?.buildingType || '',
+      floorArea: initialSpace?.floorArea || defaultValues?.floorArea || 0,
+      description: initialSpace?.description || defaultValues?.description || '',
+      spaceType: initialSpace?.spaceType || defaultValues?.spaceType || '',
+      discipline: initialSpace?.discipline || defaultValues?.discipline || '',
+      hvacSystem: initialSpace?.hvacSystem || defaultValues?.hvacSystem || '',
+      projectConstructionType: initialSpace?.projectConstructionType || defaultValues?.projectConstructionType || '',
+      projectConstructionTypeId: initialSpace?.projectConstructionTypeId || defaultValues?.projectConstructionTypeId || 0,
+      fees: initialSpace?.fees || defaultValues?.fees || [],
+      splitFees: initialSpace?.splitFees || defaultValues?.splitFees || false
+    };
+  });
 
   // Initialize disciplineFees state with initialSpace fees or defaults
   const [disciplineFees, setDisciplineFees] = useState<DisciplineFee[]>(() => 
@@ -533,130 +524,222 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     }
   };
 
-  // Update the fee table toggle handler
-  const handleFeeTableToggle = (discipline: string, isActive: boolean) => {
-    // Update discipline fees state
-    const updatedFees = disciplineFees.map(fee => 
-      fee.discipline === discipline ? { ...fee, isActive } : fee
-    );
-    setDisciplineFees(updatedFees);
-
-    // Update space state to keep fees in sync
-    setSpace(prev => ({
-      ...prev,
-      fees: updatedFees
-    }));
-  };
-
-  // Add handler for engineering service toggle
-  const handleEngineeringServiceToggle = (serviceId: string, isActive: boolean) => {
-    setEngineeringServices(prev => 
-      prev.map(service => 
-        service.id === serviceId 
-          ? { ...service, isActive: !service.isActive } 
-          : service
-      )
-    );
-  };
-
-  useEffect(() => {
-    const fetchEngineeringServices = async () => {
-      try {
-        console.log('Fetching engineering services...');
-        const response = await fetch('/api/engineering-services');
-        
-        if (!response.ok) {
-          console.error('Failed to fetch engineering services:', {
-            status: response.status,
-            statusText: response.statusText
-          });
-          throw new Error(`Failed to fetch engineering services: ${response.status}`);
-        }
-        
-        const { services, debug } = await response.json();
-        
-        // Log the debug information
-        console.log('Debug info from API:', {
-          rawDataSample: debug.rawDataSample,
-          conversionLog: debug.conversionLog
-        });
-        
-        console.log('Received engineering services:', services.map((service: EngineeringService) => ({
-          id: service.id,
-          service_name: service.service_name,
-          default_setting: service.default_setting,
-          type: typeof service.default_setting
-        })));
-        
-        // Initialize isActive based on default_setting
-        const servicesWithActive = services.map((service: EngineeringService) => {
-          const isActive = Boolean(service.default_setting);
-          console.log(`Service "${service.service_name}":`, {
-            default_setting: service.default_setting,
-            type: typeof service.default_setting,
-            isActive
-          });
-          return {
-            ...service,
-            isActive
-          };
-        });
-        
-        console.log('Final engineering services state:', servicesWithActive.map((service: EngineeringService) => ({
-          id: service.id,
-          service_name: service.service_name,
-          default_setting: service.default_setting,
-          isActive: service.isActive
-        })));
-        
-        setEngineeringServices(servicesWithActive);
-      } catch (error) {
-        console.error('Error fetching engineering services:', error);
-      }
-    };
-
-    if (open) {
-      console.log('Dialog opened, fetching engineering services...');
-      fetchEngineeringServices();
-    }
-  }, [open]);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px]">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>{initialSpace ? 'Update Space' : 'Add Space'}</DialogTitle>
           <DialogDescription>
             {initialSpace ? 'Update the space details.' : 'Select a building type and enter the space details.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-6">
-          {/* Left side - Engineering Services */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Engineering Services</h3>
-            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-              {engineeringServices.map((service) => (
-                <div 
-                  key={service.id} 
-                  className={cn(
-                    "rounded-lg border p-4",
-                    service.isActive ? "bg-green-50 dark:bg-green-950/20" : "bg-red-50 dark:bg-red-950/20"
-                  )}
+        <div className="space-y-4">
+          {/* Space Details */}
+          <div className="grid gap-2">
+            <Label htmlFor="buildingType">Building Type</Label>
+            <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={openCombobox}
+                  className="w-full justify-between"
                 >
+                  {selectedBuildingType
+                    ? selectedBuildingType.name
+                    : "Select a building type..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start" side="bottom" sideOffset={4}>
+                <Command shouldFilter={false} className="w-full">
+                  <CommandInput 
+                    placeholder="Search by name or description..." 
+                    value={searchQuery}
+                    onValueChange={(value) => {
+                      setSearchQuery(value);
+                      setOpenCombobox(true);
+                    }}
+                  />
+                  <div className="relative">
+                    <CommandList 
+                      className="max-h-[300px] overflow-y-auto"
+                      style={{ 
+                        scrollbarWidth: 'thin',
+                        msOverflowStyle: 'none',
+                        WebkitOverflowScrolling: 'touch'
+                      }}
+                      onWheel={handleWheel}
+                    >
+                      <CommandEmpty>No building types found.</CommandEmpty>
+                      <CommandGroup>
+                        {filteredBuildingTypes.map((type) => (
+                          <CommandItem
+                            key={type.id}
+                            value={type.id}
+                            onSelect={() => {
+                              setSelectedBuildingType(type);
+                              setOpenCombobox(false);
+                              setSearchQuery('');
+                              
+                              setSpace(prev => ({
+                                ...prev,
+                                buildingTypeId: type.id,
+                                buildingType: type.name || '',
+                                name: type.name || '',
+                                description: type.description || '',
+                                spaceType: type.space_type || '',
+                                discipline: type.discipline || '',
+                                hvacSystem: type.hvac_system || '',
+                                fees: disciplineFees,
+                                floorArea: prev.floorArea || (type.default_area || 0),
+                                splitFees: prev.splitFees
+                              }));
+                            }}
+                            className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Check
+                                className={cn(
+                                  "h-4 w-4",
+                                  selectedBuildingType === type ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="font-medium">{type.name}</span>
+                            </div>
+                            {type.description && (
+                              <span className="text-sm text-muted-foreground ml-6 mt-0.5">
+                                {type.description}
+                              </span>
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </div>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="projectConstructionType">Project Construction Type</Label>
+            <Popover open={openConstructionTypeCombobox} onOpenChange={setOpenConstructionTypeCombobox}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={openConstructionTypeCombobox}
+                  className="w-full justify-between"
+                >
+                  {selectedConstructionType
+                    ? selectedConstructionType.project_type
+                    : "Select a construction type..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start" side="bottom" sideOffset={4}>
+                <Command shouldFilter={false} className="w-full">
+                  <CommandInput 
+                    placeholder="Search by type, definition, or description..." 
+                    value={constructionTypeSearchQuery}
+                    onValueChange={(value) => {
+                      setConstructionTypeSearchQuery(value);
+                      setOpenConstructionTypeCombobox(true);
+                    }}
+                  />
+                  <div className="relative">
+                    <CommandList 
+                      className="max-h-[300px] overflow-y-auto"
+                      style={{ 
+                        scrollbarWidth: 'thin',
+                        msOverflowStyle: 'none',
+                        WebkitOverflowScrolling: 'touch'
+                      }}
+                      onWheel={handleWheel}
+                    >
+                      <CommandEmpty>No construction types found.</CommandEmpty>
+                      <CommandGroup>
+                        {filteredConstructionTypes.map((type) => (
+                          <CommandItem
+                            key={type.id}
+                            value={type.id.toString()}
+                            onSelect={() => {
+                              setSelectedConstructionType(type);
+                              setOpenConstructionTypeCombobox(false);
+                              setConstructionTypeSearchQuery('');
+                              
+                              setSpace(prev => ({
+                                ...prev,
+                                projectConstructionType: type.project_type,
+                                projectConstructionTypeId: type.id
+                              }));
+                            }}
+                            className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Check
+                                className={cn(
+                                  "h-4 w-4",
+                                  selectedConstructionType?.id === type.id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="font-medium">{type.project_type}</span>
+                            </div>
+                            <div className="text-sm text-muted-foreground ml-6 mt-0.5">
+                              <div>{type.definition}</div>
+                              <div className="mt-1">Cost Index: {type.relative_cost_index}</div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </div>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="floorArea">Floor Area (sq ft)</Label>
+            <Input
+              id="floorArea"
+              type="number"
+              value={space.floorArea.toString()}
+              onChange={handleFloorAreaChange}
+              className="w-full"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="description">Description</Label>
+            <Input
+              id="description"
+              value={space.description}
+              onChange={(e) => setSpace(prev => ({ ...prev, description: e.target.value }))}
+              className="w-full"
+            />
+          </div>
+
+          {/* Discipline Fees */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Discipline Fees</h3>
+            <div className="space-y-4">
+              {disciplineFees.map((fee) => (
+                <div key={fee.id} className="rounded-lg border p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">{service.service_name}</div>
+                    <div className="font-medium">{fee.discipline}</div>
                     <button
                       type="button"
-                      onClick={() => handleEngineeringServiceToggle(service.id, !service.isActive)}
-                      className={cn(
-                        "p-1.5 rounded-md transition-colors",
-                        service.isActive
-                          ? "bg-primary/10 text-primary hover:bg-primary/20"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                      )}
-                      title={service.isActive ? 'Disable service' : 'Enable service'}
+                      onClick={() => handleDisciplineFeeToggle(fee.discipline, !fee.isActive)}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        fee.isActive
+                          ? 'bg-primary/10 text-primary hover:bg-primary/20' 
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                      title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
                     >
-                      {service.isActive ? (
+                      {fee.isActive ? (
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                           <path d="M20 6 9 17l-5-5"/>
                         </svg>
@@ -668,264 +751,25 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                       )}
                     </button>
                   </div>
-                  <div className="text-sm text-muted-foreground mb-2">
-                    {service.description}
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-muted-foreground">Discipline:</span>
-                    <span className="font-medium">{service.discipline}</span>
-                  </div>
-                  {service.estimated_fee && (
-                    <div className="flex justify-between items-center text-sm mt-1">
-                      <span className="text-muted-foreground">Estimated Fee:</span>
-                      <span className="font-medium">{service.estimated_fee}</span>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Cost per sq ft:</span>
+                      <div>{formatCurrency(fee.costPerSqft)}</div>
                     </div>
-                  )}
+                    <div>
+                      <span className="text-muted-foreground">Total Cost:</span>
+                      <div>{formatCurrency(fee.totalFee)}</div>
+                    </div>
+                  </div>
                 </div>
               ))}
-            </div>
-          </div>
-
-          {/* Right side - Space Details */}
-          <div className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="buildingType">Building Type</Label>
-              <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={openCombobox}
-                    className="w-full justify-between"
-                  >
-                    {selectedBuildingType
-                      ? selectedBuildingType.name
-                      : "Select a building type..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start" side="bottom" sideOffset={4}>
-                  <Command shouldFilter={false} className="w-full">
-                    <CommandInput 
-                      placeholder="Search by name or description..." 
-                      value={searchQuery}
-                      onValueChange={(value) => {
-                        setSearchQuery(value);
-                        setOpenCombobox(true);
-                      }}
-                    />
-                    <div className="relative">
-                      <CommandList 
-                        className="max-h-[300px] overflow-y-auto"
-                        style={{ 
-                          scrollbarWidth: 'thin',
-                          msOverflowStyle: 'none',
-                          WebkitOverflowScrolling: 'touch'
-                        }}
-                        onWheel={handleWheel}
-                      >
-                        <CommandEmpty>No building types found.</CommandEmpty>
-                        <CommandGroup>
-                          {filteredBuildingTypes.map((type) => (
-                            <CommandItem
-                              key={type.id}
-                              value={type.id}
-                              onSelect={() => {
-                                setSelectedBuildingType(type);
-                                setOpenCombobox(false);
-                                setSearchQuery('');
-                                
-                                setSpace(prev => ({
-                                  ...prev,
-                                  buildingTypeId: type.id,
-                                  buildingType: type.name || '',
-                                  name: type.name || '',
-                                  description: type.description || '',
-                                  spaceType: type.space_type || '',
-                                  discipline: type.discipline || '',
-                                  hvacSystem: type.hvac_system || '',
-                                  fees: disciplineFees,
-                                  floorArea: prev.floorArea || (type.default_area || 0),
-                                  splitFees: prev.splitFees
-                                }));
-                              }}
-                              className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Check
-                                  className={cn(
-                                    "h-4 w-4",
-                                    selectedBuildingType === type ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                <span className="font-medium">{type.name}</span>
-                              </div>
-                              {type.description && (
-                                <span className="text-sm text-muted-foreground ml-6 mt-0.5">
-                                  {type.description}
-                                </span>
-                              )}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </div>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="projectConstructionType">Project Construction Type</Label>
-              <Popover open={openConstructionTypeCombobox} onOpenChange={setOpenConstructionTypeCombobox}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={openConstructionTypeCombobox}
-                    className="w-full justify-between"
-                  >
-                    {selectedConstructionType
-                      ? selectedConstructionType.project_type
-                      : "Select a construction type..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start" side="bottom" sideOffset={4}>
-                  <Command shouldFilter={false} className="w-full">
-                    <CommandInput 
-                      placeholder="Search by type, definition, or description..." 
-                      value={constructionTypeSearchQuery}
-                      onValueChange={(value) => {
-                        setConstructionTypeSearchQuery(value);
-                        setOpenConstructionTypeCombobox(true);
-                      }}
-                    />
-                    <div className="relative">
-                      <CommandList 
-                        className="max-h-[300px] overflow-y-auto"
-                        style={{ 
-                          scrollbarWidth: 'thin',
-                          msOverflowStyle: 'none',
-                          WebkitOverflowScrolling: 'touch'
-                        }}
-                        onWheel={handleWheel}
-                      >
-                        <CommandEmpty>No construction types found.</CommandEmpty>
-                        <CommandGroup>
-                          {filteredConstructionTypes.map((type) => (
-                            <CommandItem
-                              key={type.id}
-                              value={type.id.toString()}
-                              onSelect={() => {
-                                setSelectedConstructionType(type);
-                                setOpenConstructionTypeCombobox(false);
-                                setConstructionTypeSearchQuery('');
-                                
-                                setSpace(prev => ({
-                                  ...prev,
-                                  projectConstructionType: type.project_type,
-                                  projectConstructionTypeId: type.id
-                                }));
-                              }}
-                              className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Check
-                                  className={cn(
-                                    "h-4 w-4",
-                                    selectedConstructionType?.id === type.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                <span className="font-medium">{type.project_type}</span>
-                              </div>
-                              <div className="text-sm text-muted-foreground ml-6 mt-0.5">
-                                <div>{type.definition}</div>
-                                <div className="mt-1">Cost Index: {type.relative_cost_index}</div>
-                              </div>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </div>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="grid gap-2">
-              {selectedBuildingType?.description && (
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap">
-                  {selectedBuildingType.description}
-                </div>
-              )}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="floorArea">Floor Area (sq ft)</Label>
-              <Input
-                id="floorArea"
-                value={space.floorArea.toString()}
-                onChange={handleFloorAreaChange}
-                onFocus={(e) => console.log('Input focused, current value:', e.target.value)}
-                onBlur={(e) => console.log('Input blurred, final value:', e.target.value)}
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder="Enter floor area"
-                className="flex h-10 w-full rounded-md border border-[#D1D5DB] dark:border-[#4DB6AC] bg-background px-3 py-2 text-sm text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted dark:placeholder:text-[#6B7280] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4DB6AC] dark:focus-visible:ring-[#4DB6AC] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Construction Cost by Discipline</Label>
-              <div className="space-y-4">
-                {disciplineFees.map((fee, index) => (
-                  <div key={fee.id} className="rounded-lg border p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium">{fee.discipline}</div>
-                      <button
-                        type="button"
-                        onClick={() => handleDisciplineFeeToggle(fee.discipline, !fee.isActive)}
-                        className={`p-1.5 rounded-md transition-colors ${
-                          fee.isActive
-                            ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                        }`}
-                        title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
-                      >
-                        {fee.isActive ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                            <path d="M20 6 9 17l-5-5"/>
-                          </svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                            <path d="M18 6 6 18"/>
-                            <path d="m6 6 12 12"/>
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Cost per sq ft:</span>
-                        <div>{formatCurrency(fee.costPerSqft)}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Total Cost:</span>
-                        <div>{formatCurrency(fee.totalFee)}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                <div className="mt-4 pt-4 border-t">
-                  <div className="flex justify-between items-center">
-                    <div className="font-medium">Total Cost</div>
-                    <div className="font-medium">
-                      {formatCurrency(disciplineFees.reduce((sum, fee) => 
-                        sum + (fee.isActive ? fee.totalFee : 0), 0
-                      ))}
-                    </div>
+              <div className="mt-4 pt-4 border-t">
+                <div className="flex justify-between items-center">
+                  <div className="font-medium">Total Cost</div>
+                  <div className="font-medium">
+                    {formatCurrency(disciplineFees.reduce((sum, fee) => 
+                      sum + (fee.isActive ? fee.totalFee : 0), 0
+                    ))}
                   </div>
                 </div>
               </div>
