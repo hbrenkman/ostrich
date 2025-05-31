@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface AddStandardServiceDialogProps {
   open: boolean;
@@ -16,17 +17,25 @@ interface AddStandardServiceDialogProps {
     discipline: string;
     service_name: string;
     description: string;
-    estimated_fee?: 'included' | 'additional_service';
-    default_setting?: boolean;
-    phase?: 'design' | 'construction';
+    included_in_fee: boolean;
+    default_included: boolean;
+    phase: 'design' | 'construction';
+    min_fee: number | null;
+    rate: number | null;
+    fee_increment: number | null;
+    construction_admin: boolean;
   }) => Promise<void>;
   onEdit?: (serviceId: string, service: {
     discipline: string;
     service_name: string;
     description: string;
-    estimated_fee?: 'included' | 'additional_service';
-    default_setting?: boolean;
-    phase?: 'design' | 'construction';
+    included_in_fee: boolean;
+    default_included: boolean;
+    phase: 'design' | 'construction';
+    min_fee: number | null;
+    rate: number | null;
+    fee_increment: number | null;
+    construction_admin: boolean;
   }) => Promise<void>;
   editMode?: boolean;
   serviceData?: {
@@ -34,9 +43,13 @@ interface AddStandardServiceDialogProps {
     discipline: string;
     service_name: string;
     description: string;
-    estimated_fee: string | null;
-    default_setting: boolean;
+    included_in_fee: boolean;
+    default_included: boolean;
     phase: 'design' | 'construction' | null;
+    min_fee: number | null;
+    rate: number | null;
+    fee_increment: number | null;
+    construction_admin: boolean;
   };
 }
 
@@ -60,6 +73,18 @@ const PHASES = [
   { value: 'construction', label: 'Construction' }
 ];
 
+const formatPercentage = (value: number | null): string => {
+  if (value === null) return '';
+  return `${value.toFixed(2)}%`;
+};
+
+const parsePercentage = (value: string): number | null => {
+  if (!value) return null;
+  // Remove any % symbol and convert to number
+  const num = parseFloat(value.replace('%', ''));
+  return isNaN(num) ? null : num;
+};
+
 export function AddStandardServiceDialog({
   open,
   onOpenChange,
@@ -75,9 +100,13 @@ export function AddStandardServiceDialog({
     discipline: '',
     service_name: '',
     description: '',
-    estimated_fee: 'included' as 'included' | 'additional_service',
-    default_setting: true,
-    phase: 'design' as 'design' | 'construction'
+    included_in_fee: true,
+    default_included: false,
+    phase: 'design' as 'design' | 'construction',
+    min_fee: null as number | null,
+    rate: null as number | null,
+    fee_increment: null as number | null,
+    construction_admin: false
   });
 
   // Reset form when dialog opens/closes or serviceData changes
@@ -87,9 +116,13 @@ export function AddStandardServiceDialog({
         discipline: serviceData.discipline,
         service_name: serviceData.service_name,
         description: serviceData.description,
-        estimated_fee: serviceData.estimated_fee as 'included' | 'additional_service' || 'included',
-        default_setting: serviceData.default_setting,
-        phase: serviceData.phase || 'design'
+        included_in_fee: serviceData.included_in_fee,
+        default_included: serviceData.default_included,
+        phase: serviceData.phase || 'design',
+        min_fee: serviceData.min_fee,
+        rate: serviceData.rate,
+        fee_increment: serviceData.fee_increment,
+        construction_admin: serviceData.construction_admin
       });
       // Initialize selectedDisciplines with the service's discipline
       setSelectedDisciplines([serviceData.discipline]);
@@ -98,9 +131,13 @@ export function AddStandardServiceDialog({
         discipline: '',
         service_name: '',
         description: '',
-        estimated_fee: 'included',
-        default_setting: true,
-        phase: 'design'
+        included_in_fee: true,
+        default_included: false,
+        phase: 'design',
+        min_fee: null,
+        rate: null,
+        fee_increment: null,
+        construction_admin: false
       });
       setSelectedDisciplines([]);
       setError(null);
@@ -125,8 +162,7 @@ export function AddStandardServiceDialog({
   const handleEstimatedFeeChange = (value: 'included' | 'additional_service') => {
     setFormData(prev => ({
       ...prev,
-      estimated_fee: value,
-      default_setting: value === 'included'
+      included_in_fee: value === 'included'
     }));
   };
 
@@ -149,12 +185,16 @@ export function AddStandardServiceDialog({
       if (editMode && serviceData && onEdit) {
         // In edit mode, we only update the single service
         await onEdit(serviceData.id, {
-          discipline: serviceData.discipline,
+          discipline: formData.discipline,
           service_name: formData.service_name,
           description: formData.description,
-          estimated_fee: formData.estimated_fee,
-          default_setting: formData.default_setting,
-          phase: formData.phase
+          included_in_fee: formData.included_in_fee,
+          default_included: formData.default_included,
+          phase: formData.phase,
+          min_fee: formData.min_fee,
+          rate: formData.rate,
+          fee_increment: formData.fee_increment,
+          construction_admin: formData.construction_admin
         });
       } else {
         // In add mode, create a service for each selected discipline
@@ -163,9 +203,13 @@ export function AddStandardServiceDialog({
             discipline,
             service_name: formData.service_name,
             description: formData.description,
-            estimated_fee: formData.estimated_fee,
-            default_setting: formData.default_setting,
-            phase: formData.phase
+            included_in_fee: formData.included_in_fee,
+            default_included: formData.default_included,
+            phase: formData.phase,
+            min_fee: formData.min_fee,
+            rate: formData.rate,
+            fee_increment: formData.fee_increment,
+            construction_admin: formData.construction_admin
           });
         }
       }
@@ -289,36 +333,135 @@ export function AddStandardServiceDialog({
           <div className="space-y-2">
             <Label htmlFor="estimated_fee">Estimated Fee</Label>
             <Select
-              value={formData.estimated_fee}
+              value={formData.included_in_fee ? 'included' : 'additional_service'}
               onValueChange={handleEstimatedFeeChange}
-              defaultValue="included"
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select fee type" />
               </SelectTrigger>
               <SelectContent>
-                {ESTIMATED_FEE_OPTIONS.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                <SelectItem value="included">Included in Project Scope</SelectItem>
+                <SelectItem value="additional_service">Additional Service</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="flex items-center space-x-2">
             <Switch
-              id="default_setting"
-              checked={formData.default_setting}
-              disabled
-              className="opacity-50"
+              id="default_included"
+              checked={formData.default_included}
+              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, default_included: checked }))}
             />
-            <Label htmlFor="default_setting" className="text-muted-foreground">
-              {formData.estimated_fee === 'included' 
-                ? 'Included in project scope'
-                : 'See additional service'}
+            <Label htmlFor="default_included" className="text-muted-foreground">
+              Default Included (Service will be included by default in new proposals)
             </Label>
           </div>
+
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="construction_admin"
+              checked={formData.construction_admin}
+              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, construction_admin: checked }))}
+              className="data-[state=checked]:bg-yellow-500"
+            />
+            <Label htmlFor="construction_admin" className="text-muted-foreground">
+              Construction Administration Fee Calculation
+            </Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="ml-2 text-muted-foreground cursor-help">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                      <path d="M12 17h.01"></path>
+                    </svg>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[300px]">
+                  <p className="font-medium">Construction Administration Fee</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    When enabled, this service will affect the construction administration fee calculation in the fixed fee table.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
+          {!formData.included_in_fee && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="min_fee">Minimum Fee ($)</Label>
+                <Input
+                  id="min_fee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.min_fee || ''}
+                  onChange={(e) => setFormData(prev => ({
+                    ...prev,
+                    min_fee: e.target.value ? parseFloat(e.target.value) : null
+                  }))}
+                  placeholder="Enter minimum fee"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="rate">Rate (%)</Label>
+                <div className="relative">
+                  <Input
+                    id="rate"
+                    type="text"
+                    inputMode="decimal"
+                    value={formData.rate !== null ? (document.activeElement === document.getElementById('rate') 
+                      ? formData.rate.toString() 
+                      : formatPercentage(formData.rate)) : ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty input or numbers
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        const numValue = value === '' ? null : parseFloat(value);
+                        setFormData(prev => ({
+                          ...prev,
+                          rate: numValue
+                        }));
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = parseFloat(e.target.value);
+                      if (!isNaN(value)) {
+                        setFormData(prev => ({
+                          ...prev,
+                          rate: value
+                        }));
+                      }
+                    }}
+                    placeholder="Enter percentage rate"
+                    className="pr-8"
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                    %
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="fee_increment">Fee Increment ($)</Label>
+                <Input
+                  id="fee_increment"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.fee_increment || ''}
+                  onChange={(e) => setFormData(prev => ({
+                    ...prev,
+                    fee_increment: e.target.value ? parseFloat(e.target.value) : null
+                  }))}
+                  placeholder="Enter fee increment amount"
+                />
+              </div>
+            </>
+          )}
 
           <DialogFooter>
             <Button

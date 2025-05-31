@@ -109,9 +109,10 @@ interface TrackedService {
   id: string;
   service_name: string;
   discipline: string;
-  included_in_fee: boolean;
+  default_included: boolean;
   min_fee: number | null;
   rate: number | null;
+  phase: 'design' | 'construction';
 }
 
 interface FixedFeesProps {
@@ -121,9 +122,18 @@ interface FixedFeesProps {
   onCalculateFee: (structure: Structure, discipline: string, phase: 'design' | 'construction') => { fee: number; rate: number };
   onDesignPercentageChange?: (structureId: string, percentage: number) => void;
   trackedServices?: TrackedService[];
+  onServiceFeeUpdate?: (serviceId: string, discipline: string, fee: number) => void;
 }
 
-export default function FixedFees({ structures, phase, onFeeUpdate, onCalculateFee, onDesignPercentageChange, trackedServices = [] }: FixedFeesProps) {
+export default function FixedFees({ 
+  structures, 
+  phase, 
+  onFeeUpdate, 
+  onCalculateFee, 
+  onDesignPercentageChange, 
+  trackedServices = [],
+  onServiceFeeUpdate 
+}: FixedFeesProps) {
   const formatCurrency = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return '$0';
     return new Intl.NumberFormat('en-US', {
@@ -171,56 +181,65 @@ export default function FixedFees({ structures, phase, onFeeUpdate, onCalculateF
     'Structural'
   ];
 
-  const renderTrackedServices = (structureId: string) => {
-    // Filter services for this structure's discipline
-    const structureServices = trackedServices.filter((service): service is TrackedService & { min_fee: number } => 
-      service.included_in_fee && service.min_fee !== null
+  const renderTrackedServices = (structureId: string, phase: 'design' | 'construction') => {
+    // Filter services for this phase
+    const phaseServices = trackedServices.filter(service => 
+      service.default_included &&
+      service.min_fee !== null &&
+      service.phase === phase
     );
 
-    if (!structureServices.length) return null;
+    if (!phaseServices.length) return null;
 
-    // Group services by name and accumulate fees by discipline
-    const groupedServices = structureServices.reduce((acc, service) => {
-      const existingService = acc.find(s => s.service_name === service.service_name);
-      if (existingService) {
-        // Add fee to the appropriate discipline
-        existingService.fees[service.discipline] = (existingService.fees[service.discipline] || 0) + service.min_fee;
-      } else {
-        // Create new service entry
-        acc.push({
-          id: service.id,
-          service_name: service.service_name,
-          fees: {
-            [service.discipline]: service.min_fee
-          }
-        });
+    // Group services by name
+    const servicesByName = phaseServices.reduce((acc, service) => {
+      if (!acc[service.service_name]) {
+        acc[service.service_name] = [];
       }
+      acc[service.service_name].push(service);
       return acc;
-    }, [] as Array<{ id: string; service_name: string; fees: Record<string, number> }>);
+    }, {} as Record<string, TrackedService[]>);
 
     return (
-      <div className="mt-4 border-t border-gray-200 pt-4">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">Included Engineering Services</h3>
-        <div className="space-y-2">
-          {groupedServices.map(service => (
-            <div key={service.id} className="grid grid-cols-6 gap-2 px-4">
-              <div className="flex items-center p-2 bg-gray-50 rounded-md">
-                <div className="text-sm font-medium">{service.service_name}</div>
-              </div>
-              {DISCIPLINES.map(discipline => (
-                <div key={discipline} className="flex items-center">
-                  <div className="flex-1 flex justify-end pr-10">
-                    {service.fees[discipline] > 0 && (
-                      <div className="text-sm font-medium">
-                        {formatCurrency(service.fees[discipline])}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+      <div className="mt-4 space-y-2">
+        {Object.entries(servicesByName).map(([serviceName, services]) => (
+          <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
+            {/* Description column */}
+            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
+              <Home className="w-3.5 h-3.5 text-primary/50" />
+              <span className="text-sm">{serviceName}</span>
             </div>
-          ))}
-        </div>
+            
+            {/* Discipline columns */}
+            {DISCIPLINES.map(discipline => {
+              // Find the service for this discipline
+              const service = services.find(s => s.discipline === discipline);
+              if (!service) {
+                return <div key={discipline} className="h-10" />;
+              }
+
+              return (
+                <div key={discipline} className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <Input
+                      type="text"
+                      value={formatCurrency(service.min_fee)}
+                      onChange={(e) => {
+                        if (onServiceFeeUpdate) {
+                          const value = e.target.value.replace(/[^0-9.-]+/g, '');
+                          const numericValue = parseFloat(value) || 0;
+                          onServiceFeeUpdate(service.id, discipline, numericValue);
+                        }
+                      }}
+                      className="text-right pr-2 bg-transparent"
+                    />
+                  </div>
+                  <div className="w-8" /> {/* Spacer to match the check button width */}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     );
   };
@@ -229,7 +248,7 @@ export default function FixedFees({ structures, phase, onFeeUpdate, onCalculateF
   const getServiceFeesForDiscipline = (structureId: string, discipline: string): number => {
     const fees = trackedServices
       .filter((service): service is TrackedService & { min_fee: number } => 
-        service.included_in_fee && 
+        service.default_included &&
         service.min_fee !== null && 
         service.discipline === discipline
       )
@@ -240,7 +259,7 @@ export default function FixedFees({ structures, phase, onFeeUpdate, onCalculateF
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       {structures.map(structure => (
         <Card key={structure.id} className="p-4">
           <div className="flex items-center justify-between mb-4">
@@ -248,81 +267,151 @@ export default function FixedFees({ structures, phase, onFeeUpdate, onCalculateF
             {renderPhasePercentages(structure)}
           </div>
 
-          {/* Add discipline headers at structure level with Description column */}
-          <div className="grid grid-cols-6 gap-2 mb-4 px-4 border-b border-gray-200 pb-2">
-            <div className="text-sm font-medium">Description</div>
-            {DISCIPLINES.map(discipline => (
-              <div key={discipline} className="text-sm font-medium text-center">
-                {discipline}
-              </div>
-            ))}
-          </div>
+          {/* Design Phase Section */}
+          <div className="mb-8">
+            <h3 className="text-md font-medium text-gray-700 mb-4">Design Phase</h3>
+            
+            {/* Design Phase Headers */}
+            <div className="grid grid-cols-6 gap-2 mb-4 px-4 border-b border-gray-200 pb-2">
+              <div className="text-sm font-medium">Description</div>
+              {DISCIPLINES.map(discipline => (
+                <div key={discipline} className="text-sm font-medium text-center">
+                  {discipline}
+                </div>
+              ))}
+            </div>
 
-          <div className="mt-4 space-y-4">
-            {structure.levels.map(level => (
-              <div key={level.id} className="space-y-2">
-                <div className="grid grid-cols-6 gap-2 px-4">
-                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                    <Building2 className="w-3.5 h-3.5 text-primary/50" />
-                    <span className="text-sm font-medium">{level.name}</span>
+            <div className="mt-4 space-y-4">
+              {structure.levels.map(level => (
+                <div key={`design-${level.id}`} className="space-y-2">
+                  <div className="grid grid-cols-6 gap-2 px-4">
+                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                      <Building2 className="w-3.5 h-3.5 text-primary/50" />
+                      <span className="text-sm font-medium">{level.name}</span>
+                    </div>
+                    {DISCIPLINES.map(discipline => (
+                      <div key={discipline} className="h-10" />
+                    ))}
                   </div>
-                  {/* Empty cells for discipline columns */}
-                  {DISCIPLINES.map(discipline => (
-                    <div key={discipline} className="h-10" />
+                  {level.spaces.map(space => (
+                    <div key={`design-${space.id}`} className="grid grid-cols-6 gap-2 px-4">
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
+                        <Home className="w-3.5 h-3.5 text-primary/50" />
+                        <span className="text-sm">{space.name}</span>
+                      </div>
+                      {DISCIPLINES.map(discipline => {
+                        const fee = space.fees.find(f => f.discipline === discipline);
+                        if (!fee) return <div key={discipline} className="h-10" />;
+
+                        const { fee: designFee } = onCalculateFee(structure, discipline, 'design');
+                        const totalStructureArea = structure.levels.reduce((total, level) => 
+                          total + level.spaces.reduce((levelTotal, space) => levelTotal + (space.floorArea || 0), 0), 0);
+                        const spacePortion = totalStructureArea > 0 ? (space.floorArea || 0) / totalStructureArea : 0;
+                        const designSpaceFee = designFee * spacePortion;
+
+                        return (
+                          <div key={discipline} className="flex items-center gap-2">
+                            <div className="flex-1">
+                              <Input
+                                type="text"
+                                value={fee.isActive ? formatCurrency(designSpaceFee) : ''}
+                                className="text-right pr-2 bg-transparent"
+                                readOnly
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive })}
+                              className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'}`}
+                              title={fee.isActive ? "Disable discipline" : "Enable discipline"}
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ))}
                 </div>
-                {level.spaces.map(space => (
-                  <div key={space.id} className="grid grid-cols-6 gap-2 px-4">
-                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
-                      <Home className="w-3.5 h-3.5 text-primary/50" />
-                      <span className="text-sm">{space.name}</span>
-                    </div>
-                    {DISCIPLINES.map(discipline => {
-                      const fee = space.fees.find(f => f.discipline === discipline);
-                      if (!fee) return <div key={discipline} className="h-10" />;
+              ))}
+            </div>
 
-                      // Calculate the fee for this discipline and phase
-                      const { fee: calculatedFee, rate } = onCalculateFee(
-                        structure,
-                        discipline,
-                        phase
-                      );
-
-                      // Calculate the space's portion of the fee based on its area
-                      const totalStructureArea = structure.levels.reduce((total, level) => 
-                        total + level.spaces.reduce((levelTotal, space) => levelTotal + (space.floorArea || 0), 0), 0);
-                      const spacePortion = totalStructureArea > 0 ? (space.floorArea || 0) / totalStructureArea : 0;
-                      const spaceFee = calculatedFee * spacePortion;
-
-                      return (
-                        <div key={discipline} className="flex items-center gap-2">
-                          <div className="flex-1">
-                            <Input
-                              type="text"
-                              value={fee.isActive ? formatCurrency(spaceFee) : ''}
-                              className="text-right pr-2 bg-transparent"
-                              readOnly
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive })}
-                            className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'}`}
-                            title={fee.isActive ? "Disable discipline" : "Enable discipline"}
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            ))}
+            {/* Add tracked services for design phase */}
+            {renderTrackedServices(structure.id, 'design')}
           </div>
 
-          {/* Add tracked services after the levels and spaces */}
-          {renderTrackedServices(structure.id)}
+          {/* Construction Phase Section */}
+          <div>
+            <h3 className="text-md font-medium text-gray-700 mb-4">Construction Phase</h3>
+            
+            {/* Construction Phase Headers */}
+            <div className="grid grid-cols-6 gap-2 mb-4 px-4 border-b border-gray-200 pb-2">
+              <div className="text-sm font-medium">Description</div>
+              {DISCIPLINES.map(discipline => (
+                <div key={discipline} className="text-sm font-medium text-center">
+                  {discipline}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {structure.levels.map(level => (
+                <div key={`construction-${level.id}`} className="space-y-2">
+                  <div className="grid grid-cols-6 gap-2 px-4">
+                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                      <Building2 className="w-3.5 h-3.5 text-primary/50" />
+                      <span className="text-sm font-medium">{level.name}</span>
+                    </div>
+                    {DISCIPLINES.map(discipline => (
+                      <div key={discipline} className="h-10" />
+                    ))}
+                  </div>
+                  {level.spaces.map(space => (
+                    <div key={`construction-${space.id}`} className="grid grid-cols-6 gap-2 px-4">
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
+                        <Home className="w-3.5 h-3.5 text-primary/50" />
+                        <span className="text-sm">{space.name}</span>
+                      </div>
+                      {DISCIPLINES.map(discipline => {
+                        const fee = space.fees.find(f => f.discipline === discipline);
+                        if (!fee) return <div key={discipline} className="h-10" />;
+
+                        const { fee: constructionFee } = onCalculateFee(structure, discipline, 'construction');
+                        const totalStructureArea = structure.levels.reduce((total, level) => 
+                          total + level.spaces.reduce((levelTotal, space) => levelTotal + (space.floorArea || 0), 0), 0);
+                        const spacePortion = totalStructureArea > 0 ? (space.floorArea || 0) / totalStructureArea : 0;
+                        const constructionSpaceFee = constructionFee * spacePortion;
+
+                        return (
+                          <div key={discipline} className="flex items-center gap-2">
+                            <div className="flex-1">
+                              <Input
+                                type="text"
+                                value={fee.isActive ? formatCurrency(constructionSpaceFee) : ''}
+                                className="text-right pr-2 bg-transparent"
+                                readOnly
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive })}
+                              className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'}`}
+                              title={fee.isActive ? "Disable discipline" : "Enable discipline"}
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            {/* Add tracked services for construction phase */}
+            {renderTrackedServices(structure.id, 'construction')}
+          </div>
         </Card>
       ))}
     </div>

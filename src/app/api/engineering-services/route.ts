@@ -7,9 +7,11 @@ interface EngineeringService {
   service_name: string;
   description: string;
   included_in_fee: boolean;
+  default_included: boolean;
   phase: 'design' | 'construction';
   min_fee: number | null;
   rate: number | null;
+  fee_increment: number | null;
 }
 
 interface RawServiceData {
@@ -85,9 +87,11 @@ export async function POST(request: NextRequest) {
         service_name: body.service_name,
         description: body.description,
         included_in_fee: body.included_in_fee ?? false,
+        default_included: body.default_included ?? false,
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
-        rate: body.rate || null
+        rate: body.rate || null,
+        fee_increment: body.fee_increment || null
       })
       .select()
       .single();
@@ -178,7 +182,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Update the service
+    // Update the service with only the fields that exist in the database
     const { data, error } = await supabase
       .from('engineering_standard_services')
       .update({
@@ -186,9 +190,11 @@ export async function PUT(request: NextRequest) {
         service_name: body.service_name,
         description: body.description,
         included_in_fee: body.included_in_fee ?? false,
+        default_included: body.default_included ?? false,
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
-        rate: body.rate || null
+        rate: body.rate || null,
+        fee_increment: body.fee_increment || null
       })
       .eq('id', serviceId)
       .select()

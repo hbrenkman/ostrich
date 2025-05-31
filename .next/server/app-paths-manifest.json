@@ -1,11 +1,6 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
+  "/admin/reference-tables/page": "app/admin/reference-tables/page.js",
+  "/admin/users-permissions/page": "app/admin/users-permissions/page.js",
   "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js",
-  "/api/projects/[id]/route": "app/api/projects/[id]/route.js",
-  "/api/engineering-services/route": "app/api/engineering-services/route.js",
-  "/api/proposal-number/route": "app/api/proposal-number/route.js",
-  "/api/fee-duplicate-structures/route": "app/api/fee-duplicate-structures/route.js",
-  "/api/design-fee-scale/route": "app/api/design-fee-scale/route.js",
-  "/api/fee-additional-items/route": "app/api/fee-additional-items/route.js",
-  "/api/project-construction-types/route": "app/api/project-construction-types/route.js"
+  "/projects/page": "app/projects/page.js"
 }

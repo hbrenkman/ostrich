@@ -1,9 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, DragEvent } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import {
   Command,
@@ -205,9 +211,11 @@ interface EngineeringStandardService {
   service_name: string;
   description: string;
   included_in_fee: boolean;
+  default_included: boolean;
   phase: 'design' | 'construction';
   min_fee: number | null;
   rate: number | null;
+  fee_increment: number | null;  // fee increment value
 }
 
 // Add interface for tracked services
@@ -215,19 +223,21 @@ interface TrackedService {
   id: string;
   service_name: string;
   discipline: string;
-  included_in_fee: boolean;
+  default_included: boolean;
   min_fee: number | null;
-  rate: number | null;
+  rate: number | null;  // percentage rate
+  fee_increment: number | null;  // fee increment value
+  phase: 'design' | 'construction';
 }
 
 // Update EngineeringServicesDisplay props
 interface EngineeringServicesDisplayProps {
   services: EngineeringStandardService[];
   isLoading: boolean;
-  onServiceUpdate?: (serviceId: string, updates: Partial<EngineeringStandardService>) => void;
+  onServiceUpdate: (serviceId: string, updates: Partial<EngineeringStandardService>) => void;
   proposal: ProposalFormData;
-  setProposal: React.Dispatch<React.SetStateAction<ProposalFormData>>;
-  onServicesChange?: (services: TrackedService[]) => void;  // Add this prop
+  setProposal: (proposal: ProposalFormData) => void;
+  onServicesChange: (services: TrackedService[]) => void;
 }
 
 function EngineeringServicesDisplay({ 
@@ -239,91 +249,90 @@ function EngineeringServicesDisplay({
   onServicesChange 
 }: EngineeringServicesDisplayProps) {
   const [draggedService, setDraggedService] = useState<EngineeringStandardService | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
-  // Add effect to notify parent of service changes
-  useEffect(() => {
-    if (onServicesChange) {
-      const trackedServices: TrackedService[] = services.map(service => ({
-        id: service.id,
-        service_name: service.service_name,
-        discipline: service.discipline,
-        included_in_fee: service.included_in_fee,
-        min_fee: service.min_fee,
-        rate: service.rate
-      }));
-      onServicesChange(trackedServices);
-    }
-  }, [services, onServicesChange]);
-
-  if (isLoading) {
-    return <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>;
-  }
-
-  const includedServices = services.filter(service => service.included_in_fee);
-  const excludedServices = services.filter(service => !service.included_in_fee);
+  // Use default_included from services directly
+  const includedServices = services.filter(service => service.default_included);
+  const excludedServices = services.filter(service => !service.default_included);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
-    console.log('=== DRAG START ===');
-    console.log('Service:', service.service_name);
+    console.log('Drag start:', service.service_name);
+    setIsDragging(true);
     setDraggedService(service);
     const dragData = {
       type: 'engineering_service',
-      service: service
+      serviceId: service.id,
+      serviceName: service.service_name
     };
     e.dataTransfer.setData('application/json', JSON.stringify(dragData));
     e.dataTransfer.effectAllowed = 'move';
-    console.log('Drag data set:', dragData);
   };
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
+  const handleDragEnd = () => {
+    console.log('Drag end');
+    setIsDragging(false);
+    setDraggedService(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, isIncluded: boolean) => {
     e.preventDefault();
-    e.stopPropagation();
-    console.log('=== DRAG OVER ===');
-    console.log('Target included:', targetIncluded);
-    
-    if (draggedService) {
-      console.log('Dragged service:', draggedService.service_name);
-      e.dataTransfer.dropEffect = 'move';
-      console.log('Drop effect set to move');
-    } else {
-      e.dataTransfer.dropEffect = 'none';
-      console.log('No dragged service, drop effect set to none');
-    }
+    e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
     e.preventDefault();
-    console.log('=== DROP ATTEMPT ===');
-    console.log('Target included:', targetIncluded);
-
-    // Get the current dragged service from state
-    const currentDraggedService = draggedService;
-    if (!currentDraggedService) {
-      console.log('No dragged service found');
+    e.stopPropagation();
+    
+    const data = e.dataTransfer.getData('application/json');
+    if (!data) {
+      console.error('No data received in drop event');
       return;
     }
 
-    console.log('Processing drop for service:', currentDraggedService.service_name);
-    console.log('Current included status:', currentDraggedService.included_in_fee);
-    console.log('Target included status:', targetIncluded);
-
-    // Only update if the included status is changing
-    if (currentDraggedService.included_in_fee !== targetIncluded) {
-      console.log('Updating service status...');
+    try {
+      const { serviceId, serviceName } = JSON.parse(data);
+      console.log('Drop event data:', { serviceId, serviceName, targetIncluded });
       
-      // Update the service's included status
-      if (onServiceUpdate) {
-        onServiceUpdate(currentDraggedService.id, { included_in_fee: targetIncluded });
+      // Find the service in the services array
+      const serviceIndex = services.findIndex(s => s.id === serviceId);
+      if (serviceIndex === -1) {
+        console.error('Service not found:', serviceId);
+        return;
       }
+
+      const service = services[serviceIndex];
+      console.log('Service being updated:', {
+        id: service.id,
+        name: service.service_name,
+        default_included: service.default_included,
+        min_fee: service.min_fee,
+        phase: service.phase,
+        discipline: service.discipline
+      });
+
+      // Only update if the inclusion status is actually changing
+      if (service.default_included !== targetIncluded) {
+        onServiceUpdate(serviceId, { default_included: targetIncluded });
+        
+        // Log the services that will be passed to onServicesChange
+        const updatedServices = services.map(s => 
+          s.id === serviceId 
+            ? { ...s, default_included: targetIncluded }
+            : s
+        );
+        console.log('Services being passed to onServicesChange:', updatedServices.map(s => ({
+          id: s.id,
+          name: s.service_name,
+          default_included: s.default_included,
+          min_fee: s.min_fee,
+          phase: s.phase
+        })));
+        
+        onServicesChange(updatedServices);
+      }
+    } catch (error) {
+      console.error('Error handling drop:', error);
     }
-
-    console.log('Drop complete');
-    setDraggedService(null);  // Clear the dragged service state
-  };
-
-  const handleDragEnd = () => {
-    console.log('=== DRAG END ===');
-    setDraggedService(null);
   };
 
   const groupServicesByDiscipline = (services: EngineeringStandardService[]): Record<string, EngineeringStandardService[]> => {
@@ -343,14 +352,16 @@ function EngineeringServicesDisplay({
       draggable
       onDragStart={(e) => handleDragStart(e, service)}
       onDragEnd={handleDragEnd}
-      className={`text-xs text-gray-700 dark:text-gray-300 p-1 rounded cursor-move hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-        draggedService?.id === service.id ? 'opacity-50' : ''
+      className={`flex items-center justify-between p-2 rounded-md cursor-move hover:bg-gray-100 dark:hover:bg-gray-800 ${
+        isDragging && draggedService?.id === service.id ? 'opacity-50' : ''
       }`}
     >
-      {service.service_name}
-      {service.rate && (
-        <span className="ml-1 text-gray-500">({service.rate}%)</span>
-      )}
+      <div className="flex items-center gap-2">
+        <GripVertical className="w-4 h-4 text-gray-400" />
+        <div>
+          <div className="text-sm font-medium">{service.service_name}</div>
+        </div>
+      </div>
     </div>
   );
 
@@ -359,11 +370,20 @@ function EngineeringServicesDisplay({
       {/* Included Services */}
       <div
         className={`border border-green-500/20 rounded-md overflow-hidden ${
-          draggedService && !draggedService.included_in_fee ? 'border-green-500/50 bg-green-500/5' : ''
+          isDragging && draggedService && !draggedService.default_included ? 'border-green-500/50 bg-green-500/5' : ''
         }`}
-        onDragOver={(e) => handleDragOver(e, true)}
-        onDrop={(e) => handleDrop(e, true)}
-        onDragEnd={handleDragEnd}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('Drag over included');
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('Drop on included');
+          handleDrop(e, true);
+        }}
       >
         <div className="bg-green-500/10 px-2 py-1">
           <h3 className="text-sm font-medium text-green-700 dark:text-green-400">Included Services</h3>
@@ -389,11 +409,20 @@ function EngineeringServicesDisplay({
       {/* Excluded Services */}
       <div
         className={`border border-red-500/20 rounded-md overflow-hidden ${
-          draggedService && draggedService.included_in_fee ? 'border-red-500/50 bg-red-500/5' : ''
+          isDragging && draggedService && draggedService.default_included ? 'border-red-500/50 bg-red-500/5' : ''
         }`}
-        onDragOver={(e) => handleDragOver(e, false)}
-        onDrop={(e) => handleDrop(e, false)}
-        onDragEnd={handleDragEnd}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('Drag over excluded');
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('Drop on excluded');
+          handleDrop(e, false);
+        }}
       >
         <div className="bg-red-500/10 px-2 py-1">
           <h3 className="text-sm font-medium text-red-700 dark:text-red-400">Excluded Services</h3>
@@ -843,10 +872,53 @@ export default function EditProposalPage() {
     }
   };
 
+  // Add a new useEffect to handle service updates when structures change
+  useEffect(() => {
+    // Only proceed if we have loaded engineering services
+    if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
+      console.log('Checking for services with min_fee after structure change:', {
+        totalServices: engineeringStandardServices.length,
+        includedServices: engineeringStandardServices.filter(s => s.default_included).length,
+        servicesWithMinFee: engineeringStandardServices.filter(s => s.min_fee !== null).length
+      });
+
+      // Find services that are included and have non-null min_fee
+      const servicesWithFees = engineeringStandardServices.filter(service => 
+        service.default_included && 
+        service.min_fee !== null
+      );
+
+      console.log('Found services with fees:', servicesWithFees.map(s => ({
+        name: s.service_name,
+        discipline: s.discipline,
+        min_fee: s.min_fee,
+        rate: s.rate,
+        fee_increment: s.fee_increment,
+        default_included: s.default_included
+      })));
+
+      if (servicesWithFees.length > 0) {
+        const updatedTrackedServices = servicesWithFees.map(service => ({
+          id: service.id,
+          service_name: service.service_name,
+          discipline: service.discipline,
+          default_included: service.default_included,
+          min_fee: service.min_fee,
+          rate: service.rate,
+          fee_increment: service.fee_increment,
+          phase: service.phase
+        }));
+
+        console.log('Updating tracked services with rate and fee_increment:', updatedTrackedServices);
+        setTrackedServices(updatedTrackedServices);
+      }
+    }
+  }, [proposal.structures, engineeringStandardServices, isLoadingStandardServices]);
+
   const handleAddStructure = (structure: Omit<Structure, 'id'>) => {
     const newStructure: Structure = {
       id: crypto.randomUUID(),
-      name: structure.name || "New Structure",  // Use name field, fallback to "New Structure"
+      name: structure.name || "New Structure",
       constructionType: structure.constructionType,
       floorArea: structure.floorArea,
       description: structure.description,
@@ -859,6 +931,7 @@ export default function EditProposalPage() {
       designPercentage: 80
     };
 
+    // Update proposal with new structure only
     setProposal(prev => ({
       ...prev,
       structures: [...prev.structures, newStructure]
@@ -2388,10 +2461,29 @@ export default function EditProposalPage() {
       // Revert the local state if the API call fails
       setEngineeringStandardServices(prevServices => 
         prevServices.map(service => 
-          service.id === serviceId ? { ...service, included_in_fee: !updates.included_in_fee } : service
+          service.id === serviceId ? { ...service, default_included: !updates.default_included } : service
         )
       );
     }
+  };
+
+  // Add logging for trackedServices changes
+  useEffect(() => {
+    console.log('=== TrackedServices Updated ===');
+    console.log('Total services:', trackedServices.length);
+    console.log('Services:', trackedServices.map(service => ({
+      id: service.id,
+      name: service.service_name,
+      discipline: service.discipline,
+      default_included: service.default_included,
+      min_fee: service.min_fee,
+      phase: service.phase
+    })));
+  }, [trackedServices]);
+
+  // Add handler for services change
+  const handleServicesChange = (services: TrackedService[]) => {
+    setTrackedServices(services);
   };
 
   return (
@@ -2634,7 +2726,7 @@ export default function EditProposalPage() {
                         onServiceUpdate={handleServiceUpdate}
                         proposal={proposal}
                         setProposal={setProposal}
-                        onServicesChange={setTrackedServices}
+                        onServicesChange={handleServicesChange}
                       />
                     )}
                   </div>
