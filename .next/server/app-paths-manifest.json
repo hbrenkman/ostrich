@@ -2,5 +2,9 @@
   "/admin/reference-tables/page": "app/admin/reference-tables/page.js",
   "/admin/users-permissions/page": "app/admin/users-permissions/page.js",
   "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js",
-  "/projects/page": "app/projects/page.js"
+  "/projects/page": "app/projects/page.js",
+  "/api/engineering-services/route": "app/api/engineering-services/route.js",
+  "/api/reference-tables/route": "app/api/reference-tables/route.js",
+  "/api/state-cost-index/route": "app/api/state-cost-index/route.js",
+  "/projects/[id]/page": "app/projects/[id]/page.js"
 }

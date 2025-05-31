@@ -742,7 +742,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
           {/* Discipline Fees */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Discipline Fees</h3>
+            <h3 className="text-lg font-semibold">Discipline Construction Costs</h3>
             <div className="space-y-4">
               {disciplineFees.map((fee) => (
                 <div key={fee.id} className="rounded-lg border p-4">

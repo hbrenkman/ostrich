@@ -733,6 +733,9 @@ video {
 .top-full {
   top: 100%;
 }
+.right-8 {
+  right: 2rem;
+}
 .z-10 {
   z-index: 10;
 }

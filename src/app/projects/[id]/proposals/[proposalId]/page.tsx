@@ -228,6 +228,7 @@ interface TrackedService {
   rate: number | null;  // percentage rate
   fee_increment: number | null;  // fee increment value
   phase: 'design' | 'construction';
+  customFee?: number;
 }
 
 // Update EngineeringServicesDisplay props
@@ -256,7 +257,7 @@ function EngineeringServicesDisplay({
   const excludedServices = services.filter(service => !service.default_included);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
-    console.log('Drag start:', service.service_name);
+    // console.log('Drag start:', service.service_name);
     setIsDragging(true);
     setDraggedService(service);
     const dragData = {
@@ -269,7 +270,7 @@ function EngineeringServicesDisplay({
   };
 
   const handleDragEnd = () => {
-    console.log('Drag end');
+    // console.log('Drag end');
     setIsDragging(false);
     setDraggedService(null);
   };
@@ -1876,25 +1877,98 @@ export default function EditProposalPage() {
     return { adjustedRate: disciplineRate };
   };
 
-  const calculateDisciplineFee = (structure: Structure, discipline: string, phase: 'design' | 'construction'): { fee: number; rate: number } => {
+  const calculateDisciplineFee = (
+    structure: Structure, 
+    discipline: string, 
+    phase: 'design' | 'construction',
+    returnRawCost: boolean = false
+  ): { fee: number; rate: number } => {
+    console.log('\n=== Calculating Discipline Fee ===');
+    console.log('Inputs:', {
+      structure: structure.name,
+      discipline,
+      phase,
+      designPercentage: structure.designPercentage ?? 80,
+      returnRawCost
+    });
+
     // Get the fee scale rate
     const feeScale = getFeeScale(structure, discipline);
+    console.log('Fee Scale:', {
+      adjustedRate: feeScale.adjustedRate,
+      rawRate: feeScale.adjustedRate
+    });
 
     // Calculate the percentage based on phase
     const percentage = phase === 'design' 
       ? (structure.designPercentage ?? 80) / 100 
       : (100 - (structure.designPercentage ?? 80)) / 100;
+    console.log('Phase Percentage:', {
+      phase,
+      rawPercentage: structure.designPercentage ?? 80,
+      calculatedPercentage: percentage
+    });
     
-    // Calculate total construction cost for this structure
-    const constructionCost = structure.levels.reduce((total, level) =>
-      level.spaces.reduce((levelTotal, space) =>
-        levelTotal + space.fees.reduce((feeTotal, fee) =>
-          feeTotal + (fee.isActive ? fee.totalFee : 0), 0), 0), 0);
+    // Calculate discipline-specific construction cost for this structure
+    const totalConstructionCost = structure.levels.reduce((total, level) =>
+      level.spaces.reduce((levelTotal, space) => {
+        const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
+        if (fee) {
+          const spaceConstructionCost = fee.costPerSqft * space.floorArea;
+          console.log('Adding construction cost for space:', {
+            level: level.name,
+            space: space.name,
+            discipline: fee.discipline,
+            costPerSqft: fee.costPerSqft,
+            floorArea: space.floorArea,
+            constructionCost: spaceConstructionCost
+          });
+          return levelTotal + spaceConstructionCost;
+        }
+        return levelTotal;
+      }, 0), 0);
+    
+    console.log('Construction Cost Calculation:', {
+      totalConstructionCost,
+      breakdown: structure.levels.map(level => ({
+        level: level.name,
+        spaces: level.spaces.map(space => {
+          const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
+          return {
+            space: space.name,
+            fee: fee ? {
+              discipline: fee.discipline,
+              costPerSqft: fee.costPerSqft,
+              floorArea: space.floorArea,
+              constructionCost: fee.costPerSqft * space.floorArea
+            } : null
+          };
+        })
+      }))
+    });
+
+    // If returnRawCost is true, return the raw construction cost
+    if (returnRawCost) {
+      return { fee: totalConstructionCost, rate: 0 };
+    }
     
     // Calculate the fee
-    const fee = constructionCost * (feeScale.adjustedRate / 100) * percentage;
+    const calculatedFee = totalConstructionCost * (feeScale.adjustedRate / 100) * percentage;
     
-    return { fee, rate: feeScale.adjustedRate };
+    console.log('Final Fee Calculation:', {
+      totalConstructionCost,
+      rate: feeScale.adjustedRate,
+      rateAsDecimal: feeScale.adjustedRate / 100,
+      percentage,
+      calculatedFee,
+      breakdown: {
+        step1: totalConstructionCost,
+        step2: totalConstructionCost * (feeScale.adjustedRate / 100),
+        step3: totalConstructionCost * (feeScale.adjustedRate / 100) * percentage
+      }
+    });
+    
+    return { fee: calculatedFee, rate: feeScale.adjustedRate };
   };
 
   const calculateTotalDesignFee = (structure: Structure): number => {
@@ -2477,6 +2551,8 @@ export default function EditProposalPage() {
       discipline: service.discipline,
       default_included: service.default_included,
       min_fee: service.min_fee,
+      rate: service.rate,
+      fee_increment: service.fee_increment,
       phase: service.phase
     })));
   }, [trackedServices]);
@@ -2484,6 +2560,19 @@ export default function EditProposalPage() {
   // Add handler for services change
   const handleServicesChange = (services: TrackedService[]) => {
     setTrackedServices(services);
+  };
+
+  // Add handler for service fee updates
+  const handleServiceFeeUpdate = (serviceId: string, discipline: string, fee: number | undefined, phase: 'design' | 'construction') => {
+    console.log('Updating service fee:', { serviceId, discipline, fee, phase });
+    
+    setTrackedServices(prevServices => 
+      prevServices.map(service => 
+        service.id === serviceId
+          ? { ...service, customFee: fee }
+          : service
+      )
+    );
   };
 
   return (
@@ -3201,6 +3290,7 @@ export default function EditProposalPage() {
                 onFeeUpdate={handleFeeUpdate}
                 onCalculateFee={calculateDisciplineFee}
                 trackedServices={trackedServices}
+                onServiceFeeUpdate={handleServiceFeeUpdate}
               />
                           </div>
                         </div>
