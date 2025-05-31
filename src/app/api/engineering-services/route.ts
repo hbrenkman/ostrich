@@ -6,9 +6,10 @@ interface EngineeringService {
   discipline: string;
   service_name: string;
   description: string;
-  estimated_fee: string | null;
-  default_setting: boolean;
-  phase: 'design' | 'construction' | null;
+  included_in_fee: boolean;
+  phase: 'design' | 'construction';
+  min_fee: number | null;
+  rate: number | null;
 }
 
 interface RawServiceData {
@@ -83,9 +84,10 @@ export async function POST(request: NextRequest) {
         discipline: body.discipline,
         service_name: body.service_name,
         description: body.description,
-        estimated_fee: body.estimated_fee || null,
-        default_setting: body.default_setting ?? false,
-        phase: body.phase || 'design'
+        included_in_fee: body.included_in_fee ?? false,
+        phase: body.phase || 'design',
+        min_fee: body.min_fee || null,
+        rate: body.rate || null
       })
       .select()
       .single();
@@ -183,9 +185,10 @@ export async function PUT(request: NextRequest) {
         discipline: body.discipline,
         service_name: body.service_name,
         description: body.description,
-        estimated_fee: body.estimated_fee || null,
-        default_setting: body.default_setting ?? false,
-        phase: body.phase || 'design'
+        included_in_fee: body.included_in_fee ?? false,
+        phase: body.phase || 'design',
+        min_fee: body.min_fee || null,
+        rate: body.rate || null
       })
       .eq('id', serviceId)
       .select()

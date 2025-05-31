@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "react-hot-toast";
 
 interface BuildingType {
   id: string;
@@ -479,86 +480,65 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   }, [space.floorArea]);
 
   // Update the handleSave function to include floor area validation
-  const handleSave = () => {
-    if (!selectedBuildingType || !selectedConstructionType || space.floorArea <= 0) {
-      return;
+  const handleSave = async () => {
+    try {
+      if (!selectedBuildingType || !selectedConstructionType) {
+        toast.error('Please select both building type and construction type');
+        return;
+      }
+
+      const spaceToSave = {
+        ...space,
+        buildingType: selectedBuildingType.name,
+        buildingTypeId: selectedBuildingType.id,
+        projectConstructionType: selectedConstructionType.project_type,
+        projectConstructionTypeId: selectedConstructionType.id,
+        fees: disciplineFees  // Ensure we're using the latest discipline fees
+      };
+
+      console.log('Saving space with fees:', {
+        fees: disciplineFees
+      });
+
+      await onSave(spaceToSave);
+      onOpenChange(false);
+    } catch (error) {
+      console.error('Error saving space:', error);
+      toast.error('Failed to save space');
     }
-
-    // Get active disciplines from fees
-    const activeDisciplines = disciplineFees
-      .filter(fee => fee.isActive)
-      .map(fee => fee.discipline);
-
-    // Set the space discipline based on active disciplines
-    let primaryDiscipline = '';
-    if (activeDisciplines.length === 0) {
-      // If no active disciplines, use building type discipline
-      primaryDiscipline = selectedBuildingType.discipline || '';
-    } else if (activeDisciplines.length === 1) {
-      // If only one discipline is active, use that
-      primaryDiscipline = activeDisciplines[0];
-    } else if (activeDisciplines.includes('Mechanical') && 
-               activeDisciplines.includes('Electrical') && 
-               activeDisciplines.includes('Plumbing')) {
-      // If all three disciplines are active, use MEP
-      primaryDiscipline = 'MEP';
-    } else {
-      // For any other combination, use the first active discipline
-      primaryDiscipline = activeDisciplines[0];
-    }
-
-    const spaceToSave = {
-      ...space,
-      buildingType: selectedBuildingType.name,
-      buildingTypeId: selectedBuildingType.id,
-      projectConstructionType: selectedConstructionType.project_type,
-      projectConstructionTypeId: selectedConstructionType.id,
-      discipline: primaryDiscipline,
-      fees: disciplineFees  // Ensure we're using the latest discipline fees
-    };
-
-    console.log('Saving space with disciplines:', {
-      activeDisciplines,
-      primaryDiscipline,
-      fees: disciplineFees
-    });
-
-    onSave(spaceToSave);
-    onOpenChange(false);
   };
 
-  // Update the discipline fee toggle handler
-  const handleDisciplineFeeToggle = (discipline: string, isActive: boolean) => {
-    try {
-      // Update discipline fees state
-      const updatedFees = disciplineFees.map(fee => 
-        fee.discipline === discipline ? { ...fee, isActive } : fee
-      );
-      setDisciplineFees(updatedFees);
-
-      // Update space state to keep fees in sync
-      setSpace(prev => ({
-        ...prev,
-        fees: updatedFees
-      }));
-
-      // Call the parent component's toggle handler if we have a structure ID
-      if (initialSpace?.id) {
-        try {
-          onDisciplineFeeToggle(initialSpace.id, discipline, isActive);
-        } catch (error) {
-          console.error('Error calling parent toggle handler:', error);
-          // Revert the local state if the parent handler fails
-          setDisciplineFees(disciplineFees);
-          setSpace(prev => ({
-            ...prev,
-            fees: disciplineFees
-          }));
-        }
-      }
-    } catch (error) {
-      console.error('Error toggling discipline fee in dialog:', error);
+  // Remove the MEP logic and update discipline handling
+  const handleDisciplineToggle = (discipline: string) => {
+    const updatedFees = [...disciplineFees];
+    const feeIndex = updatedFees.findIndex(f => f.discipline === discipline);
+    
+    if (feeIndex === -1) {
+      // Add new fee if it doesn't exist
+      updatedFees.push({
+        id: crypto.randomUUID(),
+        discipline,
+        totalFee: 0,
+        isActive: true,
+        costPerSqft: 0
+      });
+    } else {
+      // Toggle existing fee
+      updatedFees[feeIndex] = {
+        ...updatedFees[feeIndex],
+        isActive: !updatedFees[feeIndex].isActive
+      };
     }
+
+    // Update the primary discipline based on active fees
+    const activeDisciplines: string[] = updatedFees.filter(f => f.isActive).map(f => f.discipline);
+    const primaryDiscipline = activeDisciplines[0] || 'Mechanical'; // Default to Mechanical if no active disciplines
+
+    setDisciplineFees(updatedFees);
+    setSpace(prev => ({
+      ...prev,
+      fees: updatedFees
+    }));
   };
 
   return (
@@ -774,7 +754,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                         e.preventDefault();
                         e.stopPropagation();
                         try {
-                          handleDisciplineFeeToggle(fee.discipline, !fee.isActive);
+                          handleDisciplineToggle(fee.discipline);
                         } catch (error) {
                           console.error('Error toggling discipline:', error);
                         }

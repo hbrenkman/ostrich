@@ -14,10 +14,10 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { StructureDialog } from './structure-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SpaceDialog } from './space-dialog';
 import { createClient } from '@supabase/supabase-js'
+import FixedFees from './components/FixedFees';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,6 +75,7 @@ interface Level {
 
 interface Structure {
   id: string;
+  name: string;  // Add name field
   constructionType: string;
   floorArea: string;
   description: string;
@@ -83,8 +84,9 @@ interface Structure {
   hvacSystem: string;
   levels: Level[];
   parentId?: string;
-  designFeeRate?: number; // Add this new field
-  constructionSupportEnabled?: boolean; // Add this new field
+  designFeeRate?: number;
+  constructionSupportEnabled?: boolean;
+  designPercentage?: number;
 }
 
 interface Project {
@@ -153,17 +155,9 @@ interface ProposalFormData {
   costIndex: number | null;
   resCheckItems: ResCheckItem[];
   nestedFeeItems: NestedFeeItem[];  // For items like Site Photometry
-  feeItems: FeeItem[];  // Replace separate arrays with a single array
 }
 
-interface StructureDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSave: (structure: Omit<Structure, 'id' | 'levels'>) => void;
-}
-
-interface DesignFeeScale {
-  id: number;
+interface FeeScale {
   construction_cost: number;
   prime_consultant_fee: number;
   fraction_of_prime_rate_mechanical: number;
@@ -210,39 +204,167 @@ interface EngineeringStandardService {
   discipline: string;
   service_name: string;
   description: string;
-  estimated_fee: string | null;
-  default_setting: boolean;
-  phase: 'design' | 'construction' | null;
+  included_in_fee: boolean;
+  phase: 'design' | 'construction';
+  min_fee: number | null;
+  rate: number | null;
 }
 
+// Add interface for tracked services
+interface TrackedService {
+  id: string;
+  service_name: string;
+  discipline: string;
+  included_in_fee: boolean;
+  min_fee: number | null;
+  rate: number | null;
+}
+
+// Update EngineeringServicesDisplay props
 interface EngineeringServicesDisplayProps {
   services: EngineeringStandardService[];
   isLoading: boolean;
+  onServiceUpdate?: (serviceId: string, updates: Partial<EngineeringStandardService>) => void;
+  proposal: ProposalFormData;
+  setProposal: React.Dispatch<React.SetStateAction<ProposalFormData>>;
+  onServicesChange?: (services: TrackedService[]) => void;  // Add this prop
 }
 
-function EngineeringServicesDisplay({ services, isLoading }: EngineeringServicesDisplayProps) {
+function EngineeringServicesDisplay({ 
+  services, 
+  isLoading, 
+  onServiceUpdate,
+  proposal,
+  setProposal,
+  onServicesChange 
+}: EngineeringServicesDisplayProps) {
+  const [draggedService, setDraggedService] = useState<EngineeringStandardService | null>(null);
+
+  // Add effect to notify parent of service changes
+  useEffect(() => {
+    if (onServicesChange) {
+      const trackedServices: TrackedService[] = services.map(service => ({
+        id: service.id,
+        service_name: service.service_name,
+        discipline: service.discipline,
+        included_in_fee: service.included_in_fee,
+        min_fee: service.min_fee,
+        rate: service.rate
+      }));
+      onServicesChange(trackedServices);
+    }
+  }, [services, onServicesChange]);
+
   if (isLoading) {
     return <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>;
   }
 
-  const includedServices = services.filter(service => service.default_setting);
-  const excludedServices = services.filter(service => !service.default_setting);
+  const includedServices = services.filter(service => service.included_in_fee);
+  const excludedServices = services.filter(service => !service.included_in_fee);
 
-  const groupServicesByDiscipline = (services: EngineeringStandardService[]) => {
-    return Object.entries(
-      services.reduce((acc, service) => {
-        const discipline = service.discipline || 'Other';
-        if (!acc[discipline]) acc[discipline] = [];
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
+    console.log('=== DRAG START ===');
+    console.log('Service:', service.service_name);
+    setDraggedService(service);
+    const dragData = {
+      type: 'engineering_service',
+      service: service
+    };
+    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+    e.dataTransfer.effectAllowed = 'move';
+    console.log('Drag data set:', dragData);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('=== DRAG OVER ===');
+    console.log('Target included:', targetIncluded);
+    
+    if (draggedService) {
+      console.log('Dragged service:', draggedService.service_name);
+      e.dataTransfer.dropEffect = 'move';
+      console.log('Drop effect set to move');
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+      console.log('No dragged service, drop effect set to none');
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
+    e.preventDefault();
+    console.log('=== DROP ATTEMPT ===');
+    console.log('Target included:', targetIncluded);
+
+    // Get the current dragged service from state
+    const currentDraggedService = draggedService;
+    if (!currentDraggedService) {
+      console.log('No dragged service found');
+      return;
+    }
+
+    console.log('Processing drop for service:', currentDraggedService.service_name);
+    console.log('Current included status:', currentDraggedService.included_in_fee);
+    console.log('Target included status:', targetIncluded);
+
+    // Only update if the included status is changing
+    if (currentDraggedService.included_in_fee !== targetIncluded) {
+      console.log('Updating service status...');
+      
+      // Update the service's included status
+      if (onServiceUpdate) {
+        onServiceUpdate(currentDraggedService.id, { included_in_fee: targetIncluded });
+      }
+    }
+
+    console.log('Drop complete');
+    setDraggedService(null);  // Clear the dragged service state
+  };
+
+  const handleDragEnd = () => {
+    console.log('=== DRAG END ===');
+    setDraggedService(null);
+  };
+
+  const groupServicesByDiscipline = (services: EngineeringStandardService[]): Record<string, EngineeringStandardService[]> => {
+    return services.reduce((acc, service) => {
+      const discipline = service.discipline;
+      if (!acc[discipline]) {
+        acc[discipline] = [];
+      }
         acc[discipline].push(service);
         return acc;
-      }, {} as Record<string, EngineeringStandardService[]>)
-    );
+    }, {} as Record<string, EngineeringStandardService[]>);
   };
+
+  const renderServiceItem = (service: EngineeringStandardService) => (
+    <div
+      key={service.id}
+      draggable
+      onDragStart={(e) => handleDragStart(e, service)}
+      onDragEnd={handleDragEnd}
+      className={`text-xs text-gray-700 dark:text-gray-300 p-1 rounded cursor-move hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+        draggedService?.id === service.id ? 'opacity-50' : ''
+      }`}
+    >
+      {service.service_name}
+      {service.rate && (
+        <span className="ml-1 text-gray-500">({service.rate}%)</span>
+      )}
+    </div>
+  );
 
   return (
     <div className="mt-2 grid grid-cols-2 gap-2">
       {/* Included Services */}
-      <div className="border border-green-500/20 rounded-md overflow-hidden">
+      <div
+        className={`border border-green-500/20 rounded-md overflow-hidden ${
+          draggedService && !draggedService.included_in_fee ? 'border-green-500/50 bg-green-500/5' : ''
+        }`}
+        onDragOver={(e) => handleDragOver(e, true)}
+        onDrop={(e) => handleDrop(e, true)}
+        onDragEnd={handleDragEnd}
+      >
         <div className="bg-green-500/10 px-2 py-1">
           <h3 className="text-sm font-medium text-green-700 dark:text-green-400">Included Services</h3>
         </div>
@@ -250,17 +372,13 @@ function EngineeringServicesDisplay({ services, isLoading }: EngineeringServices
           <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No included services</div>
         ) : (
           <div className="p-1 space-y-1">
-            {groupServicesByDiscipline(includedServices).map(([discipline, services]) => (
+            {Object.entries(groupServicesByDiscipline(includedServices)).map(([discipline, services]) => (
               <div key={discipline} className="border-b border-green-500/10 last:border-0">
                 <div className="px-2 py-1 bg-green-500/5">
                   <h4 className="text-xs font-medium text-green-600 dark:text-green-400">{discipline}</h4>
                 </div>
                 <div className="px-2 py-1">
-                  {services.map(service => (
-                    <div key={service.id} className="text-xs text-gray-700 dark:text-gray-300">
-                      {service.service_name}
-                    </div>
-                  ))}
+                  {services.map(service => renderServiceItem(service))}
                 </div>
               </div>
             ))}
@@ -269,7 +387,14 @@ function EngineeringServicesDisplay({ services, isLoading }: EngineeringServices
       </div>
 
       {/* Excluded Services */}
-      <div className="border border-red-500/20 rounded-md overflow-hidden">
+      <div
+        className={`border border-red-500/20 rounded-md overflow-hidden ${
+          draggedService && draggedService.included_in_fee ? 'border-red-500/50 bg-red-500/5' : ''
+        }`}
+        onDragOver={(e) => handleDragOver(e, false)}
+        onDrop={(e) => handleDrop(e, false)}
+        onDragEnd={handleDragEnd}
+      >
         <div className="bg-red-500/10 px-2 py-1">
           <h3 className="text-sm font-medium text-red-700 dark:text-red-400">Excluded Services</h3>
         </div>
@@ -277,17 +402,13 @@ function EngineeringServicesDisplay({ services, isLoading }: EngineeringServices
           <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No excluded services</div>
         ) : (
           <div className="p-1 space-y-1">
-            {groupServicesByDiscipline(excludedServices).map(([discipline, services]) => (
+            {Object.entries(groupServicesByDiscipline(excludedServices)).map(([discipline, services]) => (
               <div key={discipline} className="border-b border-red-500/10 last:border-0">
                 <div className="px-2 py-1 bg-red-500/5">
                   <h4 className="text-xs font-medium text-red-600 dark:text-red-400">{discipline}</h4>
                 </div>
                 <div className="px-2 py-1">
-                  {services.map(service => (
-                    <div key={service.id} className="text-xs text-gray-700 dark:text-gray-300">
-                      {service.service_name}
-                    </div>
-                  ))}
+                  {services.map(service => renderServiceItem(service))}
                 </div>
               </div>
             ))}
@@ -322,40 +443,13 @@ const contacts: Contact[] = [
   },
 ];
 
-// Add interface for service links
-interface EngineeringServiceLink {
+interface Fee {
   id: string;
-  engineering_service_id: string;
-  additional_item_id: string;
-  link_type: 'engineering_service' | 'fee_additional_item';
-  created_at: string;
-  updated_at: string;
+  discipline: string;
+  totalFee: number;  // This is already non-null in the interface
+  isActive: boolean;
+  costPerSqft: number;
 }
-
-// Add function to fetch service links
-const fetchServiceLinks = async (standardServiceIds: string[]): Promise<EngineeringServiceLink[]> => {
-  try {
-    const response = await fetch('/api/engineering-service-links', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ standardServiceIds }),
-    });
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      console.error('Error fetching service links:', errorData?.error || 'Failed to fetch service links');
-      throw new Error(errorData?.error || 'Failed to fetch service links');
-    }
-    
-    const data = await response.json();
-    return data.links || [];
-  } catch (error) {
-    console.error('Error fetching service links:', error);
-    return [];
-  }
-};
 
 export default function EditProposalPage() {
   const router = useRouter();
@@ -369,9 +463,8 @@ export default function EditProposalPage() {
   const id = params.id as string;
   const proposalId = params.proposalId as string;
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
-  const [isStructureDialogOpen, setIsStructureDialogOpen] = useState(false);
-  const [isSpaceDialogOpen, setIsSpaceDialogOpen] = useState(false);
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
   const [selectedStructureId, setSelectedStructureId] = useState<string | null>(null);
   const [project, setProject] = useState<Project | null>(null);
@@ -379,7 +472,6 @@ export default function EditProposalPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [editingStructureId, setEditingStructureId] = useState<string | null>(null);
   const [editingStructureName, setEditingStructureName] = useState('');
-  const [designFeeScale, setDesignFeeScale] = useState<DesignFeeScale[]>([]);
   const [engineeringAdditionalServices, setEngineeringAdditionalServices] = useState<EngineeringAdditionalServices[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [dragData, setDragData] = useState<any>(null);
@@ -390,6 +482,10 @@ export default function EditProposalPage() {
   const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringStandardService[]>([]);
   const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(true);
   const [isLoadingAdditionalServices, setIsLoadingAdditionalServices] = useState(true);
+  const [phase, setPhase] = useState<'design' | 'construction'>('design');
+  const [designFeeScale, setDesignFeeScale] = useState<FeeScale[]>([]);
+  const [isSpaceDialogOpen, setIsSpaceDialogOpen] = useState(false);  // Restore this state
+  const [trackedServices, setTrackedServices] = useState<TrackedService[]>([]);
 
   const [proposal, setProposal] = useState<ProposalFormData>({
     number: proposalId === 'new' ? '' : proposalId,
@@ -405,7 +501,6 @@ export default function EditProposalPage() {
     costIndex: null,
     resCheckItems: [],
     nestedFeeItems: [],
-    feeItems: [],
   });
 
   useEffect(() => {
@@ -569,24 +664,24 @@ export default function EditProposalPage() {
   // console.log('Inactive items count:', engineeringAdditionalServices.filter((item: EngineeringAdditionalServices) => !item.is_active).length);
 
   // Add logging to track feeItems state
-  useEffect(() => {
-    console.log('Current feeItems state:', {
-      totalItems: proposal.feeItems.length,
-      items: proposal.feeItems.map(item => ({
-        id: item.id,
-        name: item.name,
-        type: item.type,
-        discipline: item.discipline,
-        parentDiscipline: item.parentDiscipline
-      })),
-      byType: {
-        nested: proposal.feeItems.filter(item => item.type === 'nested').length,
-        multi: proposal.feeItems.filter(item => item.type === 'multi').length,
-        rescheck: proposal.feeItems.filter(item => item.type === 'rescheck').length,
-        discipline: proposal.feeItems.filter(item => item.type === 'discipline').length
-      }
-    });
-  }, [proposal.feeItems]);
+  // useEffect(() => {
+  //   console.log('Current feeItems state:', {
+  //     totalItems: proposal.feeItems.length,
+  //     items: proposal.feeItems.map(item => ({
+  //       id: item.id,
+  //       name: item.name,
+  //       type: item.type,
+  //       discipline: item.discipline,
+  //       parentDiscipline: item.parentDiscipline
+  //     })),
+  //     byType: {
+  //       nested: proposal.feeItems.filter(item => item.type === 'nested').length,
+  //       multi: proposal.feeItems.filter(item => item.type === 'multi').length,
+  //       rescheck: proposal.feeItems.filter(item => item.type === 'rescheck').length,
+  //       discipline: proposal.feeItems.filter(item => item.type === 'discipline').length
+  //     }
+  //   });
+  // }, [proposal.feeItems]);
 
   // Add useEffect to fetch duplicate structure rates
   useEffect(() => {
@@ -678,10 +773,30 @@ export default function EditProposalPage() {
   };
 
   const handleDelete = () => {
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (proposalId === 'new') {
+      router.push('/projects');
+      return;
+    }
+
+    try {
     setIsDeleting(true);
-    setTimeout(() => {
-      router.push(`/projects/${id}`);
-    }, 500);
+      const response = await fetch(`/api/proposals/${proposalId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete proposal');
+      }
+
+      router.push('/projects');
+    } catch (error) {
+      console.error('Error deleting proposal:', error);
+      setIsDeleting(false);
+    }
   };
 
   const formatCurrency = (value: string | number | undefined | null): string => {
@@ -729,30 +844,40 @@ export default function EditProposalPage() {
   };
 
   const handleAddStructure = (structure: Omit<Structure, 'id'>) => {
-    setProposal({
-      ...proposal,
-      structures: [...proposal.structures, { 
-        ...structure, 
-        id: crypto.randomUUID(),
-        description: structure.description || "New Structure", // Use provided description or default
-        designFeeRate: 80,
-        constructionSupportEnabled: true 
-      }]
-    });
+    const newStructure: Structure = {
+      id: crypto.randomUUID(),
+      name: structure.name || "New Structure",  // Use name field, fallback to "New Structure"
+      constructionType: structure.constructionType,
+      floorArea: structure.floorArea,
+      description: structure.description,
+      spaceType: structure.spaceType,
+      discipline: structure.discipline,
+      hvacSystem: structure.hvacSystem,
+      levels: [],
+      designFeeRate: 0,
+      constructionSupportEnabled: false,
+      designPercentage: 80
+    };
+
+    setProposal(prev => ({
+      ...prev,
+      structures: [...prev.structures, newStructure]
+    }));
   };
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>, targetStructureId?: string) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetStructureId?: string) => {
     e.preventDefault();
     const data = JSON.parse(e.dataTransfer.getData('application/json'));
     
     if (data.type === 'structure') {
       const newStructure: Structure = {
         id: data.id,
+        name: "New Structure",  // Add name field
         constructionType: "New Construction",
         floorArea: "0",
         description: "New Structure",
         spaceType: "Office",
-        discipline: "MEP",
+        discipline: "Mechanical",
         hvacSystem: "VAV System",
         levels: [{
           id: crypto.randomUUID(),
@@ -760,7 +885,7 @@ export default function EditProposalPage() {
           floorArea: "0",
           description: "New Level",
           spaceType: "Office",
-          discipline: "MEP",
+          discipline: "Mechanical",
           hvacSystem: "VAV System",
           spaces: []
         }]
@@ -785,7 +910,7 @@ export default function EditProposalPage() {
         floorArea: "0",
         description: "New Level",
         spaceType: "Office",
-        discipline: "MEP",
+        discipline: "Mechanical", // Changed from MEP to Mechanical as default
         hvacSystem: "VAV System",
         spaces: []
       };
@@ -819,7 +944,7 @@ export default function EditProposalPage() {
       floorArea: "0",
       description: "New Level",
       spaceType: "Office",
-      discipline: "MEP",
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: "VAV System",
       spaces: []
     }));
@@ -876,56 +1001,21 @@ export default function EditProposalPage() {
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  const processLinkedServices = async (structureId: string, levelId: string, disciplines: string[]) => {
-    console.log('=== Processing Linked Services ===');
-    console.log('Structure ID:', structureId);
-    console.log('Level ID:', levelId);
-    console.log('Disciplines:', disciplines);
-
-    // Get standard services for these disciplines
-    const standardServices = engineeringStandardServices.filter(service => 
-      disciplines.includes(service.discipline)
-    );
-
-    console.log('Found standard services:', standardServices.length);
-
-    // Process each standard service
-    for (const service of standardServices) {
-      const serviceLinks = await fetchServiceLinks([service.id]);
-      console.log(`Processing service: ${service.service_name} with ${serviceLinks.length} links`);
-
-      for (const link of serviceLinks) {
-        const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
-        if (additionalService) {
-          console.log(`Creating fee item for: ${additionalService.name}`);
-          // Create a mock drag event for the additional service
-          const dragData = {
-            type: 'additional_service',
-            item: additionalService,
-            source: 'engineering_services'
-          };
-
-          // Add the fee item directly
-          await handleFeeTableDrop(
-            {} as DragEvent<HTMLDivElement>,
-            structureId,
-            levelId,
-            '',  // No space ID needed
-            service.discipline,
-            additionalService.phase || 'design',
-            dragData
-          );
-        }
-      }
-    }
-  };
-
-  // Remove redundant logging in handleAddSpace
   const handleAddSpace = async (space: Omit<Space, 'id'>) => {
     if (!selectedStructureId || !selectedLevelId) {
       console.error('No structure or level selected');
       return;
     }
+
+    // Create a new space with a unique ID
+    const newSpace: Space = {
+      ...space,
+      id: crypto.randomUUID(),
+      fees: space.fees.map(fee => ({
+        ...fee,
+        id: crypto.randomUUID()
+      }))
+    };
 
     // If we're editing an existing space, update it instead of creating a new one
     if (editingSpace) {
@@ -961,129 +1051,33 @@ export default function EditProposalPage() {
           return structure;
         })
       }));
-
-      // Process linked services for updated space
-      try {
-        const activeDisciplines = space.fees
-          .filter(fee => fee.isActive)
-          .map(fee => fee.discipline);
-
-        const standardServices = engineeringStandardServices.filter(service => 
-          activeDisciplines.includes(service.discipline)
-        );
-
-        for (const service of standardServices) {
-          const serviceLinks = await fetchServiceLinks([service.id]);
-          if (serviceLinks.length > 0) {
-            console.log(`Processing "${service.service_name}" with ${serviceLinks.length} linked services`);
-          }
-
-          for (const link of serviceLinks) {
-            const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
-            if (additionalService) {
-              const dragData = {
-                type: 'additional_service',
-                item: additionalService,
-                source: 'engineering_services'
-              };
-
-              await handleFeeTableDrop(
-                {} as DragEvent<HTMLDivElement>,
-                selectedStructureId,
-                selectedLevelId,
-                editingSpace.id,
-                service.discipline,
-                additionalService.phase || 'design',
-                dragData
-              );
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error processing linked services:', error);
-      } finally {
-        setIsSpaceDialogOpen(false);
-        setEditingSpace(null);
-      }
-      return;
-    }
-
-    // Create a new space with a unique ID (original code for adding new spaces)
-    const newSpace: Space = {
-      ...space,
-      id: crypto.randomUUID(),
-      fees: space.fees.map(fee => ({
-        ...fee,
-        id: crypto.randomUUID()
-      }))
-    };
-
-    // Get active disciplines before updating state
-    const activeDisciplines = space.fees
-      .filter(fee => fee.isActive)
-      .map(fee => fee.discipline);
-
-    // Update the proposal state
-    setProposal(prev => ({
-      ...prev,
-      structures: prev.structures.map(structure => {
-        if (structure.id === selectedStructureId) {
-          return {
-            ...structure,
-            levels: structure.levels.map(level => {
-              if (level.id === selectedLevelId) {
-                return {
-                  ...level,
-                  spaces: [...level.spaces, newSpace]
-                };
-              }
-              return level;
-            })
-          };
-        }
-        return structure;
-      })
-    }));
-
-    // Process linked services for new space
-    try {
-      const standardServices = engineeringStandardServices.filter(service => 
-        activeDisciplines.includes(service.discipline)
-      );
-
-      for (const service of standardServices) {
-        const serviceLinks = await fetchServiceLinks([service.id]);
-        if (serviceLinks.length > 0) {
-          console.log(`Processing "${service.service_name}" with ${serviceLinks.length} linked services`);
-        }
-
-        for (const link of serviceLinks) {
-          const additionalService = engineeringAdditionalServices.find(s => s.id === link.additional_item_id);
-          if (additionalService) {
-            const dragData = {
-              type: 'additional_service',
-              item: additionalService,
-              source: 'engineering_services'
+    } else {
+      // For new spaces, update the proposal state
+      setProposal(prev => ({
+        ...prev,
+        structures: prev.structures.map(structure => {
+          if (structure.id === selectedStructureId) {
+            return {
+              ...structure,
+              levels: structure.levels.map(level => {
+                if (level.id === selectedLevelId) {
+                  return {
+                    ...level,
+                    spaces: [...level.spaces, newSpace]
+                  };
+                }
+                return level;
+              })
             };
-
-            await handleFeeTableDrop(
-              {} as DragEvent<HTMLDivElement>,
-              selectedStructureId,
-              selectedLevelId,
-              newSpace.id,
-              service.discipline,
-              additionalService.phase || 'design',
-              dragData
-            );
           }
-        }
-      }
-    } catch (error) {
-      console.error('Error processing linked services:', error);
-    } finally {
-      setIsSpaceDialogOpen(false);
-      setEditingSpace(null);
+          return structure;
+        })
+      }));
     }
+
+    // Close the dialog and reset editing state
+    setIsSpaceDialogOpen(false);
+    setEditingSpace(null);
   };
 
   const handleAddLowerLevel = (structureId: string) => {
@@ -1104,7 +1098,7 @@ export default function EditProposalPage() {
       floorArea: "0",
       description: "New Level",
       spaceType: "Office",
-      discipline: "MEP",
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: "VAV System",
       spaces: []
     };
@@ -1172,7 +1166,7 @@ export default function EditProposalPage() {
       floorArea: "0",
       description: "New Level",
       spaceType: "Office",
-      discipline: "MEP",
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: "VAV System",
       spaces: []
     };
@@ -1227,7 +1221,7 @@ export default function EditProposalPage() {
       floorArea: "0",
       description: "New Level",
       spaceType: "Office",
-      discipline: "MEP",
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: "VAV System",
       spaces: []
     }));
@@ -1321,7 +1315,7 @@ export default function EditProposalPage() {
       floorArea: levelToDuplicate.floorArea,
       description: levelToDuplicate.description,
       spaceType: levelToDuplicate.spaceType,
-      discipline: levelToDuplicate.discipline,
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: levelToDuplicate.hvacSystem,
       spaces: levelToDuplicate.spaces.map(space => ({
         ...space,
@@ -1433,7 +1427,7 @@ export default function EditProposalPage() {
       floorArea: levelToDuplicate.floorArea,
       description: levelToDuplicate.description,
       spaceType: levelToDuplicate.spaceType,
-      discipline: levelToDuplicate.discipline,
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: levelToDuplicate.hvacSystem,
       spaces: levelToDuplicate.spaces.map(space => ({
         ...space,
@@ -1506,7 +1500,7 @@ export default function EditProposalPage() {
       floorArea: levelToDuplicate.floorArea,
       description: levelToDuplicate.description,
       spaceType: levelToDuplicate.spaceType,
-      discipline: levelToDuplicate.discipline,
+      discipline: "Mechanical", // Changed from MEP to Mechanical as default
       hvacSystem: levelToDuplicate.hvacSystem,
       spaces: levelToDuplicate.spaces.map(space => ({
         ...space,
@@ -1574,33 +1568,22 @@ export default function EditProposalPage() {
   };
 
   const handleDuplicateStructure = (structureId: string) => {
-    console.log('=== Duplicating Structure ===');
-    console.log('Structure ID to duplicate:', structureId);
-    
     const structureToDuplicate = proposal.structures.find(s => s.id === structureId);
-    if (!structureToDuplicate) {
-      console.log('Structure not found:', structureId);
-      return;
-    }
+    if (!structureToDuplicate) return;
 
-    console.log('Found structure to duplicate:', {
-      ...structureToDuplicate,
-      designFeeRate: structureToDuplicate.designFeeRate,
-      constructionSupportEnabled: structureToDuplicate.constructionSupportEnabled
-    });
+    // Count existing duplicates to get the next number
+    const existingDuplicates = proposal.structures.filter(s => s.parentId === structureId).length;
+    const duplicateNumber = existingDuplicates + 1;  // Add 1 to get the next number
 
-    // Create a new structure with a unique ID
     const newStructure: Structure = {
       id: crypto.randomUUID(),
-      parentId: structureId,
+      name: `${structureToDuplicate.name} (Duplicate ${duplicateNumber})`,  // Add "Duplicate" text and correct numbering
       constructionType: structureToDuplicate.constructionType,
       floorArea: structureToDuplicate.floorArea,
       description: structureToDuplicate.description,
       spaceType: structureToDuplicate.spaceType,
       discipline: structureToDuplicate.discipline,
       hvacSystem: structureToDuplicate.hvacSystem,
-      designFeeRate: structureToDuplicate.designFeeRate ?? 80,
-      constructionSupportEnabled: structureToDuplicate.constructionSupportEnabled ?? true,
       levels: structureToDuplicate.levels.map(level => ({
         ...level,
         id: crypto.randomUUID(),
@@ -1609,87 +1592,56 @@ export default function EditProposalPage() {
           id: crypto.randomUUID(),
           fees: space.fees.map(fee => ({
             ...fee,
-          id: crypto.randomUUID()
+            id: crypto.randomUUID()
+          }))
         }))
-        }))
-      }))
+      })),
+      parentId: structureId,
+      designFeeRate: structureToDuplicate.designFeeRate,
+      constructionSupportEnabled: structureToDuplicate.constructionSupportEnabled,
+      designPercentage: structureToDuplicate.designPercentage
     };
 
-    console.log('Created new structure:', {
-      ...newStructure,
-      designFeeRate: newStructure.designFeeRate,
-      constructionSupportEnabled: newStructure.constructionSupportEnabled
-    });
-
-    // Find the index of the structure being duplicated
-    const originalIndex = proposal.structures.findIndex(s => s.id === structureId);
-    
-    // Insert the new structure directly after the original
-    setProposal(prev => {
-      const newStructures = [...prev.structures];
-      newStructures.splice(originalIndex + 1, 0, newStructure);
-      
-      // Renumber any existing duplicates that come after this point
-      const updatedStructures = renumberDuplicates(newStructures, structureId);
-      
-      return {
-        ...prev,
-        structures: updatedStructures
-      };
-    });
+    setProposal(prev => ({
+      ...prev,
+      structures: [...prev.structures, newStructure]
+    }));
   };
 
   const handleCopyStructure = (structureId: string) => {
-    console.log('=== Copying Structure ===');
-    console.log('Original Structure ID:', structureId);
-    
     const structureToCopy = proposal.structures.find(s => s.id === structureId);
-    if (!structureToCopy) {
-      console.log('Structure not found:', structureId);
-      return;
-    }
-    console.log('Found structure to copy:', {
-      id: structureToCopy.id,
-      description: structureToCopy.description,
-      levels: structureToCopy.levels.length,
-      designFeeRate: structureToCopy.designFeeRate,
-      constructionSupportEnabled: structureToCopy.constructionSupportEnabled
-    });
+    if (!structureToCopy) return;
 
-    // Create a new structure with copied levels and spaces, but without parentId
     const newStructure: Structure = {
       id: crypto.randomUUID(),
+      name: `${structureToCopy.name} (Copy)`,  // Add "Copy" to name
       constructionType: structureToCopy.constructionType,
       floorArea: structureToCopy.floorArea,
-      description: `${structureToCopy.description} (Copy)`,
+      description: structureToCopy.description,
       spaceType: structureToCopy.spaceType,
       discipline: structureToCopy.discipline,
       hvacSystem: structureToCopy.hvacSystem,
-      designFeeRate: structureToCopy.designFeeRate ?? 80, // Copy design fee rate with default
-      constructionSupportEnabled: structureToCopy.constructionSupportEnabled ?? true, // Copy construction support setting with default
       levels: structureToCopy.levels.map(level => ({
         ...level,
         id: crypto.randomUUID(),
         spaces: level.spaces.map(space => ({
           ...space,
-          id: crypto.randomUUID()
+          id: crypto.randomUUID(),
+          fees: space.fees.map(fee => ({
+            ...fee,
+            id: crypto.randomUUID()
+          }))
         }))
-      }))
+      })),
+      designFeeRate: structureToCopy.designFeeRate,
+      constructionSupportEnabled: structureToCopy.constructionSupportEnabled,
+      designPercentage: structureToCopy.designPercentage
     };
 
-    console.log('Created new independent structure:', {
-      id: newStructure.id,
-      description: newStructure.description,
-      levels: newStructure.levels.length,
-      designFeeRate: newStructure.designFeeRate,
-      constructionSupportEnabled: newStructure.constructionSupportEnabled
-    });
-
-    // Add the new structure to the end of the array
-    setProposal({
-      ...proposal,
-      structures: [...proposal.structures, newStructure]
-    });
+    setProposal(prev => ({
+      ...prev,
+      structures: [...prev.structures, newStructure]
+    }));
   };
 
   const handleStructureNameUpdate = (structureId: string) => {
@@ -1720,12 +1672,13 @@ export default function EditProposalPage() {
         // Update parent structure - don't add duplicate number to parent
         if (s.id === structureId) {
           console.log('Updating parent structure:', s.id);
-          return { ...s, description: editingStructureName };
+          return { ...s, name: editingStructureName };
         }
         // Update duplicate structures
         if (s.parentId === structureId) {
-          // Use getDuplicateNumber to get the correct duplicate number
-          const duplicateNumber = getDuplicateNumber(proposal.structures, s);
+          // Get the duplicate number from the existing name
+          const match = s.name.match(/\(Duplicate (\d+)\)$/);
+          const duplicateNumber = match ? parseInt(match[1]) : getDuplicateNumber(proposal.structures, s);
           console.log('Updating duplicate structure:', {
             id: s.id,
             duplicateNumber,
@@ -1733,7 +1686,7 @@ export default function EditProposalPage() {
           });
           return {
             ...s,
-            description: `${editingStructureName} (Duplicate ${duplicateNumber})`
+            name: `${editingStructureName} (Duplicate ${duplicateNumber})`
           };
         }
         return s;
@@ -1798,27 +1751,77 @@ export default function EditProposalPage() {
     return rate;
   };
 
-  // Update calculateDisciplineFee to use duplicate rate
-  const calculateDisciplineFee = (
-    constructionCost: number,
-    discipline: string | number,
-    structure: Structure
-  ): { fee: number; rate: number } => {
-    // Remove redundant logging
-    const duplicateRate = getDuplicateRate(structure);
-    const feeScale = getFeeScale(constructionCost, discipline, duplicateRate);
-    
-    // Only log the final result
-    console.log(`${discipline} Fee Calculation:`, {
-      constructionCost,
-      rate: feeScale.adjustedRate,
-      fee: constructionCost * (feeScale.adjustedRate / 100)
+  // Move getFeeScale here so it can access designFeeScale
+  const getFeeScale = (structure: Structure, discipline: string): { adjustedRate: number } => {
+    // Calculate total construction cost for this structure
+    const constructionCost = structure.levels.reduce((total, level) =>
+      level.spaces.reduce((levelTotal, space) =>
+        levelTotal + space.fees.reduce((feeTotal, fee) =>
+          feeTotal + (fee.isActive ? fee.totalFee : 0), 0), 0), 0);
+
+    // Get the current fee scale from state
+    const currentFeeScale = designFeeScale;
+    if (!currentFeeScale || currentFeeScale.length === 0) {
+      return { adjustedRate: 0 };
+    }
+
+    // Find the appropriate fee scale row
+    const scale = currentFeeScale.find((row: FeeScale, index: number) => {
+      const nextRow = currentFeeScale[index + 1];
+      return !nextRow || constructionCost <= nextRow.construction_cost;
     });
 
-    return {
-      fee: constructionCost * (feeScale.adjustedRate / 100),
-      rate: feeScale.adjustedRate
-    };
+    if (!scale) {
+      return { adjustedRate: 0 };
+    }
+
+    // Get the base rate (prime consultant fee)
+    const baseRate = scale.prime_consultant_fee;
+
+    // Get the fraction rate for the discipline
+    let fractionRate: number;
+    const disciplineLower = discipline.toLowerCase();
+    switch (disciplineLower) {
+      case 'mechanical':
+        fractionRate = scale.fraction_of_prime_rate_mechanical;
+        break;
+      case 'plumbing':
+        fractionRate = scale.fraction_of_prime_rate_plumbing;
+        break;
+      case 'electrical':
+        fractionRate = scale.fraction_of_prime_rate_electrical;
+        break;
+      case 'structural':
+        fractionRate = scale.fraction_of_prime_rate_structural;
+        break;
+      default:
+        fractionRate = 1;
+    }
+
+    // Calculate the fee using the discipline's fraction of the prime consultant fee
+    const disciplineRate = baseRate * (fractionRate / 100);
+    return { adjustedRate: disciplineRate };
+  };
+
+  const calculateDisciplineFee = (structure: Structure, discipline: string, phase: 'design' | 'construction'): { fee: number; rate: number } => {
+    // Get the fee scale rate
+    const feeScale = getFeeScale(structure, discipline);
+
+    // Calculate the percentage based on phase
+    const percentage = phase === 'design' 
+      ? (structure.designPercentage ?? 80) / 100 
+      : (100 - (structure.designPercentage ?? 80)) / 100;
+    
+    // Calculate total construction cost for this structure
+    const constructionCost = structure.levels.reduce((total, level) =>
+      level.spaces.reduce((levelTotal, space) =>
+        levelTotal + space.fees.reduce((feeTotal, fee) =>
+          feeTotal + (fee.isActive ? fee.totalFee : 0), 0), 0), 0);
+    
+    // Calculate the fee
+    const fee = constructionCost * (feeScale.adjustedRate / 100) * percentage;
+    
+    return { fee, rate: feeScale.adjustedRate };
   };
 
   const calculateTotalDesignFee = (structure: Structure): number => {
@@ -1837,7 +1840,7 @@ export default function EditProposalPage() {
             return;
           }
 
-          const { fee: disciplineFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
+          const { fee: disciplineFee } = calculateDisciplineFee(structure, fee.discipline, 'design');
           console.log(`${fee.discipline} Fee:`, {
             constructionCost: fee.totalFee,
             designFee: disciplineFee
@@ -1845,21 +1848,23 @@ export default function EditProposalPage() {
           
           total += disciplineFee;
         });
+
+        // Add any engineering services fees
+        if (space.engineeringServices) {
+          space.engineeringServices.forEach(service => {
+            if (service.isActive && service.estimated_fee) {
+              total += Number(service.estimated_fee) || 0;
+            }
+          });
+        }
       });
     });
 
-    // Add any additional fee items for design phase
-    const additionalFees = proposal.feeItems
-      .filter(item => item.phase === 'design')
-      .reduce((sum, item) => sum + (Number(item.default_min_value) || 0), 0);
-
-    console.log('\nFinal Totals:', {
-      disciplineFees: total,
-      additionalFees,
-      total: total + additionalFees
+    console.log('\nFinal Total:', {
+      total
     });
 
-    return total + additionalFees;
+    return total;
   };
 
   const handleDesignFeeRateChange = (structureId: string, rate: number) => {
@@ -1938,60 +1943,79 @@ export default function EditProposalPage() {
     return 'multi';
   };
 
-  // Add the getFeeScale function
-  const getFeeScale = (
-    constructionCost: number,
-    discipline: string | number,
-    duplicateRate: number
+  const updateFeesForService = (
+    structureId: string,
+    levelId: string,
+    spaceId: string,
+    service: EngineeringStandardService
   ) => {
-    if (!designFeeScale.length) {
-      return { adjustedRate: 0 };
+    // Only proceed if the service has a non-null min_fee
+    if (service.min_fee === null) {
+      console.log('Service has no min_fee, skipping fee update');
+      return;
     }
 
-    // Find the appropriate fee scale row
-    const scale = designFeeScale.find((row, index) => {
-      const nextRow = designFeeScale[index + 1];
-      return !nextRow || constructionCost <= nextRow.construction_cost;
-    });
+    // Since we've checked min_fee is not null, we can safely use it
+    const minFee = service.min_fee;
 
-    if (!scale) {
-      return { adjustedRate: 0 };
-    }
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.map(s => {
+        if (s.id === structureId) {
+          return {
+            ...s,
+            levels: s.levels.map(l => {
+              if (l.id === levelId) {
+                return {
+                  ...l,
+                  spaces: l.spaces.map(sp => {
+                    if (sp.id === spaceId) {
+                      // Find or create the fee for this discipline
+                      const existingFee = sp.fees.find(f => f.discipline === service.discipline);
+                      if (existingFee) {
+                        // Accumulate the fee instead of replacing it
+                        return {
+                          ...sp,
+                          fees: sp.fees.map(f => 
+                            f.id === existingFee.id 
+                              ? { ...f, totalFee: (f.totalFee || 0) + minFee }
+                              : f
+                          )
+                        };
+                      } else {
+                        // Add new fee
+                        return {
+                          ...sp,
+                          fees: [
+                            ...sp.fees,
+                            {
+                              id: crypto.randomUUID(),
+                              discipline: service.discipline,
+                              totalFee: minFee,
+                              isActive: true,
+                              costPerSqft: 0
+                            }
+                          ]
+                        };
+                      }
+                    }
+                    return sp;
+                  })
+                };
+              }
+              return l;
+            })
+          };
+        }
+        return s;
+      })
+    }));
 
-    // If discipline is a number or 'total', use the prime consultant fee
-    if (typeof discipline === 'number' || discipline === 'total') {
-      const baseRate = scale.prime_consultant_fee;
-      return { adjustedRate: baseRate * duplicateRate };
-    }
-
-    // Get the appropriate fraction based on discipline
-    let fractionRate: number;
-    const disciplineLower = discipline.toLowerCase();
-    switch (disciplineLower) {
-      case 'mechanical':
-        fractionRate = scale.fraction_of_prime_rate_mechanical;
-        break;
-      case 'plumbing':
-        fractionRate = scale.fraction_of_prime_rate_plumbing;
-        break;
-      case 'electrical':
-        fractionRate = scale.fraction_of_prime_rate_electrical;
-        break;
-      case 'structural':
-        fractionRate = scale.fraction_of_prime_rate_structural;
-        break;
-      default:
-        fractionRate = 1;
-    }
-
-    // Calculate the fee using the discipline's fraction of the prime consultant fee
-    const baseRate = scale.prime_consultant_fee;
-    const disciplineRate = baseRate * (fractionRate / 100);
-    return { adjustedRate: disciplineRate * duplicateRate };
+    console.log('Updated fees for service:', service.service_name);
   };
 
   const handleFeeTableDrop = (
-    e: DragEvent<HTMLDivElement>,
+    e: DragEvent<HTMLDivElement> | Event,
     structureId: string,
     levelId: string,
     spaceId: string,
@@ -1999,150 +2023,39 @@ export default function EditProposalPage() {
     phase: 'design' | 'construction',
     dragDataOverride?: any
   ) => {
-    // Parse drag data from event or use override
-    const parsedDragData = dragDataOverride || (e.dataTransfer?.getData('application/json') ? JSON.parse(e.dataTransfer.getData('application/json')) : null);
+    // Only call preventDefault if it's a React DragEvent
+    if ('preventDefault' in e) {
+      e.preventDefault();
+    }
     
-    if (!parsedDragData) {
-      console.error('Invalid drag data');
+    console.log('=== FEE TABLE DROP ===');
+    console.log('Drop target:', { structureId, levelId, spaceId, discipline, phase });
+    
+    let dragData;
+    if (dragDataOverride) {
+      dragData = dragDataOverride;
+    } else if ('dataTransfer' in e) {
+      try {
+        const jsonData = e.dataTransfer?.getData('application/json');
+        if (jsonData) {
+          dragData = JSON.parse(jsonData);
+        }
+      } catch (error) {
+        console.error('Error parsing drag data:', error);
+        return;
+      }
+    }
+
+    console.log('Retrieved drag data:', dragData);
+
+    if (!dragData) {
+      console.log('No drag data found');
       return;
     }
 
-    if (parsedDragData.type !== 'fee_item' && parsedDragData.type !== 'additional_service') {
-      console.error('Invalid drag data type:', parsedDragData.type);
-      return;
-    }
-
-    if (parsedDragData.type === 'fee_item') {
-      const item = parsedDragData.item as FeeItem;
-      const itemPhase = parsedDragData.phase as 'design' | 'construction';
-
-      if (itemPhase !== phase) {
-        console.log('Phase mismatch:', { itemPhase, targetPhase: phase });
-        return;
-      }
-
-      const itemType = getItemType(item.name, discipline, item.discipline);
-      console.log('Determined item type:', itemType);
-
-      const newFeeItem: FeeItem = {
-        id: crypto.randomUUID(),
-        name: item.name,
-        description: item.description,
-        default_min_value: item.default_min_value,
-        isActive: true,
-        type: itemType,
-        discipline: itemType === 'nested' ? discipline : itemType === 'discipline' ? item.name : item.discipline || discipline,
-        parentDiscipline: itemType === 'nested' ? discipline : undefined,
-        phase: itemPhase
-      };
-
-      // Update the proposal state with the new fee item
-      setProposal(prev => {
-        const updatedStructures = prev.structures.map(structure => {
-          if (structure.id === structureId) {
-            return {
-              ...structure,
-              levels: structure.levels.map(level => {
-                if (level.id === levelId) {
-                  return {
-                    ...level,
-                    spaces: level.spaces.map(space => {
-                      if (space.id === spaceId) {
-                        const updatedServices = [...(space.engineeringServices || [])];
-                        // Convert FeeItem to EngineeringService format
-                        const engineeringService = {
-                          id: newFeeItem.id,
-                          discipline: newFeeItem.discipline || '',
-                          service_name: newFeeItem.name,
-                          description: newFeeItem.description,
-                          estimated_fee: null,
-                          isActive: newFeeItem.isActive
-                        };
-                        updatedServices.push(engineeringService);
-                        return {
-                          ...space,
-                          engineeringServices: updatedServices
-                        };
-                      }
-                      return space;
-                    })
-                  };
-                }
-                return level;
-              })
-            };
-          }
-          return structure;
-        });
-
-        return {
-          ...prev,
-          structures: updatedStructures
-        };
-      });
-    } else if (parsedDragData.type === 'additional_service') {
-      const item = parsedDragData.item as EngineeringAdditionalServices;
-      const itemPhase = item.phase || 'design';
-
-      if (itemPhase !== phase) {
-        console.log('Phase mismatch:', { itemPhase, targetPhase: phase });
-        return;
-      }
-
-      if (!item.discipline) {
-        console.error('Additional service missing discipline');
-        return;
-      }
-
-      console.log('Processing additional service:', {
-        name: item.name,
-        phase: itemPhase,
-        discipline: item.discipline
-      });
-
-      // Convert EngineeringAdditionalService to EngineeringService format
-      const engineeringService = {
-        id: crypto.randomUUID(),
-        discipline: item.discipline,
-        service_name: item.name,
-        description: item.description,
-        estimated_fee: null,
-        isActive: true
-      };
-
-      // Update the proposal state
-      setProposal(prev => {
-        const updatedStructures = prev.structures.map(structure => {
-          if (structure.id === structureId) {
-            return {
-              ...structure,
-              levels: structure.levels.map(level => {
-                if (level.id === levelId) {
-                  return {
-                    ...level,
-                    spaces: level.spaces.map(space => {
-                      if (space.id === spaceId) {
-                        return {
-                          ...space,
-                          engineeringServices: [...(space.engineeringServices || []), engineeringService]
-                        };
-                      }
-                      return space;
-                    })
-                  };
-                }
-                return level;
-              })
-            };
-          }
-          return structure;
-        });
-
-        return {
-          ...prev,
-          structures: updatedStructures
-        };
-      });
+    if (dragData.type === 'engineering_service') {
+      const service = dragData.service as EngineeringStandardService;
+      updateFeesForService(structureId, levelId, spaceId, service);
     }
   };
 
@@ -2150,14 +2063,6 @@ export default function EditProposalPage() {
   const isDropAllowed = (e: DragEvent<HTMLDivElement>, targetPhase: 'design' | 'construction'): boolean => {
     if (!dragData) return false;
     return dragData.type === 'additional_item' && dragData.phase === targetPhase;
-  };
-
-  // Add handler for deleting fee items
-  const handleDeleteFeeItem = (itemId: string) => {
-    setProposal(prev => ({
-      ...prev,
-      feeItems: prev.feeItems.filter(item => item.id !== itemId)
-    }));
   };
 
   // Add handler for editing space
@@ -2242,115 +2147,34 @@ export default function EditProposalPage() {
   };
 
   // Add helper function to handle fee updates
-  const handleFeeUpdate = (structureId: string, discipline: string, type: 'design' | 'construction', value: number | null, spaceId?: string) => {
-    // Only allow overrides for space-level fees
-    if (!spaceId) return;
-
-    // Treat empty/null values as 0 for calculations
-    const effectiveValue = value === null ? 0 : value;
-
-    // Update the manual override
-    setManualFeeOverrides((prev: ManualFeeOverride[]) => {
-      const existing = prev.find(o => 
-        o.structureId === structureId && 
-        o.discipline === discipline && 
-        o.spaceId === spaceId
-      );
-      if (existing) {
-        return prev.map(o => 
-          o.structureId === structureId && o.discipline === discipline && o.spaceId === spaceId
-            ? { ...o, [type === 'design' ? 'designFee' : 'constructionSupportFee']: effectiveValue }
-            : o
-        );
-      }
-      return [...prev, {
-        structureId,
-        discipline,
-        spaceId,
-        [type === 'design' ? 'designFee' : 'constructionSupportFee']: effectiveValue
-      }];
-    });
-
-    // Update the proposal state with new space fee and recalculate discipline total
-    setProposal(prev => {
-      const structure = prev.structures.find(s => s.id === structureId);
-      if (!structure) return prev;
-
-      // First update the space's fee
-      const updatedStructures = prev.structures.map(s => {
-        if (s.id === structureId) {
-          return {
-            ...s,
-            levels: s.levels.map(l => ({
-              ...l,
-              spaces: l.spaces.map(sp => {
-                if (sp.id === spaceId) {
-                  return {
-                    ...sp,
-                    fees: sp.fees.map(f => {
-                      if (f.discipline === discipline) {
-                        return { ...f, totalFee: effectiveValue };
-                      }
-                      return f;
-                    })
-                  };
-                }
-                return sp;
-              })
-            }))
-          };
-        }
-        return s;
-      });
-
-      // Then calculate the discipline total by summing all active spaces
-      const updatedStructuresWithTotals = updatedStructures.map(s => {
-        if (s.id === structureId) {
-          // Get all spaces with this discipline
-          const spacesWithDiscipline = s.levels.flatMap(level => 
-            level.spaces.filter(space => 
-              space.fees.some(fee => fee.discipline === discipline && fee.isActive)
-            )
-          );
-
-          // Calculate total for this discipline by summing all active spaces
-          const disciplineTotal = spacesWithDiscipline.reduce((sum, space) => {
-            // Get the fee for this discipline in this space
-            const spaceFee = space.fees.find(f => f.discipline === discipline);
-            // Add the fee to the sum (use 0 if no fee found)
-            const feeValue = spaceFee?.totalFee ?? 0;
-            console.log(`Space ${space.name} fee: ${feeValue}`); // Debug log
-            return sum + feeValue;
-          }, 0);
-
-          console.log(`Total for discipline ${discipline}: ${disciplineTotal}`); // Debug log
-
-          // Update the discipline total in all spaces
-          return {
-            ...s,
-            levels: s.levels.map(l => ({
-              ...l,
-              spaces: l.spaces.map(sp => ({
-                ...sp,
-                fees: sp.fees.map(f => {
-                  if (f.discipline === discipline) {
-                    // Update the discipline total in the fee item
-                    return { ...f, costPerSqft: disciplineTotal };
-                  }
-                  return f;
-                })
-              }))
-            }))
-          };
-        }
-        return s;
-      });
-
-      return {
-        ...prev,
-        structures: updatedStructuresWithTotals
-      };
-    });
+  const handleFeeUpdate = (structureId: string, levelId: string, spaceId: string, feeId: string, updates: Partial<Fee>) => {
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.map(s =>
+        s.id === structureId
+          ? {
+              ...s,
+              levels: s.levels.map(l =>
+                l.id === levelId
+                  ? {
+                      ...l,
+                      spaces: l.spaces.map(sp =>
+                        sp.id === spaceId
+                          ? {
+                              ...sp,
+                              fees: sp.fees.map(f =>
+                                f.id === feeId ? { ...f, ...updates } : f
+                              )
+                            }
+                          : sp
+                      )
+                    }
+                  : l
+              )
+            }
+          : s
+      )
+    }));
   };
 
   // Add helper function to reset fees
@@ -2474,6 +2298,101 @@ export default function EditProposalPage() {
   useEffect(() => {
     fetchEngineeringAdditionalServices();
   }, []);
+
+  // Update the handleDisciplineFeeToggle to match the expected signature
+  const handleServiceToggle = (serviceId: string, isActive: boolean) => {
+    // Implementation will be added later
+    console.log('Service toggle:', serviceId, isActive);
+  };
+
+  // Update the handleDragStart for services
+  const handleServiceDragStart = (e: DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
+    console.log('Starting service drag:', service.service_name);
+    const dragData = {
+      type: 'engineering_service',
+      service: service
+    };
+    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+    e.dataTransfer.effectAllowed = 'move'; // Changed from 'copy' to 'move'
+  };
+
+  // Update the handleDragOver for the space container
+  const handleSpaceDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    console.log('=== SPACE DRAG OVER ===');
+    
+    try {
+      const jsonData = e.dataTransfer.getData('application/json');
+      console.log('Space drag over data:', jsonData);
+      
+      if (jsonData) {
+        const data = JSON.parse(jsonData);
+        console.log('Parsed space drag data:', data);
+        
+        if (data.type === 'engineering_service' || data.type === 'additional_service') {
+          e.dataTransfer.dropEffect = 'move';
+          console.log('Setting drop effect to move for space');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error in space drag over:', error);
+    }
+    
+    e.dataTransfer.dropEffect = 'none';
+    console.log('Setting drop effect to none for space');
+  };
+
+  // Update the service update handler in the main component
+  const handleServiceUpdate = async (serviceId: string, updates: Partial<EngineeringStandardService>) => {
+    console.log('Updating service state:', serviceId, updates);
+    
+    try {
+      // Find the current service data
+      const currentService = engineeringStandardServices.find(s => s.id === serviceId);
+      if (!currentService) {
+        throw new Error('Service not found');
+      }
+
+      // Combine current service data with updates
+      const updatedServiceData = {
+        ...currentService,
+        ...updates
+      };
+
+      // Make API call to update the service
+      const response = await fetch(`/api/engineering-services?id=${serviceId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedServiceData),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update service');
+      }
+
+      const updatedService = await response.json();
+      console.log('Service updated successfully:', updatedService);
+
+      // Update the local state with the response from the server
+      setEngineeringStandardServices(prevServices => 
+        prevServices.map(service => 
+          service.id === serviceId ? { ...service, ...updatedService } : service
+        )
+      );
+    } catch (error) {
+      console.error('Error updating service:', error);
+      // Revert the local state if the API call fails
+      setEngineeringStandardServices(prevServices => 
+        prevServices.map(service => 
+          service.id === serviceId ? { ...service, included_in_fee: !updates.included_in_fee } : service
+        )
+      );
+    }
+  };
 
   return (
     <div className="container mx-auto py-6 pt-24 space-y-6">
@@ -2689,13 +2608,13 @@ export default function EditProposalPage() {
                             </svg>
                           </button>
                         )}
-                        <div className="font-medium dark:text-[#E5E7EB]">{structure.description}</div>
+                        <div className="font-medium dark:text-[#E5E7EB]">{structure.name}</div>
                         {!structure.parentId && (
                           <button
                             type="button"
                             onClick={() => {
                               setEditingStructureId(structure.id);
-                              setEditingStructureName(structure.description);
+                              setEditingStructureName(structure.name);
                             }}
                             className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
                             title="Edit Structure Name"
@@ -2712,6 +2631,10 @@ export default function EditProposalPage() {
                       <EngineeringServicesDisplay
                         services={engineeringStandardServices}
                         isLoading={isLoadingStandardServices}
+                        onServiceUpdate={handleServiceUpdate}
+                        proposal={proposal}
+                        setProposal={setProposal}
+                        onServicesChange={setTrackedServices}
                       />
                     )}
                   </div>
@@ -2956,7 +2879,23 @@ export default function EditProposalPage() {
                         {level.spaces && level.spaces.length > 0 && (
                           <div className="bg-muted/5 divide-y divide-[#4DB6AC]/10 dark:divide-[#4DB6AC]/10">
                             {level.spaces.map((space) => (
-                              <div key={space.id} className="p-3 pl-12">
+                              <div 
+                                key={space.id} 
+                                className="p-3 pl-12"
+                                onDragOver={handleSpaceDragOver}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  handleFeeTableDrop(
+                                    e,
+                                    structure.id,
+                                    level.id,
+                                    space.id,
+                                    space.discipline,
+                                    'design',
+                                    dragData
+                                  );
+                                }}
+                              >
                                 <div className="flex items-start gap-3">
                                   <div className="p-1.5 bg-primary/5 rounded-md">
                                     <Home className="w-4 h-4 text-primary/70" />
@@ -3128,14 +3067,6 @@ export default function EditProposalPage() {
                                 </div>
                                 <div className="flex items-center gap-1">
                                   {/* ... existing buttons ... */}
-                                  <button
-                                    type="button"
-                                    onClick={() => processLinkedServices(structure.id, level.id, [space.discipline])}
-                                    className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                    title="Process Linked Services"
-                                  >
-                                    <SplitSquareVertical className="w-3.5 h-3.5" />
-                                  </button>
                                 </div>
                   </div>
                             ))}
@@ -3170,848 +3101,46 @@ export default function EditProposalPage() {
 
         <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
           <div className="flex gap-6">
-            {/* Fee Table Section - Add overflow-auto to enable scrolling */}
-            <div className="flex-1 min-w-0 overflow-auto">
-              <h2 className="text-lg font-semibold mb-4 dark:text-[#E5E7EB]">Fee Table</h2>
-              <div className="space-y-6">
-                {proposal.structures.map((structure, structureIndex) => {
-                  // Calculate total structure cost first
-                  const totalStructureCost = structure.levels.reduce((total, level) =>
-                    level.spaces.reduce((levelTotal, space) =>
-                      levelTotal + space.fees.reduce((feeTotal, fee) =>
-                        feeTotal + (fee.isActive ? fee.totalFee : 0), 0), 0), 0);
-
-                  // Get the design fee rate and calculate construction support rate
-                  const designFeeRate = structure.designFeeRate ?? 80;
-                  const constructionSupportRate = 100 - designFeeRate;
-                  const { fee: totalDesignFee, rate: designFeeRateFromScale } = calculateDisciplineFee(totalStructureCost, 'total', structure);
-                  const totalConstructionSupportFee = totalDesignFee * (constructionSupportRate / 100);
-
-                  // Calculate individual discipline fees based on their proportion of the total cost
-                  const structureFees = structure.levels.flatMap(level =>
-                    level.spaces.flatMap(space => space.fees)
-                  );
-                  
-                  if (structureFees.length === 0) return null;
-
-                  return (
-                    <div key={structure.id} className="border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 rounded-lg overflow-hidden">
-                      {/* Building Header */}
-                      <div className="bg-muted/5 p-4 border-b border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="w-5 h-5 text-primary" />
-                            <span className="text-lg font-medium text-gray-900 dark:text-[#E5E7EB]">
-                              {structure.description}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                              <label className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                Design Fee Percentage:
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="100"
-                                  step="0.1"
-                                  value={designFeeRate}
-                                  onChange={(e) => {
-                                    const value = parseFloat(e.target.value);
-                                    if (!isNaN(value) && value >= 0 && value <= 100) {
-                                      handleDesignFeeRateChange(structure.id, value);
-                                    }
-                                  }}
-                                  className="w-20 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                                />
-                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500">%</span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <label className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                Construction Support Percentage:
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type="number"
-                                  value={constructionSupportRate}
-                                  readOnly
-                                  className="w-20 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md bg-muted/10 text-gray-500 cursor-not-allowed"
-                                />
-                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500">%</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleConstructionSupportToggle(structure.id, !(structure.constructionSupportEnabled ?? true))}
-                                className={`p-1.5 rounded-md transition-colors ${
-                                  structure.constructionSupportEnabled !== false
-                                    ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                }`}
-                                title={structure.constructionSupportEnabled !== false ? 'Disable construction support' : 'Enable construction support'}
-                              >
-                                {structure.constructionSupportEnabled !== false ? (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                    <path d="M20 6 9 17l-5-5"/>
-                                  </svg>
-                                ) : (
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                    <path d="M18 6 6 18"/>
-                                    <path d="m6 6 12 12"/>
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-semibold mb-4 dark:text-[#E5E7EB]">Fixed Fees</h2>
+              <FixedFees
+                structures={proposal.structures}
+                phase={phase}
+                onFeeUpdate={handleFeeUpdate}
+                onCalculateFee={calculateDisciplineFee}
+                trackedServices={trackedServices}
+              />
                           </div>
                         </div>
                       </div>
 
-                      {/* Fee Tables Container */}
-                      <div className="divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
-                        {/* Design Phase Fees */}
-                        <div className="p-4">
-                          <h3 className="text-md font-medium mb-4 text-gray-700 dark:text-[#E5E7EB]">Design Phase Fees</h3>
-                          <div className="overflow-x-auto">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="border-b border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[30%]">Item</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[20%]">Construction Cost</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[15%]">Design Fee Rate</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[20%]">Design Fee</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[15%]">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
-                                {/* Group fees by discipline */}
-                                {Array.from((() => {
-                                  // Create a map to store combined fees by discipline
-                                  const disciplineFees = new Map<string, {
-                                    totalCost: number;
-                                    fees: { id: string; spaceId: string; levelId: string; isActive: boolean }[];
-                                  }>();
-
-                                  // Collect all fees by discipline
-                                  structure.levels.forEach(level => {
-                                    level.spaces.forEach(space => {
-                                      space.fees.forEach(fee => {
-                                        if (!disciplineFees.has(fee.discipline)) {
-                                          disciplineFees.set(fee.discipline, {
-                                            totalCost: 0,
-                                            fees: []
-                                          });
-                                        }
-                                        const disciplineData = disciplineFees.get(fee.discipline)!;
-                                        disciplineData.totalCost += fee.totalFee;
-                                        disciplineData.fees.push({
-                                          id: fee.id,
-                                          spaceId: space.id,
-                                          levelId: level.id,
-                                          isActive: fee.isActive
-                                        });
-                                      });
-                                    });
-                                  });
-
-                                  return disciplineFees;
-                                })()).map(([discipline, data]) => {
-                                  const { fee: disciplineDesignFee, rate: disciplineRate } = calculateDisciplineFee(data.totalCost, discipline as string, structure);
-                                  const isActive = data.fees.some(f => f.isActive);
-                                  const manualOverride = getManualOverride(structure.id, discipline);
-                                  const displayDesignFee = manualOverride?.designFee ?? disciplineDesignFee;
-
-                                      return (
-                                    <React.Fragment key={discipline}>
-                                      <tr className="hover:bg-muted/5"
-                                        onDragOver={(e) => {
-                                          e.preventDefault();
-                                          e.dataTransfer.dropEffect = isDropAllowed(e, 'design') ? 'copy' : 'none';
-                                        }}
-                                        onDrop={(e) => handleFeeTableDrop(e, structure.id, '', '', discipline, 'design')}
-                                      >
-                                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-8">
-                                          {discipline}
-                                            </td>
-                                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                          {formatCurrency(data.totalCost)}
-                                            </td>
-                                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                          {disciplineRate.toFixed(1)}%
-                                            </td>
-                                        <td className="py-3 px-4 text-sm">
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                              {formatCurrency(displayDesignFee)}
-                                            </span>
-                                            {manualOverride?.designFee !== undefined && (
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete Proposal</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this proposal? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-3 mt-4">
                                               <button
                                                 type="button"
-                                                onClick={() => handleResetFees(structure.id, discipline)}
-                                                className="p-1 text-gray-500 hover:text-primary"
-                                                title="Reset to calculated value"
+                onClick={() => setIsDeleteDialogOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
                                               >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                                  <path d="M3 3v5h5"/>
-                                                </svg>
+                Cancel
                                               </button>
-                                            )}
-                                          </div>
-                                            </td>
-                                            <td className="py-3 px-4">
-                                          <div className="flex items-center gap-2">
                                               <button
                                                 type="button"
-                                              onClick={() => {
-                                                // Get all spaces under this discipline
-                                                const spacesWithDiscipline = structure.levels.flatMap(level =>
-                                                  level.spaces.filter(space => 
-                                                    space.fees.some(fee => fee.discipline === discipline)
-                                                  )
-                                                );
-
-                                                // Get all fees for this discipline across all spaces
-                                                const disciplineFees = spacesWithDiscipline.flatMap(space =>
-                                                  space.fees.filter(fee => fee.discipline === discipline)
-                                                );
-
-                                                // If all fees are active, disable all. Otherwise, enable all
-                                                const allActive = disciplineFees.every(fee => fee.isActive);
-                                                handleFeeTableToggle(structure.id, discipline, !allActive);
-                                              }}
-                                              className={`p-1.5 rounded-md transition-colors ${
-                                                data.fees.some(f => f.isActive)
-                                                  ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                              }`}
-                                              title={data.fees.some(f => f.isActive) ? 'Disable all spaces for this discipline' : 'Enable all spaces for this discipline'}
-                                            >
-                                              {data.fees.some(f => f.isActive) ? (
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                  <path d="M20 6 9 17l-5-5"/>
-                                                </svg>
-                                              ) : (
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                  <path d="M18 6 6 18"/>
-                                                  <path d="m6 6 12 12"/>
-                                                </svg>
-                                              )}
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-destructive rounded-md hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
                                               </button>
                                           </div>
-                                            </td>
-                                          </tr>
-
-                                      {/* Show individual space fees only if splitFees is true */}
-                                      {structure.levels.flatMap(level =>
-                                        level.spaces.filter(space => space.splitFees).flatMap(space =>
-                                          space.fees.filter(fee => fee.discipline === discipline).map(fee => {
-                                            const { fee: spaceDesignFee, rate: spaceRate } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                            return (
-                                              <tr key={`${fee.id}-${space.id}`} className="hover:bg-muted/5 bg-muted/5">
-                                                <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-12">
-                                                  <div className="flex items-center gap-2">
-                                                    <span className="text-gray-500">└─</span>
-                                                    {space.name}
-                                                  </div>
-                                                </td>
-                                                <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                  {formatCurrency(fee.totalFee)}
-                                                </td>
-                                                <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                  {spaceRate.toFixed(1)}%
-                                                </td>
-                                                <td className="py-2 px-4 text-sm">
-                                                  <div className="flex items-center gap-2">
-                                                    <input
-                                                      type="text"
-                                                      defaultValue={getManualOverride(structure.id, fee.discipline, space.id)?.designFee ?? 
-                                                        (fee.isActive ? spaceDesignFee : '')}
-                                                      onBlur={(e) => {
-                                                        const val = e.target.value === '' ? null : Number(e.target.value);
-                                                        handleFeeUpdate(structure.id, fee.discipline, 'design', val, space.id);
-                                                      }}
-                                                      onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') {
-                                                          e.currentTarget.blur(); // This will trigger the onBlur handler
-                                                        }
-                                                      }}
-                                                      className="w-24 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                                                    />
-                                                    {getManualOverride(structure.id, fee.discipline, space.id)?.designFee !== undefined && (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleResetFees(structure.id, fee.discipline, space.id)}
-                                                        className="p-1 text-gray-500 hover:text-primary"
-                                                        title="Reset to calculated value"
-                                                      >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                                          <path d="M3 3v5h5"/>
-                                                        </svg>
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                </td>
-                                                <td className="py-2 px-4">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                      setProposal(prev => ({
-                                                        ...prev,
-                                                        structures: prev.structures.map(s => {
-                                                          if (s.id === structure.id) {
-                                                            return {
-                                                              ...s,
-                                                              levels: s.levels.map(l => {
-                                                                if (l.id === level.id) {
-                                                                  return {
-                                                                    ...l,
-                                                                    spaces: l.spaces.map(sp => {
-                                                                      if (sp.id === space.id) {
-                                                                        return {
-                                                                          ...sp,
-                                                                          fees: sp.fees.map(f => {
-                                                                            if (f.id === fee.id) {
-                                                                              return { ...f, isActive: !f.isActive };
-                                                                            }
-                                                                            return f;
-                                                                          })
-                                                                        };
-                                                                      }
-                                                                      return sp;
-                                                                    })
-                                                                  };
-                                                                }
-                                                                return l;
-                                                              })
-                                                            };
-                                                          }
-                                                          return s;
-                                                        })
-                                                      }));
-                                                    }}
-                                                    className={`p-1.5 rounded-md transition-colors ${
-                                                      fee.isActive 
-                                                        ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                                                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                                    }`}
-                                                    title={fee.isActive ? 'Disable fee' : 'Enable fee'}
-                                                  >
-                                                    {fee.isActive ? (
-                                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                        <path d="M20 6 9 17l-5-5"/>
-                                                      </svg>
-                                                    ) : (
-                                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                        <path d="M18 6 6 18"/>
-                                                        <path d="m6 6 12 12"/>
-                                                      </svg>
-                                                    )}
-                                                  </button>
-                                                </td>
-                                              </tr>
-                                            );
-                                          })
-                                        )
-                                      )}
-
-                                      {/* Find nested items for this discipline */}
-                                      {proposal.feeItems
-                                        .filter(feeItem => feeItem.type === 'nested' && feeItem.parentDiscipline === discipline && feeItem.phase === 'design')
-                                        .map(nestedItem => (
-                                          <tr key={`nested-${nestedItem.id}-${discipline}`} className="hover:bg-muted/5 bg-muted/5">
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-12">
-                                                <div className="flex items-center gap-2">
-                                                  <span className="text-gray-500">└─</span>
-                                                  {nestedItem.name}
-                                                </div>
-                                              </td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                -
-                                              </td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                -
-                                              </td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                {formatCurrency(nestedItem.default_min_value)}
-                                              </td>
-                                              <td className="py-2 px-4">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteFeeItem(nestedItem.id)}
-                                                  className="p-1.5 text-gray-500 hover:text-destructive"
-                                                title="Delete item"
-                                                >
-                                                  <Trash2 className="w-4 h-4" />
-                                                </button>
-                                              </td>
-                                            </tr>
-                                          ))}
-                                    </React.Fragment>
-                                      );
-                                })}
-
-                                {/* Multi-discipline items */}
-                                {proposal.feeItems
-                                  .filter(item => item.type === 'multi' && item.phase === 'design')
-                                  .map(item => (
-                                    <tr 
-                                      key={item.id} 
-                                      className="hover:bg-muted/5"
-                                      onDragOver={(e) => {
-                                        e.preventDefault();
-                                        e.dataTransfer.dropEffect = 'none';
-                                      }}
-                                      onDrop={(e) => {
-                                        e.preventDefault();
-                                        console.log('Drop rejected - multi-discipline items section does not accept drops');
-                                      }}
-                                    >
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-8">
-                                        {item.name}
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        {formatCurrency(item.default_min_value)}
-                                      </td>
-                                      <td className="py-3 px-4">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteFeeItem(item.id)}
-                                          className="p-1.5 text-gray-500 hover:text-destructive"
-                                          title="Delete item"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
-
-                                {/* ResCheck items */}
-                                {proposal.feeItems
-                                  .filter(item => item.type === 'rescheck' && item.phase === 'design')
-                                  .map(item => (
-                                    <tr 
-                                      key={item.id} 
-                                      className="hover:bg-muted/5"
-                                      onDragOver={(e) => {
-                                        e.preventDefault();
-                                        e.dataTransfer.dropEffect = 'none';
-                                      }}
-                                      onDrop={(e) => {
-                                        e.preventDefault();
-                                        console.log('Drop rejected - rescheck items section does not accept drops');
-                                      }}
-                                    >
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-8">
-                                        {item.name}
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        {formatCurrency(item.default_min_value)}
-                                      </td>
-                                      <td className="py-3 px-4">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteFeeItem(item.id)}
-                                          className="p-1.5 text-gray-500 hover:text-destructive"
-                                          title="Delete item"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
-
-                                {/* Update the Design Phase Total row */}
-                                <tr className="bg-muted/5 border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                                  <td className="py-2 px-4 text-sm font-medium text-gray-900 dark:text-[#E5E7EB]">
-                                    Design Phase Total
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-primary">
-                                    {formatCurrency(totalStructureCost)}
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-gray-900 dark:text-[#E5E7EB]">
-                                    {(() => {
-                                      const totalFee = structure.levels.reduce((total, level) => 
-                                        total + level.spaces.reduce((levelTotal, space) => 
-                                          levelTotal + space.fees.reduce((feeTotal, fee) => {
-                                            const manualOverride = getManualOverride(structure.id, fee.discipline);
-                                            const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                            return feeTotal + (manualOverride?.designFee ?? disciplineDesignFee);
-                                          }, 0)
-                                        , 0)
-                                      , 0);
-                                      const effectiveRate = (totalFee / totalStructureCost) * 100;
-                                      return isNaN(effectiveRate) ? '0.0' : effectiveRate.toFixed(1);
-                                    })()}%
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-primary">
-                                    {formatCurrency(structure.levels.reduce((total, level) => 
-                                      total + level.spaces.reduce((levelTotal, space) => 
-                                        levelTotal + space.fees.reduce((feeTotal, fee) => {
-                                          const manualOverride = getManualOverride(structure.id, fee.discipline);
-                                          const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                          return feeTotal + (manualOverride?.designFee ?? disciplineDesignFee);
-                                        }, 0)
-                                      , 0)
-                                    , 0))}
-                                  </td>
-                                  <td className="py-2 px-4"></td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        {/* Construction Phase Fees */}
-                        <div className="p-4">
-                          <h3 className="text-md font-medium mb-4 text-gray-700 dark:text-[#E5E7EB]">Construction Phase Fees</h3>
-                          <div className="overflow-x-auto">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="border-b border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[30%]">Discipline</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[20%]">Construction Cost</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[15%]">Design Fee Rate</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[20%]">Construction Support Fee</th>
-                                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-[#9CA3AF] w-[15%]">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
-                                {/* Show discipline rows when construction support is enabled */}
-                                {structure.constructionSupportEnabled !== false && structure.levels.flatMap(level =>
-                                  level.spaces.flatMap(space =>
-                                    space.fees.map((fee, index) => {
-                                      // Calculate the discipline's design fee first
-                                      const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                      
-                                      // Calculate construction support fee based on the discipline's design fee and construction support rate
-                                      const disciplineConstructionSupportFee = disciplineDesignFee * (constructionSupportRate / 100);
-                                      const manualOverride = getManualOverride(structure.id, fee.discipline);
-                                      const displayConstructionSupportFee = manualOverride?.constructionSupportFee ?? disciplineConstructionSupportFee;
-
-                                      // Find nested items for this discipline
-                                      const nestedItems = proposal.feeItems.filter(
-                                        item => item.type === 'nested' && item.parentDiscipline === fee.discipline && item.phase === 'construction'
-                                      );
-
-                                      return (
-                                        <React.Fragment key={`construction-${fee.id}-${level.id}-${space.id}`}>
-                                          <tr className="hover:bg-muted/5"
-                                          onDragOver={(e) => {
-                                            e.preventDefault();
-                                              e.dataTransfer.dropEffect = isDropAllowed(e, 'construction') ? 'copy' : 'none';
-                                          }}
-                                          onDrop={(e) => handleFeeTableDrop(e, structure.id, level.id, space.id, fee.discipline, 'construction')}
-                                        >
-                                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-8">
-                                            {fee.discipline}
-                                          </td>
-                                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                            {formatCurrency(fee.totalFee)}
-                                          </td>
-                                          <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                              {(() => {
-                                                const { rate: disciplineRate } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                                return disciplineRate.toFixed(1);
-                                              })()}%
-                                          </td>
-                                          <td className="py-3 px-4 text-sm">
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                type="text"
-                                                value={formatInputValue(displayConstructionSupportFee)}
-                                                onChange={(e) => {
-                                                  const value = parseInputValue(e.target.value);
-                                                  handleFeeUpdate(structure.id, fee.discipline, 'construction', value, space.id);
-                                                }}
-                                                className="w-32 px-2 py-1 text-sm border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                                                placeholder="0.00"
-                                              />
-                                              {manualOverride?.constructionSupportFee !== undefined && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleResetFees(structure.id, fee.discipline, space.id)}
-                                                  className="p-1 text-gray-500 hover:text-primary"
-                                                  title="Reset to calculated value"
-                                                >
-                                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                                    <path d="M3 3v5h5"/>
-                                                  </svg>
-                                                </button>
-                                              )}
-                                            </div>
-                                          </td>
-                                          <td className="py-3 px-4">
-                                              <div className="flex items-center gap-2">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                const newIsActive = !fee.isActive;
-                                                handleFeeTableToggle(structure.id, fee.discipline, newIsActive);
-                                              }}
-                                              className={`p-1.5 rounded-md transition-colors ${
-                                                fee.isActive
-                                                  ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                              }`}
-                                              title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
-                                            >
-                                              {fee.isActive ? (
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                  <path d="M20 6 9 17l-5-5"/>
-                                                </svg>
-                                              ) : (
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                                  <path d="M18 6 6 18"/>
-                                                  <path d="m6 6 12 12"/>
-                                                </svg>
-                                              )}
-                                            </button>
-                                              </div>
-                                          </td>
-                                        </tr>
-                                          {nestedItems.map(nestedItem => (
-                                            <tr key={`construction-nested-${nestedItem.id}-${fee.id}`} className="hover:bg-muted/5 bg-muted/5">
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-12">
-                                                <div className="flex items-center gap-2">
-                                                  <span className="text-gray-500">└─</span>
-                                                  {nestedItem.name}
-                                                </div>
-                                              </td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">-</td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">-</td>
-                                              <td className="py-2 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                                {formatCurrency(nestedItem.default_min_value)}
-                                              </td>
-                                              <td className="py-2 px-4">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteFeeItem(nestedItem.id)}
-                                                  className="p-1.5 text-gray-500 hover:text-destructive"
-                                                  title="Delete item"
-                                                >
-                                                  <Trash2 className="w-4 h-4" />
-                                                </button>
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </React.Fragment>
-                                      );
-                                    })
-                                  )
-                                )}
-
-                                {/* Show placeholder row for dropping items when construction support is disabled */}
-                                {structure.constructionSupportEnabled === false && (
-                                  <tr 
-                                    className="hover:bg-muted/5"
-                                    onDragOver={(e) => {
-                                      e.preventDefault();
-                                      e.dataTransfer.dropEffect = isDropAllowed(e, 'construction') ? 'copy' : 'none';
-                                    }}
-                                    onDrop={(e) => handleFeeTableDrop(e, structure.id, '', '', 'construction', 'construction')}
-                                  >
-                                    <td colSpan={5} className="py-8 px-4 text-center text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                      <div className="flex flex-col items-center gap-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-                                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                          <polyline points="17 8 12 3 7 8"/>
-                                          <line x1="12" x2="12" y1="3" y2="15"/>
-                                        </svg>
-                                        <span>Drop additional items here</span>
-                                        <span className="text-xs">Construction support is disabled</span>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-
-                                {/* Multi-discipline items for construction phase - always show these */}
-                                {proposal.feeItems
-                                  .filter((feeItem: FeeItem) => feeItem.type === 'multi' && feeItem.phase === 'construction')
-                                  .map((feeItem: FeeItem) => (
-                                    <tr 
-                                      key={`construction-multi-${feeItem.id}`} 
-                                      className="hover:bg-muted/5"
-                                    >
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB] pl-8">
-                                        {feeItem.name}
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        -
-                                      </td>
-                                      <td className="py-3 px-4 text-sm text-gray-900 dark:text-[#E5E7EB]">
-                                        {formatCurrency(feeItem.default_min_value)}
-                                      </td>
-                                      <td className="py-3 px-4">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteFeeItem(feeItem.id)}
-                                          className="p-1.5 text-gray-500 hover:text-destructive"
-                                          title="Delete item"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  ))}
-
-                                {/* Construction Phase Total row */}
-                                <tr className="bg-muted/5 border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                                  <td className="py-2 px-4 text-sm font-medium text-gray-900 dark:text-[#E5E7EB]">
-                                    Construction Phase Total
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-primary">
-                                    {formatCurrency(totalStructureCost)}
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-gray-900 dark:text-[#E5E7EB]">
-                                    {(() => {
-                                      const totalFee = calculateTotalDesignFee(structure);
-                                      const effectiveRate = (totalFee / totalStructureCost) * 100;
-                                      return isNaN(effectiveRate) ? '0.0' : effectiveRate.toFixed(1);
-                                    })()}%
-                                  </td>
-                                  <td className="py-2 px-4 text-sm font-medium text-primary">
-                                    {formatCurrency(
-                                      (() => {
-                                        // Calculate discipline-based construction support fees
-                                        const disciplineFees = structure.constructionSupportEnabled !== false
-                                          ? structure.levels.reduce((total, level) => 
-                                              total + level.spaces.reduce((levelTotal, space) => 
-                                                levelTotal + space.fees.reduce((feeTotal, fee) => {
-                                                  if (!fee.isActive) return feeTotal;
-                                                  const { fee: disciplineDesignFee } = calculateDisciplineFee(fee.totalFee, fee.discipline, structure);
-                                                  return feeTotal + (disciplineDesignFee * (constructionSupportRate / 100));
-                                                }, 0)
-                                              , 0)
-                                          , 0)
-                                          : 0;
-
-                                        // Calculate additional items fees (both multi-discipline and nested items)
-                                        const additionalFees = proposal.feeItems
-                                          .filter(item => item.phase === 'construction')
-                                          .reduce<number>((total, item) => {
-                                            // For multi-discipline items, add their default_min_value
-                                            if (item.type === 'multi') {
-                                              return total + (Number(item.default_min_value) || 0);
-                                            }
-                                            // For nested items, add their default_min_value
-                                            if (item.type === 'nested') {
-                                              return total + (Number(item.default_min_value) || 0);
-                                            }
-                                            return total;
-                                          }, 0);
-
-                                        const total = disciplineFees + additionalFees;
-                                        return total;
-                                      })()
-                                    )}
-                                  </td>
-                                  <td className="py-2 px-4"></td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {proposal.structures.every(s => 
-                  s.levels.every(l => 
-                    l.spaces.every(sp => sp.fees.length === 0)
-                  )
-                ) && (
-                  <div className="text-center py-8 text-gray-500 dark:text-[#9CA3AF]">
-                    No fees have been added yet. Add spaces to structures to see fee information.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Additional Items Container - Make it sticky */}
-            <div className="w-80 flex-shrink-0">
-              <div className="sticky top-24 bg-muted/5 rounded-lg border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 p-2">
-                <h2 className="text-lg font-semibold mb-2 px-2 dark:text-[#E5E7EB]">Additional Engineering Services</h2>
-                <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
-                  {/* Design Phase Items */}
-                  <div className="border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 rounded-md overflow-hidden">
-                    <div className="bg-muted/10 px-2 py-1.5">
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">Design Phase</h3>
-                    </div>
-                    {isLoadingAdditionalServices ? (
-                      <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : engineeringAdditionalServices.filter(item => item.phase === 'design').length === 0 ? (
-                      <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No design phase items</div>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-1 p-1">
-                        {engineeringAdditionalServices
-                          .filter(item => item.phase === 'design')
-                          .map(item => (
-                            <div
-                              key={item.id}
-                              draggable
-                              onDragStart={(e) => handleAdditionalItemDragStart(e, item)}
-                              className="p-1.5 rounded hover:bg-muted/5 cursor-move border border-transparent hover:border-primary/20 transition-colors text-sm"
-                            >
-                              <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">{item.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-[#9CA3AF]">{item.description}</div>
-                              <div className="text-xs font-medium text-primary mt-0.5">Min: {formatCurrency(item.default_min_value)}</div>
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Construction Phase Items */}
-                  <div className="border border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 rounded-md overflow-hidden">
-                    <div className="bg-muted/10 px-2 py-1.5">
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">Construction Phase</h3>
-                    </div>
-                    {isLoadingAdditionalServices ? (
-                      <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">Loading...</div>
-                    ) : engineeringAdditionalServices.filter(item => item.phase === 'construction').length === 0 ? (
-                      <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No construction phase items</div>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-1 p-1">
-                        {engineeringAdditionalServices
-                          .filter(item => item.phase === 'construction')
-                          .map(item => (
-                            <div
-                              key={item.id}
-                              draggable
-                              onDragStart={(e) => handleAdditionalItemDragStart(e, item)}
-                              className="p-1.5 rounded hover:bg-muted/5 cursor-move border border-transparent hover:border-primary/20 transition-colors text-sm"
-                            >
-                              <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">{item.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-[#9CA3AF]">{item.description}</div>
-                              <div className="text-xs font-medium text-primary mt-0.5">Min: {formatCurrency(item.default_min_value)}</div>
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
 
         <div className="flex justify-between">
           <button
@@ -4066,12 +3195,6 @@ export default function EditProposalPage() {
           </Command>
         </DialogContent>
       </Dialog>
-
-      <StructureDialog
-        open={isStructureDialogOpen}
-        onOpenChange={setIsStructureDialogOpen}
-        onSave={(structure) => handleAddStructure({ ...structure, levels: [] })}
-      />
 
       <SpaceDialog
         open={isSpaceDialogOpen}
