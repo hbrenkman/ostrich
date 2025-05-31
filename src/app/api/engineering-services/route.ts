@@ -12,6 +12,7 @@ interface EngineeringService {
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
+  construction_admin: boolean;
 }
 
 interface RawServiceData {
@@ -91,7 +92,8 @@ export async function POST(request: NextRequest) {
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
         rate: body.rate || null,
-        fee_increment: body.fee_increment || null
+        fee_increment: body.fee_increment || null,
+        construction_admin: body.construction_admin ?? false
       })
       .select()
       .single();
@@ -194,7 +196,8 @@ export async function PUT(request: NextRequest) {
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
         rate: body.rate || null,
-        fee_increment: body.fee_increment || null
+        fee_increment: body.fee_increment || null,
+        construction_admin: body.construction_admin ?? false
       })
       .eq('id', serviceId)
       .select()

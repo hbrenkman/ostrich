@@ -215,7 +215,8 @@ interface EngineeringStandardService {
   phase: 'design' | 'construction';
   min_fee: number | null;
   rate: number | null;
-  fee_increment: number | null;  // fee increment value
+  fee_increment: number | null;
+  construction_admin: boolean;
 }
 
 // Add interface for tracked services
@@ -229,6 +230,7 @@ interface TrackedService {
   fee_increment: number | null;  // fee increment value
   phase: 'design' | 'construction';
   customFee?: number;
+  construction_admin: boolean;
 }
 
 // Update EngineeringServicesDisplay props
@@ -880,13 +882,14 @@ export default function EditProposalPage() {
       console.log('Checking for services with min_fee after structure change:', {
         totalServices: engineeringStandardServices.length,
         includedServices: engineeringStandardServices.filter(s => s.default_included).length,
-        servicesWithMinFee: engineeringStandardServices.filter(s => s.min_fee !== null).length
+        servicesWithMinFee: engineeringStandardServices.filter(s => s.min_fee !== null).length,
+        constructionAdminServices: engineeringStandardServices.filter(s => s.construction_admin).length
       });
 
-      // Find services that are included and have non-null min_fee
+      // Find services that are included and have non-null min_fee, including construction admin services
       const servicesWithFees = engineeringStandardServices.filter(service => 
         service.default_included && 
-        service.min_fee !== null
+        (service.min_fee !== null || service.construction_admin)
       );
 
       console.log('Found services with fees:', servicesWithFees.map(s => ({
@@ -895,7 +898,8 @@ export default function EditProposalPage() {
         min_fee: s.min_fee,
         rate: s.rate,
         fee_increment: s.fee_increment,
-        default_included: s.default_included
+        default_included: s.default_included,
+        construction_admin: s.construction_admin
       })));
 
       if (servicesWithFees.length > 0) {
@@ -907,7 +911,8 @@ export default function EditProposalPage() {
           min_fee: service.min_fee,
           rate: service.rate,
           fee_increment: service.fee_increment,
-          phase: service.phase
+          phase: service.phase,
+          construction_admin: service.construction_admin
         }));
 
         console.log('Updating tracked services with rate and fee_increment:', updatedTrackedServices);

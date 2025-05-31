@@ -733,9 +733,6 @@ video {
 .top-full {
   top: 100%;
 }
-.right-8 {
-  right: 2rem;
-}
 .z-10 {
   z-index: 10;
 }
@@ -2016,6 +2013,9 @@ video {
 .pt-8 {
   padding-top: 2rem;
 }
+.pl-4 {
+  padding-left: 1rem;
+}
 .text-left {
   text-align: left;
 }
@@ -3280,20 +3280,16 @@ textarea)::placeholder {
 .data-\[state\=checked\]\:bg-primary[data-state=checked] {
   background-color: hsl(var(--primary));
 }
+.data-\[state\=checked\]\:bg-yellow-500[data-state=checked] {
+  --tw-bg-opacity: 1;
+  background-color: rgb(234 179 8 / var(--tw-bg-opacity));
+}
 .data-\[state\=open\]\:bg-accent[data-state=open] {
   background-color: hsl(var(--accent));
 }
 .data-\[state\=unchecked\]\:bg-\[\#6B7280\][data-state=unchecked] {
   --tw-bg-opacity: 1;
   background-color: rgb(107 114 128 / var(--tw-bg-opacity));
-}
-.data-\[state\=checked\]\:bg-yellow-500[data-state=checked] {
-  --tw-bg-opacity: 1;
-  background-color: rgb(234 179 8 / var(--tw-bg-opacity));
-}
-.data-\[state\=checked\]\:bg-green-500[data-state=checked] {
-  --tw-bg-opacity: 1;
-  background-color: rgb(34 197 94 / var(--tw-bg-opacity));
 }
 .data-\[state\=active\]\:text-foreground[data-state=active] {
   color: hsl(var(--foreground));
