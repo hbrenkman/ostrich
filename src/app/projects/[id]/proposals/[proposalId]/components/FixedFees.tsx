@@ -1,5 +1,5 @@
 import { FC, useState, useEffect } from 'react';
-import { Building2, Layers, Home, ChevronDown, ChevronRight, Check, RotateCcw } from 'lucide-react';
+import { Building2, Layers, Home, ChevronDown, ChevronRight, Check, RotateCcw, ChevronUp, ChevronDown as ChevronDownIcon, Copy, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -130,6 +130,13 @@ interface FixedFeesProps {
   onServiceFeeUpdate?: (serviceId: string, discipline: string, fee: number | undefined, phase: 'design' | 'construction') => void;
 }
 
+interface ProjectSummary {
+  designTotals: Record<string, number>;
+  constructionTotals: Record<string, number>;
+  grandTotals: Record<string, number>;
+  projectTotal: number;
+}
+
 export default function FixedFees({ 
   structures, 
   phase, 
@@ -139,6 +146,8 @@ export default function FixedFees({
   trackedServices = [],
   onServiceFeeUpdate 
 }: FixedFeesProps) {
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+
   const formatCurrency = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return '$0';
     return new Intl.NumberFormat('en-US', {
@@ -363,7 +372,9 @@ export default function FixedFees({
                         type="button"
                         className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
                         title="Revert to calculated fee"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           if (onServiceFeeUpdate) {
                             onServiceFeeUpdate(service.id, discipline, undefined, phase);
                           }
@@ -376,6 +387,8 @@ export default function FixedFees({
                       type="text"
                       value={formatCurrency(displayFee)}
                       onChange={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (onServiceFeeUpdate) {
                           const value = e.target.value.replace(/[^0-9.-]+/g, '');
                           const numericValue = parseFloat(value) || 0;
@@ -390,7 +403,9 @@ export default function FixedFees({
                       type="button"
                       className={`p-1.5 rounded-md transition-colors ${service.default_included ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
                       title={service.default_included ? "Disable service" : "Enable service"}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (onServiceFeeUpdate) {
                           onServiceFeeUpdate(service.id, discipline, service.default_included ? 0 : calculatedFee, phase);
                         }
@@ -465,7 +480,7 @@ export default function FixedFees({
     ).filter(Boolean);
   };
 
-  // Update calculatePhaseTotals to use the moved calculateServiceFee function
+  // Update calculatePhaseTotals to respect construction admin condition
   const calculatePhaseTotals = (structure: Structure, phase: 'design' | 'construction') => {
     const totals = DISCIPLINES.reduce((acc, discipline) => {
       // Calculate space fees total
@@ -473,6 +488,11 @@ export default function FixedFees({
         return levelTotal + level.spaces.reduce((spaceTotal, space) => {
           const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
           if (!fee) return spaceTotal;
+          
+          // Skip space fees in construction phase if no construction admin services
+          if (phase === 'construction' && !hasConstructionAdminServices) {
+            return spaceTotal;
+          }
           
           // Create a temporary structure with just this space to calculate its fee
           const tempStructure: Structure = {
@@ -533,7 +553,7 @@ export default function FixedFees({
     );
   };
 
-  // Update renderGrandTotals to include total sum
+  // Update renderGrandTotals to use structure name in both places
   const renderGrandTotals = (structure: Structure) => {
     const designTotals = calculatePhaseTotals(structure, 'design');
     const constructionTotals = calculatePhaseTotals(structure, 'construction');
@@ -551,7 +571,7 @@ export default function FixedFees({
         <div className="mt-4 border-t-2 border-gray-300 pt-4">
           <div className="grid grid-cols-6 gap-2 px-4">
             <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 font-medium">
-              <span className="text-sm">Structure Grand Total Fees</span>
+              <span className="text-sm">{structure.name} Grand Total Fees</span>
             </div>
             {DISCIPLINES.map(discipline => (
               <div key={discipline} className="flex items-center gap-2">
@@ -566,7 +586,7 @@ export default function FixedFees({
         <div className="mt-2 px-4">
           <div className="flex justify-end">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Structure Grand Total Fee:</span>
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{structure.name} Grand Total Fee:</span>
               <span className="text-right font-medium">
                 {formatCurrency(totalSum)}
               </span>
@@ -577,8 +597,177 @@ export default function FixedFees({
     );
   };
 
+  // Add function to calculate project summary
+  const calculateProjectSummary = (): ProjectSummary => {
+    const designTotals = DISCIPLINES.reduce((acc, discipline) => {
+      acc[discipline] = structures.reduce((sum, structure) => {
+        const totals = calculatePhaseTotals(structure, 'design');
+        return sum + (totals[discipline] || 0);
+      }, 0);
+      return acc;
+    }, {} as Record<string, number>);
+
+    const constructionTotals = DISCIPLINES.reduce((acc, discipline) => {
+      acc[discipline] = structures.reduce((sum, structure) => {
+        const totals = calculatePhaseTotals(structure, 'construction');
+        return sum + (totals[discipline] || 0);
+      }, 0);
+      return acc;
+    }, {} as Record<string, number>);
+
+    const grandTotals = DISCIPLINES.reduce((acc, discipline) => {
+      acc[discipline] = (designTotals[discipline] || 0) + (constructionTotals[discipline] || 0);
+      return acc;
+    }, {} as Record<string, number>);
+
+    const projectTotal = Object.values(grandTotals).reduce((sum, value) => sum + value, 0);
+
+    return {
+      designTotals,
+      constructionTotals,
+      grandTotals,
+      projectTotal
+    };
+  };
+
+  // Add function to copy summary to clipboard
+  const copySummaryToClipboard = () => {
+    const summary = calculateProjectSummary();
+    const text = `Project Summary
+────────────────
+Design Phase Totals
+${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.designTotals[d])}`).join('\n')}
+Design Total: ${formatCurrency(Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0))}
+
+Construction Phase Totals
+${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.constructionTotals[d])}`).join('\n')}
+Construction Total: ${formatCurrency(Object.values(summary.constructionTotals).reduce((sum, val) => sum + val, 0))}
+
+Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      console.log('Summary copied to clipboard');
+    }).catch(() => {
+      console.error('Failed to copy summary');
+    });
+  };
+
+  // Update renderSummaryPanel with proper event handling
+  const renderSummaryPanel = () => {
+    const summary = calculateProjectSummary();
+    const designTotal = Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0);
+    const constructionTotal = Object.values(summary.constructionTotals).reduce((sum, val) => sum + val, 0);
+
+    const handleToggle = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsSummaryOpen(prev => !prev);
+    };
+
+    return (
+      <div className="mb-8">
+        <div 
+          role="button"
+          tabIndex={0}
+          onClick={handleToggle}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setIsSummaryOpen(prev => !prev);
+            }
+          }}
+          className="w-full"
+        >
+          <div className="flex items-center justify-between p-2 border rounded-md hover:bg-gray-50 cursor-pointer">
+            <span className="font-medium">Project Summary</span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${isSummaryOpen ? 'rotate-180' : ''}`} />
+          </div>
+        </div>
+        
+        {isSummaryOpen && (
+          <div className="mt-4">
+            <Card className="p-4">
+              <div className="space-y-6">
+                {/* Design Phase Summary */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Project Design Phase Totals</h3>
+                  <div className="space-y-2">
+                    {DISCIPLINES.map(discipline => (
+                      <div key={discipline} className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">{discipline}</span>
+                        <span className="font-medium">{formatCurrency(summary.designTotals[discipline])}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-gray-200 pt-2 mt-2">
+                      <div className="flex justify-between items-center font-medium">
+                        <span>Project Design Total</span>
+                        <span>{formatCurrency(designTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Construction Phase Summary */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Project Construction Phase Totals</h3>
+                  <div className="space-y-2">
+                    {DISCIPLINES.map(discipline => (
+                      <div key={discipline} className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">{discipline}</span>
+                        <span className="font-medium">{formatCurrency(summary.constructionTotals[discipline])}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-gray-200 pt-2 mt-2">
+                      <div className="flex justify-between items-center font-medium">
+                        <span>Project Construction Total</span>
+                        <span>{formatCurrency(constructionTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Project Grand Total */}
+                <div className="border-t-2 border-gray-300 pt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">Project Grand Total</span>
+                    <span className="font-medium text-lg">{formatCurrency(summary.projectTotal)}</span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copySummaryToClipboard}
+                    className="flex items-center gap-2"
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copy Summary
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.print()}
+                    className="flex items-center gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Summary
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-8">
+      {/* Project Summary Panel */}
+      {renderSummaryPanel()}
+
       {structures.map(structure => (
         <Card key={structure.id} className="p-4">
           <div className="flex items-center justify-between mb-4">
@@ -641,7 +830,9 @@ export default function FixedFees({
                                     type="button"
                                     className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
                                     title="Revert to calculated fee"
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       if (onFeeUpdate && fee) {
                                         onFeeUpdate(structure.id, level.id, space.id, fee.id, { designFee: undefined }, 'design');
                                       }
@@ -654,6 +845,8 @@ export default function FixedFees({
                                   type="text"
                                   value={formatCurrency(displayFee)}
                                   onChange={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     if (onFeeUpdate && fee) {
                                       const value = e.target.value.replace(/[^0-9.-]+/g, '');
                                       const numericValue = parseFloat(value) || 0;
@@ -669,7 +862,9 @@ export default function FixedFees({
                                     type="button"
                                     className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
                                     title={fee.isActive ? "Disable discipline" : "Enable discipline"}
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       if (onFeeUpdate) {
                                         onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive }, 'design');
                                       }
@@ -767,7 +962,9 @@ export default function FixedFees({
                                     type="button"
                                     className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
                                     title="Revert to calculated fee"
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       if (onFeeUpdate && fee) {
                                         onFeeUpdate(structure.id, level.id, space.id, fee.id, { constructionFee: undefined }, 'construction');
                                       }
@@ -780,6 +977,8 @@ export default function FixedFees({
                                   type="text"
                                   value={formatCurrency(displayFee)}
                                   onChange={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
                                     if (onFeeUpdate && fee) {
                                       const value = e.target.value.replace(/[^0-9.-]+/g, '');
                                       const numericValue = parseFloat(value) || 0;
@@ -795,7 +994,9 @@ export default function FixedFees({
                                     type="button"
                                     className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
                                     title={fee.isActive ? "Disable discipline" : "Enable discipline"}
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
                                       if (onFeeUpdate) {
                                         onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive }, 'construction');
                                       }

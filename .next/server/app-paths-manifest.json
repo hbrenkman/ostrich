@@ -1,4 +1,4 @@
 {
-  "/api/engineering-services/route": "app/api/engineering-services/route.js",
-  "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js"
+  "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js",
+  "/projects/[id]/page": "app/projects/[id]/page.js"
 }

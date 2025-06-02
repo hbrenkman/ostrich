@@ -1879,7 +1879,20 @@ export default function EditProposalPage() {
 
     // Calculate the fee using the discipline's fraction of the prime consultant fee
     const disciplineRate = baseRate * (fractionRate / 100);
-    return { adjustedRate: disciplineRate };
+
+    // Get and apply the duplicate rate
+    const duplicateRate = getDuplicateRate(structure);
+    console.log('Applying duplicate rate:', {
+      structure: structure.name,
+      discipline,
+      baseRate,
+      fractionRate,
+      disciplineRate,
+      duplicateRate,
+      finalRate: disciplineRate * duplicateRate
+    });
+
+    return { adjustedRate: disciplineRate * duplicateRate };
   };
 
   const calculateDisciplineFee = (
@@ -1894,10 +1907,11 @@ export default function EditProposalPage() {
       discipline,
       phase,
       designPercentage: structure.designPercentage ?? 80,
-      returnRawCost
+      returnRawCost,
+      isDuplicate: !!structure.parentId
     });
 
-    // Get the fee scale rate
+    // Get the fee scale rate (now includes duplicate rate)
     const feeScale = getFeeScale(structure, discipline);
     console.log('Fee Scale:', {
       adjustedRate: feeScale.adjustedRate,
@@ -1957,7 +1971,7 @@ export default function EditProposalPage() {
       return { fee: totalConstructionCost, rate: 0 };
     }
     
-    // Calculate the fee
+    // Calculate the fee (now using the adjusted rate that includes duplicate rate)
     const calculatedFee = totalConstructionCost * (feeScale.adjustedRate / 100) * percentage;
     
     console.log('Final Fee Calculation:', {
