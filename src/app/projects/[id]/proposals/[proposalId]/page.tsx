@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, DragEvent } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from "@/components/ui/button";
@@ -317,12 +317,19 @@ function EngineeringServicesDisplay({
       if (service.default_included !== targetIncluded) {
         onServiceUpdate(serviceId, { default_included: targetIncluded });
         
-        // Log the services that will be passed to onServicesChange
-        const updatedServices = services.map(s => 
-          s.id === serviceId 
-            ? { ...s, default_included: targetIncluded }
-            : s
-        );
+        // Convert EngineeringStandardService to TrackedService
+        const updatedServices = services.map(s => ({
+          id: s.id,
+          service_name: s.service_name,
+          discipline: s.discipline,
+          default_included: s.id === serviceId ? targetIncluded : s.default_included,
+          min_fee: s.min_fee,
+          rate: s.rate,
+          fee_increment: s.fee_increment,
+          phase: s.phase,
+          construction_admin: s.construction_admin
+        }));
+        
         console.log('Services being passed to onServicesChange:', updatedServices.map(s => ({
           id: s.id,
           name: s.service_name,
@@ -518,6 +525,7 @@ export default function EditProposalPage() {
   const [designFeeScale, setDesignFeeScale] = useState<FeeScale[]>([]);
   const [isSpaceDialogOpen, setIsSpaceDialogOpen] = useState(false);  // Restore this state
   const [trackedServices, setTrackedServices] = useState<TrackedService[]>([]);
+  const [collapsedServices, setCollapsedServices] = useState<Set<string>>(new Set());
 
   const [proposal, setProposal] = useState<ProposalFormData>({
     number: proposalId === 'new' ? '' : proposalId,
@@ -2740,7 +2748,7 @@ export default function EditProposalPage() {
                 }`}
               >
                 <div
-                  className={`p-4 bg-muted/5 hover:bg-muted/10 cursor-pointer flex items-center gap-4 border-b border-[#4DB6AC]/50 dark:border-[#4DB6AC]/50 ${
+                  className={`p-4 bg-muted/5 hover:bg-muted/10 cursor-pointer flex items-start gap-4 border-b border-[#4DB6AC]/50 dark:border-[#4DB6AC]/50 ${
                     structure.parentId ? 'bg-muted/10' : ''
                   }`}
                   onDragOver={(e) => handleDragOver(e)}
@@ -2749,7 +2757,7 @@ export default function EditProposalPage() {
                   <div className="p-2 bg-primary/10 rounded-md">
                     <Building2 className="w-6 h-6 text-primary" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     {editingStructureId === structure.id ? (
                       <div className="flex items-center gap-2">
                         <input
@@ -2824,21 +2832,63 @@ export default function EditProposalPage() {
                         )}
                       </div>
                     )}
-                    <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
+                    <div className="text-sm text-gray-500 dark:text-[#9CA3AF] mt-1">
                       {structure.constructionType} • {calculateTotalSquareFootage(structure).toLocaleString()} sq ft • {formatCurrency(calculateTotalConstructionCost(structure))}
                     </div>
                     {!structure.parentId && (
-                      <EngineeringServicesDisplay
-                        services={engineeringStandardServices}
-                        isLoading={isLoadingStandardServices}
-                        onServiceUpdate={handleServiceUpdate}
-                        proposal={proposal}
-                        setProposal={setProposal}
-                        onServicesChange={handleServicesChange}
-                      />
+                      <div className="mt-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isCollapsed = collapsedServices.has(structure.id);
+                              if (isCollapsed) {
+                                setCollapsedServices(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(structure.id);
+                                  return next;
+                                });
+                              } else {
+                                setCollapsedServices(prev => new Set(prev).add(structure.id));
+                              }
+                            }}
+                            className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                            title={collapsedServices.has(structure.id) ? "Show Engineering Services" : "Hide Engineering Services"}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className={`w-4 h-4 transition-transform ${collapsedServices.has(structure.id) ? '' : 'rotate-90'}`}
+                            >
+                              <path d="m9 18 6-6-6-6"/>
+                            </svg>
+                          </button>
+                          <span className="text-sm font-medium text-gray-500">Engineering Services</span>
+                        </div>
+                        
+                        {!collapsedServices.has(structure.id) && (
+                          <div className="mt-2">
+                            <EngineeringServicesDisplay
+                              services={engineeringStandardServices}
+                              isLoading={isLoadingStandardServices}
+                              onServiceUpdate={handleServiceUpdate}
+                              proposal={proposal}
+                              setProposal={setProposal}
+                              onServicesChange={handleServicesChange}
+                            />
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2 pt-1">
                     {!structure.parentId && (
                       <>
                         <button
