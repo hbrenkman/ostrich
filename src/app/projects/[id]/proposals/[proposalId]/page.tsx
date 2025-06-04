@@ -127,7 +127,7 @@ interface ProposalFormData {
 
 interface FeeScale {
   construction_cost: number;
-  prime_consultant_fee: number;
+  prime_consultant_rate: number;
   fraction_of_prime_rate_mechanical: number;
   fraction_of_prime_rate_plumbing: number;
   fraction_of_prime_rate_electrical: number;
@@ -2267,8 +2267,8 @@ export default function EditProposalPage() {
       return { adjustedRate: 0 };
     }
 
-    // Get the base rate (prime consultant fee)
-    const baseRate = scale.prime_consultant_fee;
+    // Get the base rate (prime consultant rate)
+    const baseRate = scale.prime_consultant_rate;
 
     // Get the fraction rate for the discipline
     let fractionRate: number;
@@ -2290,7 +2290,7 @@ export default function EditProposalPage() {
         fractionRate = 1;
     }
 
-    // Calculate the fee using the discipline's fraction of the prime consultant fee
+    // Calculate the fee using the discipline's fraction of the prime consultant rate
     // Note: fractionRate is already in decimal form (e.g., 0.85 for mechanical)
     const disciplineRate = baseRate * fractionRate;
 

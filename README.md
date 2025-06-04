@@ -99,24 +99,24 @@ curl -i -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsIml
       Sum the disciplines togther and pass the total cost on to the structure with levels and spaces component in page.tsx.
    
 # 2 structure/building component/duplicates   
-   In the structure component we add the construction totals for each space to give as a structure construction total.
+   In the structure component we use the construction value from construction_costs table with cost_type "totals" for each space to give as a structure construction total.
    fee_duplicate_structures:  This table adjust the construction costs for duplicate structures/building.  The parent structure has index 1 in this table with a rate of 1.  The second entry in this table with id 2, would represent the second structure/building and first duplicate.  It has a rate of 0.75.  The thrid entry would have id 3 and represent duplicate 2 with rate 0.5625.  so it goes. The 10th structure (duplicate 9) and subsequent duplicates allhave the same rate represented by the rate with id 10.
 
    if we have a total structure construction cost of 10000 for the parent structure then the duplicate 1 total construction cost for the structure would be 10000x0.75 = 75000.  The same applies for the discipline construction costs.
 
 # 3 fee calculations using FixedFees.tsx component
    These construction costs from above are passed on to the FixedFees.tsx component.
-   design_fee_scale:  this table has a field called construction_cost, prime_consultant_fee and then fraction_of_prime_rate_mechanical, fraction_of_prime_rate_electrical, fraction_of_prime_rate_plumbing and fraction_of_prime_rate_structural.  These are used to adjust the prime rate by discipline.
+   design_fee_scale:  this table has a field called construction_cost, prime_consultant_rate and then fraction_of_prime_rate_mechanical, fraction_of_prime_rate_electrical, fraction_of_prime_rate_plumbing and fraction_of_prime_rate_structural.  These are used to adjust the prime rate by discipline.
 
-   Calculating a dengineering fee:  we take the total construction cost of the structure passed to FixedFee.tsx after it has been corrected by cost indices etc. as described above.  We find the bracket this corrected construction cost falls in on the design_fee_scale and get the corresponding prime_consultant_fee which is a percentage value.  Let's say the corrected construction cost passed to the FixedFee.tsx component is $170,000 and the mechanical discipline construction cost is $75,000.  In the design_fee_scale table we get the entries:
-         construction_cost    prime_consultant_fee fraction_of_prime_rate_mechanical ....
+   Calculating a dengineering fee:  we take the total construction cost of the structure passed to FixedFee.tsx after it has been corrected by cost indices etc. as described above.  We find the bracket this corrected construction cost falls in on the design_fee_scale and get the corresponding prime_consultant_rate which is a percentage value.  Let's say the corrected construction cost passed to the FixedFee.tsx component is $170,000 and the mechanical discipline construction cost is $75,000.  In the design_fee_scale table we get the entries:
+         construction_cost    prime_consultant_rate fraction_of_prime_rate_mechanical ....
          150,000              9.12                 7.5
          200,000              8.83                 7.5
 
          to calculate the design fee for mechanical discipline on the $170,000 structure total construction cost we do the following:
 
-         170,000 falls between 150,000 and 200,000 so we use the 8.83% prime_consultant_fee.
-         To get the mechanbical discipline fee we say then 75,000 x 8.83% x 7.5% = 497.
+         170,000 falls between 150,000 and 200,000 so we use the 8.83% prime_consultant_rate.
+         To get the mechanical discipline fee we say then 75,000 x 8.83% x 7.5% = 497.
 
          We do the same for the other disciplines
 
@@ -176,4 +176,39 @@ The issue we were seeing earlier might be because:
 2. The services might not have had the required fee-related values
 3. The services might have been marked as construction admin services
 
-Would you like me to check any specific part of these criteria in more detail?
+
+
+## Design Phase Space Fees & Services Logic
+# Visibility of Design Phase Fees for Spaces:
+Design phase fees for all spaces are always displayed. Every space in every structure will show its design phase fee breakdown by discipline, regardless of which services are included.
+# Fee Calculation:
+Design phase fees are calculated based on the construction cost for each discipline and the "Design Percentage" parameter (set at the top of the Fixed Fees component). The calculation uses the appropriate fee scale and discipline-specific rates to determine the design phase portion of the total fee.
+# Services Handling:
+For each discipline, standard engineering services (such as Mechanical, Electrical, Plumbing, etc.) are listed and can be toggled on or off. Each service may have its own minimum fee, rate, or fee increment, and these are factored into the total design phase fee for the discipline. Users can also override service fees or revert to the calculated value as needed.
+# UI Consistency:
+The user interface for design phase space fees includes editable fee fields and toggle buttons for enabling or disabling fees per discipline, as well as for each service within a discipline. This allows users to customize which disciplines and services are included in the design phase fee calculation for each space.
+# Summary:
+This logic ensures that design phase space fees and services are always visible and editable, providing a clear and comprehensive view of all design-related fees and services in the proposal.
+Construction Phase Space Fees & Services Logic
+# Visibility of Construction Phase Fees for Spaces:
+Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the construction_admin flag set to true and default_included set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
+# Fee Calculation:
+When construction phase fees are enabled (i.e., when a construction admin service is present), the system uses the "Construction Percentage" parameter (set at the top of the Fixed Fees component) to determine the portion of the total fee allocated to the construction phase. The calculation for each discipline is based on the construction cost and the selected percentage.
+# Services Handling:
+For each discipline, construction phase services are listed and can be toggled on or off. Each service may have its own minimum fee, rate, or fee increment, and these are factored into the total construction phase fee for the discipline. Construction administration services specifically control whether construction phase space fees are shown and calculated.
+# UI Consistency:
+The user interface for construction phase space fees matches the design phase, including editable fee fields and toggle buttons for enabling or disabling fees per discipline and per service.
+# Summary:
+This logic ensures that construction phase space fees and services are only shown and calculated when appropriate, providing clarity and accuracy in project fee proposals.
+
+## Construction Phase Space Fees & Services Logic
+# Visibility of Construction Phase Fees for Spaces:
+Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the construction_admin flag set to true and default_included set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
+# Fee Calculation:
+When construction phase fees are enabled (i.e., when a construction admin service is present), the system uses the "Construction Percentage" parameter (set at the top of the Fixed Fees component) to determine the portion of the total fee allocated to the construction phase. The calculation for each discipline is based on the construction cost and the selected percentage.
+# Services Handling:
+For each discipline, construction phase services are listed and can be toggled on or off. Each service may have its own minimum fee, rate, or fee increment, and these are factored into the total construction phase fee for the discipline. Construction administration services specifically control whether construction phase space fees are shown and calculated.
+# UI Consistency:
+The user interface for construction phase space fees matches the design phase, including editable fee fields and toggle buttons for enabling or disabling fees per discipline and per service.
+# Summary:
+This logic ensures that construction phase space fees and services are only shown and calculated when appropriate, providing clarity and accuracy in project fee proposals.

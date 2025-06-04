@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 interface DesignFeeScale {
   id: number;
   construction_cost: number;
-  prime_consultant_fee: number;
+  prime_consultant_rate: number;
   fraction_of_prime_rate_mechanical: number;
   fraction_of_prime_rate_plumbing: number;
   fraction_of_prime_rate_electrical: number;
@@ -131,7 +131,7 @@ interface TrackedService {
 
 interface FeeScale {
   construction_cost: number;
-  prime_consultant_fee: number;
+  prime_consultant_rate: number;
   fraction_of_prime_rate_mechanical: number;
   fraction_of_prime_rate_plumbing: number;
   fraction_of_prime_rate_electrical: number;
@@ -229,6 +229,14 @@ export default function FixedFees({
 
   // Memoize the formatCurrency function
   const formatCurrency = useCallback((value: number | null | undefined): string => {
+    // Add logging to catch NaN values
+    if (typeof value === 'number' && isNaN(value)) {
+      console.error('formatCurrency received NaN value:', {
+        value,
+        stack: new Error().stack
+      });
+      return '$0';
+    }
     if (value === null || value === undefined) return '$0';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -300,8 +308,8 @@ export default function FixedFees({
         return { adjustedRate: 0.05 }; // Default to 5% if no fee scale
       }
 
-      // Get the base rate (prime consultant fee) from first scale
-      const baseRate = firstScale.prime_consultant_fee;
+      // Get the base rate (prime consultant rate) from first scale
+      const baseRate = firstScale.prime_consultant_rate;
 
       // Get the fraction rate for the discipline
       let fractionRate: number;
@@ -323,7 +331,7 @@ export default function FixedFees({
           fractionRate = 1;
       }
 
-      // Calculate the fee using the discipline's fraction of the prime consultant fee
+      // Calculate the fee using the discipline's fraction of the prime consultant rate
       const disciplineRate = baseRate * (fractionRate / 100);
 
       // Get and apply the duplicate rate
@@ -389,8 +397,8 @@ export default function FixedFees({
       }
     }
 
-    // Get the base rate (prime consultant fee) from the scale
-    const baseRate = scale.prime_consultant_fee;
+    // Get the base rate (prime consultant rate) from the scale
+    const baseRate = scale.prime_consultant_rate;
 
     // Get the fraction rate for the discipline
     let fractionRate: number;
@@ -412,7 +420,7 @@ export default function FixedFees({
         fractionRate = 1;
     }
 
-    // Calculate the fee using the discipline's fraction of the prime consultant fee
+    // Calculate the fee using the discipline's fraction of the prime consultant rate
     const disciplineRate = baseRate * (fractionRate / 100);
 
     // Get and apply the duplicate rate
@@ -450,8 +458,18 @@ export default function FixedFees({
     return { adjustedRate: finalRate };
   };
 
-  // Add a memoized fee scale lookup
+  // Add logging to memoizedFeeScales calculation
   const memoizedFeeScales = useMemo(() => {
+    console.log('Calculating memoizedFeeScales with inputs:', {
+      structures: structures.map(s => ({
+        id: s.id,
+        name: s.name,
+        designPercentage: s.designPercentage
+      })),
+      designFeeScale,
+      duplicateStructureRates
+    });
+
     const scales: Record<string, Record<string, { adjustedRate: number }>> = {};
     
     structures.forEach(structure => {
@@ -459,13 +477,21 @@ export default function FixedFees({
       DISCIPLINES.forEach(discipline => {
         // Only calculate if we have fee scale data
         if (designFeeScale && designFeeScale.length > 0) {
-          scales[structure.id][discipline] = getFeeScale(structure, discipline, designFeeScale, duplicateStructureRates);
+          const result = getFeeScale(structure, discipline, designFeeScale, duplicateStructureRates);
+          console.log('Fee scale calculation result:', {
+            structure: structure.name,
+            discipline,
+            result,
+            totalConstructionCost: constructionCosts[structure.id]?.['Total'],
+            disciplineConstructionCost: constructionCosts[structure.id]?.[discipline]
+          });
+          scales[structure.id][discipline] = result;
         }
       });
     });
     
     return scales;
-  }, [structures, DISCIPLINES, designFeeScale, duplicateStructureRates]);
+  }, [structures, DISCIPLINES, designFeeScale, duplicateStructureRates, constructionCosts]);
 
   // Update calculateDisciplineFee to handle structure updates
   const calculateDisciplineFee = useCallback((
@@ -474,12 +500,22 @@ export default function FixedFees({
     phase: 'design' | 'construction',
     returnRawCost: boolean = false
   ): { fee: number; rate: number } => {
-    // console.log('calculateDisciplineFee called', { structure, discipline, phase, constructionCosts });
+    // Add logging for fee calculation inputs
+    console.log('calculateDisciplineFee inputs:', {
+      structure: structure.name,
+      discipline,
+      phase,
+      returnRawCost,
+      feeScale: memoizedFeeScales[structure.id]?.[discipline],
+      constructionCosts: constructionCosts[structure.id]?.[discipline]
+    });
+
     // Get the memoized fee scale
     const feeScale = memoizedFeeScales[structure.id]?.[discipline];
     
     // Early return if no fee scale data
     if (!feeScale || feeScale.adjustedRate === 0) {
+      console.log('No fee scale data or zero rate:', { structure: structure.name, discipline, feeScale });
       return { fee: 0, rate: 0 };
     }
 
@@ -494,6 +530,18 @@ export default function FixedFees({
         const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
         if (fee) {
           const spaceConstructionCost = fee.costPerSqft * space.floorArea;
+          // Add logging for construction cost calculation
+          if (isNaN(spaceConstructionCost)) {
+            console.error('NaN construction cost calculated:', {
+              structure: structure.name,
+              level: level.name,
+              space: space.name,
+              discipline,
+              fee,
+              floorArea: space.floorArea,
+              costPerSqft: fee.costPerSqft
+            });
+          }
           return levelTotal + (fee.isActive ? spaceConstructionCost : 0);
         }
         return levelTotal;
@@ -507,8 +555,21 @@ export default function FixedFees({
     // Calculate the fee using the memoized rate
     const calculatedFee = totalConstructionCost * (feeScale.adjustedRate / 100) * percentage;
     
+    // Add logging for final fee calculation
+    if (isNaN(calculatedFee)) {
+      console.error('NaN fee calculated:', {
+        structure: structure.name,
+        discipline,
+        phase,
+        totalConstructionCost,
+        adjustedRate: feeScale.adjustedRate,
+        percentage,
+        calculatedFee
+      });
+    }
+
     return { fee: calculatedFee, rate: feeScale.adjustedRate };
-  }, [memoizedFeeScales]);
+  }, [memoizedFeeScales, constructionCosts]);
 
   // Memoized functions
   const memoizedCalculateFee = useCallback((
@@ -615,40 +676,25 @@ export default function FixedFees({
     return calculatedFee;
   }, [structures, calculateDisciplineFee]);
 
-  // Add a function to calculate totals for a single discipline first
+  // Add logging to calculateDisciplineTotal
   const calculateDisciplineTotal = useCallback((
     structure: Structure,
     discipline: string,
     phase: 'design' | 'construction'
   ): Record<string, number> => {
-    // Add defensive check for constructionCosts
-    if (!constructionCosts) {
-      console.warn('FixedFees: constructionCosts is undefined', {
-        structureId: structure.id,
-        structureName: structure.name,
-        discipline,
-        phase
-      });
-      return { spaceFees: 0, serviceFees: 0, total: 0 };
-    }
-
-    // Add discipline total calculation logging with safe access
-    console.log('calculateDisciplineTotal called:', {
+    console.log('calculateDisciplineTotal called with:', {
       structure: structure.name,
-      structureId: structure.id,
       discipline,
       phase,
-      trackedServicesCount: trackedServices.length,
-      activeTrackedServices: trackedServices.filter(s => 
-        s.discipline === discipline && 
-        s.phase === phase && 
-        s.default_included && 
-        s.min_fee !== null &&
-        !s.construction_admin
-      ).length,
-      hasConstructionCosts: !!constructionCosts,
-      structureConstructionCosts: constructionCosts[structure.id] ? 'exists' : 'undefined',
-      disciplineConstructionCost: constructionCosts[structure.id]?.[discipline] ?? 0
+      constructionCosts: constructionCosts[structure.id],
+      levels: structure.levels.map(l => ({
+        name: l.name,
+        spaces: l.spaces.map(s => ({
+          name: s.name,
+          floorArea: s.floorArea,
+          fees: s.totalConstructionCosts.filter(f => f.discipline === discipline)
+        }))
+      }))
     });
 
     // Calculate space fees for this discipline using the constructionCosts prop
@@ -670,12 +716,27 @@ export default function FixedFees({
                 discipline,
                 totalConstructionCost: constructionCost,
                 isActive: true,
-                costPerSqft: constructionCost / space.floorArea
+                costPerSqft: space.floorArea ? constructionCost / space.floorArea : 0
               }]
             }]
           }]
         };
+
         const { fee: calculatedFee } = calculateDisciplineFee(tempStructure, discipline, phase);
+        
+        // Add logging for space fee calculation
+        console.log('Space fee calculation:', {
+          structure: structure.name,
+          level: level.name,
+          space: space.name,
+          discipline,
+          phase,
+          constructionCost,
+          floorArea: space.floorArea,
+          calculatedFee,
+          isNaN: isNaN(calculatedFee)
+        });
+
         return spaceTotal + calculatedFee;
       }, 0);
     }, 0) : 0;
@@ -691,25 +752,37 @@ export default function FixedFees({
       )
       .reduce((total, service) => {
         const calculatedFee = calculateServiceFee(service, discipline, structure.id);
+        
+        // Add logging for service fee calculation
+        console.log('Service fee calculation:', {
+          structure: structure.name,
+          service: service.service_name,
+          discipline,
+          phase,
+          calculatedFee,
+          isNaN: isNaN(calculatedFee)
+        });
+
         return total + calculatedFee;
       }, 0);
 
-    // Add logging before returning totals
+    const total = spaceFeesTotal + serviceFeesTotal;
+
+    // Add logging for final totals
     console.log('Discipline total calculation result:', {
       structure: structure.name,
-      structureId: structure.id,
       discipline,
       phase,
       spaceFeesTotal,
       serviceFeesTotal,
-      total: spaceFeesTotal + serviceFeesTotal,
-      constructionCost: constructionCosts?.[structure.id]?.[discipline] ?? 0
+      total,
+      isNaN: isNaN(total)
     });
 
     return {
       spaceFees: spaceFeesTotal,
       serviceFees: serviceFeesTotal,
-      total: spaceFeesTotal + serviceFeesTotal
+      total: total
     };
   }, [hasConstructionAdminServices, trackedServices, calculateServiceFee, calculateDisciplineFee, constructionCosts]);
 
