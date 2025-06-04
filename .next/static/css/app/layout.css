@@ -963,6 +963,9 @@ video {
 .h-\[400px\] {
   height: 400px;
 }
+.h-\[500px\] {
+  height: 500px;
+}
 .h-\[800px\] {
   height: 800px;
 }
@@ -1610,6 +1613,9 @@ video {
 .border-yellow-500 {
   --tw-border-opacity: 1;
   border-color: rgb(234 179 8 / var(--tw-border-opacity));
+}
+.border-current {
+  border-color: currentColor;
 }
 .border-l-transparent {
   border-left-color: transparent;
@@ -2260,6 +2266,10 @@ video {
   --tw-text-opacity: 1;
   color: rgb(133 77 14 / var(--tw-text-opacity));
 }
+.text-amber-600 {
+  --tw-text-opacity: 1;
+  color: rgb(217 119 6 / var(--tw-text-opacity));
+}
 .underline-offset-4 {
   text-underline-offset: 4px;
 }
@@ -2396,6 +2406,11 @@ video {
 }
 .running {
   animation-play-state: running;
+}
+.\[appearance\:textfield\] {
+  -webkit-appearance: textfield;
+     -moz-appearance: textfield;
+          appearance: textfield;
 }
 
 /* Base theme variables */
@@ -3370,6 +3385,10 @@ textarea)::placeholder {
 :is(.dark .dark\:border-\[\#4DB6AC\]\/50) {
   border-color: rgb(77 182 172 / 0.5);
 }
+:is(.dark .dark\:border-gray-700) {
+  --tw-border-opacity: 1;
+  border-color: rgb(55 65 81 / var(--tw-border-opacity));
+}
 :is(.dark .dark\:bg-\[\#2D3748\]) {
   --tw-bg-opacity: 1;
   background-color: rgb(45 55 72 / var(--tw-bg-opacity));
@@ -3456,6 +3475,10 @@ textarea)::placeholder {
 :is(.dark .dark\:text-red-400) {
   --tw-text-opacity: 1;
   color: rgb(248 113 113 / var(--tw-text-opacity));
+}
+:is(.dark .dark\:text-amber-400) {
+  --tw-text-opacity: 1;
+  color: rgb(251 191 36 / var(--tw-text-opacity));
 }
 :is(.dark .dark\:placeholder\:text-\[\#6B7280\])::-moz-placeholder {
   --tw-text-opacity: 1;
@@ -3705,6 +3728,14 @@ textarea)::placeholder {
     padding-left: 2rem;
     padding-right: 2rem;
   }
+}
+.\[\&\:\:-webkit-inner-spin-button\]\:appearance-none::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+          appearance: none;
+}
+.\[\&\:\:-webkit-outer-spin-button\]\:appearance-none::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+          appearance: none;
 }
 .\[\&\[data-state\=open\]\>svg\]\:rotate-180[data-state=open]>svg {
   --tw-rotate: 180deg;

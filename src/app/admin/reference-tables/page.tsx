@@ -9,6 +9,7 @@ import { useReferenceTables, type ReferenceTable, type ReferenceTableEntry } fro
 import { StateCostIndexTable } from './state-cost-index';
 import { ConstructionCostsTable } from './construction-costs';
 import { ProjectTypesTable } from './project-types';
+import { DesignFeeScaleTable } from './design-fee-scale';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -18,6 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { EngineeringServicesTable } from './engineering-services';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Define table categories
 export type TableCategory = ReferenceTable['category'] | 'Engineering Services';
@@ -43,6 +45,14 @@ const AVAILABLE_TABLES: TableConfig[] = [
     icon: <MapPin className="w-5 h-5 text-primary" />
   },
   {
+    id: 'design-fee-scale',
+    name: 'Design Fee Scale',
+    category: 'Design Fee Rates',
+    component: DesignFeeScaleTable,
+    description: 'View and manage design fee rates based on construction cost brackets.',
+    icon: <Calculator className="w-5 h-5 text-primary" />
+  },
+  {
     id: 'construction-costs',
     name: 'Construction Costs',
     category: 'Construction Costs',
@@ -55,7 +65,7 @@ const AVAILABLE_TABLES: TableConfig[] = [
     name: 'Project Types',
     category: 'Project Types',
     component: ProjectTypesTable,
-    description: 'View and manage different types of projects in the system.',
+    description: 'View and manage project types and their associated fee multipliers.',
     icon: <ClipboardList className="w-5 h-5 text-primary" />
   },
   {
@@ -88,6 +98,15 @@ const buildingTypes = [
   { key: 'Residential', value: 'RSD', description: 'Single-family homes and dwellings', rate: 205, sqft: true }
 ];
 
+// Update the default table
+const DEFAULT_TABLE = {
+  id: 'design-fee-scale',
+  name: 'Design Fee Scale',
+  category: 'Design Fee Rates' as const,
+  description: 'View and manage design fee rates based on construction cost brackets.',
+  icon: <Calculator className="w-5 h-5 text-primary" />
+};
+
 export default function ReferenceTablesPage() {
   const router = useRouter();
   const { isAdmin } = useAuth();
@@ -98,7 +117,7 @@ export default function ReferenceTablesPage() {
   const [selectedTable, setSelectedTable] = useState<ReferenceTable | null>(null);
   const [editingTable, setEditingTable] = useState<Partial<ReferenceTable>>({});
   const [newTable, setNewTable] = useState<Partial<ReferenceTable>>({
-    category: 'Fee Calculation',
+    category: 'Design Fee Rates',
     entries: []
   });
   const [newEntry, setNewEntry] = useState<{ key: string; value: string; description: string }>({
@@ -126,7 +145,7 @@ export default function ReferenceTablesPage() {
         entries: newTable.entries || []
       });
       setNewTable({
-        category: 'Fee Calculation',
+        category: 'Design Fee Rates',
         entries: []
       });
       setIsNewTableDialogOpen(false);
@@ -191,11 +210,11 @@ export default function ReferenceTablesPage() {
                     Cost Indices
                   </TabsTrigger>
                   <TabsTrigger 
-                    value="Fee Calculation"
+                    value="Design Fee Rates"
                     className="w-full justify-start px-4 py-3 text-base font-medium text-muted-foreground transition-all hover:bg-muted/10 hover:text-foreground data-[state=active]:bg-muted/20 data-[state=active]:text-foreground rounded-md"
                   >
                     <Calculator className="w-4 h-4 mr-2" />
-                    Fee Calculation
+                    Design Fee Rates
                   </TabsTrigger>
                   <TabsTrigger 
                     value="Project Types"
@@ -355,19 +374,23 @@ export default function ReferenceTablesPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Category</label>
-                <select
-                  value={newTable.category || 'Fee Calculation'}
-                  onChange={(e) => setNewTable(prev => ({ ...prev, category: e.target.value as TableCategory }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                <Select
+                  value={newTable.category}
+                  onValueChange={(value) => setNewTable(prev => ({ ...prev, category: value as TableCategory }))}
                 >
-                  <option value="Fee Calculation">Fee Calculation</option>
-                  <option value="Project Types">Project Types</option>
-                  <option value="Service Types">Service Types</option>
-                  <option value="Rate Categories">Rate Categories</option>
-                  <option value="Cost Indices">Cost Indices</option>
-                  <option value="Construction Costs">Construction Costs</option>
-                  <option value="Engineering Services">Engineering Services</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Design Fee Rates">Design Fee Rates</SelectItem>
+                    <SelectItem value="Project Types">Project Types</SelectItem>
+                    <SelectItem value="Service Types">Service Types</SelectItem>
+                    <SelectItem value="Rate Categories">Rate Categories</SelectItem>
+                    <SelectItem value="Cost Indices">Cost Indices</SelectItem>
+                    <SelectItem value="Construction Costs">Construction Costs</SelectItem>
+                    <SelectItem value="Engineering Services">Engineering Services</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Description</label>
@@ -482,19 +505,23 @@ export default function ReferenceTablesPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Category</label>
-                  <select
-                    value={editingTable.category ?? selectedTable.category}
-                    onChange={(e) => setEditingTable(prev => ({ ...prev, category: e.target.value as TableCategory }))}
-                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  <Select
+                    value={editingTable.category}
+                    onValueChange={(value) => setEditingTable(prev => ({ ...prev, category: value as TableCategory }))}
                   >
-                    <option value="Fee Calculation">Fee Calculation</option>
-                    <option value="Project Types">Project Types</option>
-                    <option value="Service Types">Service Types</option>
-                    <option value="Rate Categories">Rate Categories</option>
-                    <option value="Cost Indices">Cost Indices</option>
-                    <option value="Construction Costs">Construction Costs</option>
-                    <option value="Engineering Services">Engineering Services</option>
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Design Fee Rates">Design Fee Rates</SelectItem>
+                      <SelectItem value="Project Types">Project Types</SelectItem>
+                      <SelectItem value="Service Types">Service Types</SelectItem>
+                      <SelectItem value="Rate Categories">Rate Categories</SelectItem>
+                      <SelectItem value="Cost Indices">Cost Indices</SelectItem>
+                      <SelectItem value="Construction Costs">Construction Costs</SelectItem>
+                      <SelectItem value="Engineering Services">Engineering Services</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Description</label>
@@ -604,7 +631,7 @@ export default function ReferenceTablesPage() {
 
 function getCategoryIcon(category: TableCategory) {
   switch (category) {
-    case 'Fee Calculation':
+    case 'Design Fee Rates':
       return <Calculator className="w-5 h-5 text-primary" />;
     case 'Project Types':
       return <ClipboardList className="w-5 h-5 text-secondary" />;

@@ -34,7 +34,7 @@ const referenceTablesData = [
   },
   {
     name: 'Fee Multipliers',
-    category: 'Fee Calculation',
+    category: 'Design Fee Rates',
     description: 'Base multipliers for calculating project fees based on complexity',
     entries: [
       { id: '1', key: 'Simple Complexity Project', value: 1.2, description: 'Projects with standard requirements and minimal customization' },

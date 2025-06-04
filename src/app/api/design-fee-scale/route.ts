@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET() {
@@ -44,5 +44,47 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching design fee scale:', error);
     return NextResponse.json({ error: 'Failed to fetch design fee scale' }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    console.log('API: Starting PUT request for design fee scale...');
+    
+    const supabase = createSupabaseClient();
+    
+    // Get the request body
+    const body = await request.json();
+    console.log('API: Request body:', body);
+
+    // Validate required fields
+    if (!body.id || body.prime_consultant_rate === undefined) {
+      console.error('API: Missing required fields');
+      return NextResponse.json(
+        { error: 'ID and prime_consultant_rate are required' },
+        { status: 400 }
+      );
+    }
+
+    // Update the fee scale entry
+    const { data, error } = await supabase
+      .from('design_fee_scale')
+      .update({
+        prime_consultant_rate: Number(body.prime_consultant_rate)
+      })
+      .eq('id', body.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('API Error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    console.log('API: Successfully updated design fee scale');
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 } 
