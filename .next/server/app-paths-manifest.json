@@ -1,7 +1,5 @@
 {
   "/admin/reference-tables/page": "app/admin/reference-tables/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/projects/[id]/page": "app/projects/[id]/page.js",
-  "/api/design-fee-scale/route": "app/api/design-fee-scale/route.js",
-  "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js"
+  "/api/hourly-rates/route": "app/api/hourly-rates/route.js"
 }

@@ -10,7 +10,7 @@ export interface ReferenceTableEntry {
 export interface ReferenceTable {
   id: string;
   name: string;
-  category: 'Design Fee Rates' | 'Project Types' | 'Service Types' | 'Rate Categories' | 'Cost Indices' | 'Construction Costs' | 'Engineering Services';
+  category: 'Design Fee Rates' | 'Project Types' | 'Service Types' | 'Hourly Rates' | 'Cost Indices' | 'Construction Costs' | 'Engineering Services';
   description: string;
   entries: ReferenceTableEntry[];
 }

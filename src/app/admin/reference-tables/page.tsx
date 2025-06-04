@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Plus, Calculator, Building2, DollarSign, Edit2, Trash2, MapPin, ClipboardList, Wrench } from 'lucide-react';
+import { FileText, Plus, Calculator, Building2, DollarSign, Edit2, Trash2, MapPin, ClipboardList, Wrench, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { useReferenceTables, type ReferenceTable, type ReferenceTableEntry } from './hooks/useReferenceTables';
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { EngineeringServicesTable } from './engineering-services';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { HourlyRatesTable } from './hourly-rates';
 
 // Define table categories
 export type TableCategory = ReferenceTable['category'] | 'Engineering Services';
@@ -51,6 +52,14 @@ const AVAILABLE_TABLES: TableConfig[] = [
     component: DesignFeeScaleTable,
     description: 'View and manage design fee rates based on construction cost brackets.',
     icon: <Calculator className="w-5 h-5 text-primary" />
+  },
+  {
+    id: 'hour-rates',
+    name: 'Hourly Rates',
+    category: 'Hourly Rates',
+    component: HourlyRatesTable,
+    description: 'View and manage hourly rates for different disciplines and roles.',
+    icon: <Clock className="w-5 h-5 text-primary" />
   },
   {
     id: 'construction-costs',
@@ -231,11 +240,11 @@ export default function ReferenceTablesPage() {
                     Service Types
                   </TabsTrigger>
                   <TabsTrigger 
-                    value="Rate Categories"
+                    value="Hourly Rates"
                     className="w-full justify-start px-4 py-3 text-base font-medium text-muted-foreground transition-all hover:bg-muted/10 hover:text-foreground data-[state=active]:bg-muted/20 data-[state=active]:text-foreground rounded-md"
                   >
-                    <DollarSign className="w-4 h-4 mr-2" />
-                    Rate Categories
+                    <Clock className="w-4 h-4 mr-2" />
+                    Hourly Rates
                   </TabsTrigger>
                   <TabsTrigger 
                     value="Construction Costs"
@@ -385,7 +394,7 @@ export default function ReferenceTablesPage() {
                     <SelectItem value="Design Fee Rates">Design Fee Rates</SelectItem>
                     <SelectItem value="Project Types">Project Types</SelectItem>
                     <SelectItem value="Service Types">Service Types</SelectItem>
-                    <SelectItem value="Rate Categories">Rate Categories</SelectItem>
+                    <SelectItem value="Hourly Rates">Hourly Rates</SelectItem>
                     <SelectItem value="Cost Indices">Cost Indices</SelectItem>
                     <SelectItem value="Construction Costs">Construction Costs</SelectItem>
                     <SelectItem value="Engineering Services">Engineering Services</SelectItem>
@@ -516,7 +525,7 @@ export default function ReferenceTablesPage() {
                       <SelectItem value="Design Fee Rates">Design Fee Rates</SelectItem>
                       <SelectItem value="Project Types">Project Types</SelectItem>
                       <SelectItem value="Service Types">Service Types</SelectItem>
-                      <SelectItem value="Rate Categories">Rate Categories</SelectItem>
+                      <SelectItem value="Hourly Rates">Hourly Rates</SelectItem>
                       <SelectItem value="Cost Indices">Cost Indices</SelectItem>
                       <SelectItem value="Construction Costs">Construction Costs</SelectItem>
                       <SelectItem value="Engineering Services">Engineering Services</SelectItem>
@@ -637,8 +646,8 @@ function getCategoryIcon(category: TableCategory) {
       return <ClipboardList className="w-5 h-5 text-secondary" />;
     case 'Service Types':
       return <FileText className="w-5 h-5 text-accent" />;
-    case 'Rate Categories':
-      return <DollarSign className="w-5 h-5 text-green-500" />;
+    case 'Hourly Rates':
+      return <Clock className="w-5 h-5 text-primary" />;
     case 'Cost Indices':
       return <MapPin className="w-5 h-5 text-primary" />;
     case 'Construction Costs':
