@@ -82,10 +82,10 @@ interface SpaceDialogProps {
   defaultValues?: Partial<Space>;
   costIndex: number | null;
   initialSpace: Space | null;
-  onDisciplineFeeToggle: (structureId: string, levelId: string, spaceId: string, constructionCostId: string, isActive: boolean) => void;
+  onDisciplineConstructionCostToggle: (structureId: string, levelId: string, spaceId: string, constructionCostId: string, isActive: boolean) => void;
 }
 
-export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costIndex, initialSpace, onDisciplineFeeToggle }: SpaceDialogProps) {
+export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costIndex, initialSpace, onDisciplineConstructionCostToggle }: SpaceDialogProps) {
   const [buildingTypes, setBuildingTypes] = useState<BuildingType[]>([]);
   const [constructionCosts, setConstructionCosts] = useState<ConstructionCost[]>([]);
   const [projectConstructionTypes, setProjectConstructionTypes] = useState<ProjectConstructionType[]>([]);
@@ -96,6 +96,8 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   const [searchQuery, setSearchQuery] = useState('');
   const [constructionTypeSearchQuery, setConstructionTypeSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [totalConstructionCost, setTotalConstructionCost] = useState<number>(0);
+  const [totalCostPerSqFt, setTotalCostPerSqFt] = useState<number>(0);
   
   // Add a ref to track if we're initializing
   const isInitializing = useRef(true);
@@ -123,18 +125,18 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
   // Initialize disciplineConstructionCosts state with initialSpace totalConstructionCosts or defaults
   const [disciplineConstructionCosts, setDisciplineConstructionCosts] = useState<DisciplineFee[]>(() => {
-    // If we have initial space data, filter to only include MEP disciplines
+    // If we have initial space data, filter to include all disciplines
     if (initialSpace?.totalConstructionCosts) {
-      const mepCosts = initialSpace.totalConstructionCosts.filter(cost => 
-        ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.discipline)
+      const allDisciplines = initialSpace.totalConstructionCosts.filter(cost => 
+        ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].includes(cost.discipline)
       );
-      // If we don't have all MEP disciplines, add the missing ones with new IDs
-      const existingDisciplines = mepCosts.map(cost => cost.discipline);
-      const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical'].filter(
+      // If we don't have all disciplines, add the missing ones with new IDs
+      const existingDisciplines = allDisciplines.map(cost => cost.discipline);
+      const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].filter(
         discipline => !existingDisciplines.includes(discipline)
       );
       return [
-        ...mepCosts, // These already have IDs from the initial space
+        ...allDisciplines, // These already have IDs from the initial space
         ...missingDisciplines.map(discipline => ({
           id: crypto.randomUUID(), // Only generate new IDs for missing disciplines
           discipline,
@@ -144,9 +146,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
         }))
       ];
     }
-    // For new spaces, generate consistent IDs
-    const mepDisciplines = ['Mechanical', 'Plumbing', 'Electrical'];
-    return mepDisciplines.map(discipline => ({
+    // For new spaces, generate consistent IDs for all disciplines
+    const allDisciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'];
+    return allDisciplines.map(discipline => ({
       id: crypto.randomUUID(),
       discipline,
       isActive: true,
@@ -339,6 +341,57 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return `Year ${mostRecentYear}:\n${costStrings.join('\n')}`;
   };
 
+  // Update the useEffect that handles total cost calculations
+  useEffect(() => {
+    if (!selectedBuildingType) {
+      setTotalConstructionCost(0);
+      setTotalCostPerSqFt(0);
+      return;
+    }
+
+    const calculateTotalCost = () => {
+      const totalCost = constructionCosts.find(cost => 
+        cost.building_type_id === selectedBuildingType.id && 
+        cost.cost_type.toLowerCase() === 'total'
+      );
+
+      if (totalCost) {
+        let adjustedCostPerSqft = totalCost.cost_per_sqft;
+        
+        // Apply cost index adjustment
+        if (costIndex !== null) {
+          adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
+        }
+        
+        // Apply project type index
+        const projectTypeIndex = (selectedConstructionType?.relative_cost_index ?? 100) / 100;
+        adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+        
+        // Always set the cost per sq ft, even if floor area is 0
+        setTotalCostPerSqFt(adjustedCostPerSqft);
+        
+        // Calculate total cost (will be 0 if floor area is 0)
+        const totalCostValue = adjustedCostPerSqft * (space.floorArea || 0);
+        console.log('Total construction cost calculation:', {
+          baseCostPerSqft: totalCost.cost_per_sqft,
+          costIndex,
+          projectTypeIndex,
+          adjustedCostPerSqft,
+          floorArea: space.floorArea || 0,
+          totalCostValue
+        });
+        setTotalConstructionCost(totalCostValue);
+      } else {
+        console.log('No total cost found in construction costs');
+        setTotalCostPerSqFt(0);
+        setTotalConstructionCost(0);
+      }
+    };
+
+    calculateTotalCost();
+  }, [selectedBuildingType, space.floorArea, constructionCosts, costIndex, selectedConstructionType]);
+
+  // Update calculateDisciplineConstructionCosts to remove total cost calculation
   const calculateDisciplineConstructionCosts = (buildingTypeId: string, floorArea: number) => {
     console.log('Calculating costs for:', { buildingTypeId, floorArea });
     
@@ -353,35 +406,32 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       year: cost.year
     })));
     
-    // Filter to only MEP disciplines - check the actual cost_type values
-    const mepCosts = buildingTypeCosts.filter(cost => {
+    // Filter to include all disciplines
+    const disciplineCosts = buildingTypeCosts.filter(cost => {
       const costType = cost.cost_type.toLowerCase();
-      const isMEP = ['mechanical', 'plumbing', 'electrical'].includes(costType);
-      console.log('Checking cost type:', { costType, isMEP });
-      return isMEP;
+      const isDiscipline = ['mechanical', 'plumbing', 'electrical', 'civil', 'structural'].includes(costType);
+      console.log('Checking cost type:', { costType, isDiscipline });
+      return isDiscipline;
     });
-    console.log('MEP construction costs:', mepCosts.map(cost => ({
-      id: cost.id,
-      cost_type: cost.cost_type,
-      cost_per_sqft: cost.cost_per_sqft,
-      year: cost.year
-    })));
 
-    if (mepCosts.length === 0) {
-      console.log('No MEP construction costs found for building type');
+    // Continue with discipline costs calculation
+    if (disciplineCosts.length === 0) {
+      console.log('No discipline construction costs found for building type');
       // Instead of returning zeros, let's check what cost types we actually have
       const availableCostTypes = Array.from(new Set(buildingTypeCosts.map(cost => cost.cost_type)));
       console.log('Available cost types:', availableCostTypes);
       
-      // Map the available cost types to MEP disciplines if they match
+      // Map the available cost types to disciplines if they match
       const mappedCosts = buildingTypeCosts.map(cost => {
         const costType = cost.cost_type.toLowerCase();
         let mappedDiscipline: string | null = null;
         
-        // Map the cost types to MEP disciplines
+        // Map the cost types to disciplines
         if (costType.includes('mech')) mappedDiscipline = 'Mechanical';
         else if (costType.includes('plumb')) mappedDiscipline = 'Plumbing';
         else if (costType.includes('elec')) mappedDiscipline = 'Electrical';
+        else if (costType.includes('civ')) mappedDiscipline = 'Civil';
+        else if (costType.includes('struc')) mappedDiscipline = 'Structural';
         
         if (mappedDiscipline) {
           console.log('Mapped cost type to discipline:', { costType, mappedDiscipline });
@@ -399,7 +449,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
         const mostRecentYear = Math.max(...mappedCosts.map(cost => cost.year));
         const recentCosts = mappedCosts.filter(cost => cost.year === mostRecentYear);
         
-        return ['Mechanical', 'Plumbing', 'Electrical'].map(discipline => {
+        return ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].map(discipline => {
           const matchingCost = recentCosts.find(c => c.discipline === discipline);
           let costPerSqft = matchingCost?.cost_per_sqft || 0;
           
@@ -430,16 +480,16 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     }
 
     // Get the most recent year's costs
-    const mostRecentYear = Math.max(...mepCosts.map(cost => cost.year));
-    const recentCosts = mepCosts.filter(cost => cost.year === mostRecentYear);
-    console.log('Most recent MEP costs:', { year: mostRecentYear, costs: recentCosts });
+    const mostRecentYear = Math.max(...disciplineCosts.map(cost => cost.year));
+    const recentCosts = disciplineCosts.filter(cost => cost.year === mostRecentYear);
+    console.log('Most recent discipline costs:', { year: mostRecentYear, costs: recentCosts });
 
     // Get project type index
     const projectTypeIndex = (selectedConstructionType?.relative_cost_index ?? 100) / 100;
     console.log('Project type index:', projectTypeIndex);
 
-    // Calculate costs for each MEP discipline
-    const calculatedCosts = ['Mechanical', 'Plumbing', 'Electrical'].map(discipline => {
+    // Calculate costs for each discipline
+    const calculatedCosts = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].map(discipline => {
       const cost = recentCosts.find(c => c.cost_type.toLowerCase() === discipline.toLowerCase());
       let costPerSqft = cost?.cost_per_sqft || 0;
       
@@ -464,7 +514,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       });
 
       return {
-        id: crypto.randomUUID(), // We'll replace this with existing ID if available
+        id: crypto.randomUUID(),
         discipline,
         isActive: true,
         costPerSqft,
@@ -476,7 +526,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return calculatedCosts;
   };
 
-  // Update the useEffect that handles initial space
+  // Update the useEffect that handles initial space to remove total cost calculation
   useEffect(() => {
     if (open && initialSpace) {
       console.log('Dialog opened with initial space:', initialSpace);
@@ -611,29 +661,29 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       return updated;
     });
 
-    // Only call onDisciplineFeeToggle if we have an initialSpace (editing mode)
+    // Only call onDisciplineConstructionCostToggle if we have an initialSpace (editing mode)
     if (initialSpace) {
-      const feeToToggle = initialSpace.totalConstructionCosts.find(f => f.discipline === discipline);
-      if (feeToToggle) {
-        console.log('SpaceDialog: Calling onDisciplineFeeToggle with:', {
+      const constructionCostToToggle = initialSpace.totalConstructionCosts.find(f => f.discipline === discipline);
+      if (constructionCostToToggle) {
+        console.log('SpaceDialog: Calling onDisciplineConstructionCostToggle with:', {
           structureId: initialSpace.structureId,
           levelId: initialSpace.levelId,
           spaceId: initialSpace.id,
-          feeId: feeToToggle.id,
+          constructionCostId: constructionCostToToggle.id,
           isActive: newIsActive
         });
-        onDisciplineFeeToggle(
+        onDisciplineConstructionCostToggle(
           initialSpace.structureId || '',
           initialSpace.levelId || '',
           initialSpace.id,
-          feeToToggle.id,
+          constructionCostToToggle.id,
           newIsActive
         );
       }
     }
   };
 
-  // Update the handleSave function to log the state
+  // Update the handleSave function to include total construction cost
   const handleSave = async () => {
     try {
       if (!selectedBuildingType || !selectedConstructionType) {
@@ -653,14 +703,42 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       console.log("handleSave: updatedFees (after mapping calculatedFees):", updatedFees);
       console.log('SpaceDialog: Final totalConstructionCosts state being saved:', updatedFees);
 
+      // Get the total cost from construction_costs
+      const totalCost = constructionCosts.find(cost => 
+        cost.building_type_id === selectedBuildingType.id && 
+        cost.cost_type.toLowerCase() === 'total'
+      );
+
+      let adjustedTotalCostPerSqft = 0;
+      if (totalCost) {
+        adjustedTotalCostPerSqft = totalCost.cost_per_sqft;
+        
+        // Apply cost index adjustment
+        if (costIndex !== null) {
+          adjustedTotalCostPerSqft = adjustedTotalCostPerSqft * (costIndex / 100);
+        }
+        
+        // Apply project type index
+        const projectTypeIndex = (selectedConstructionType.relative_cost_index ?? 100) / 100;
+        adjustedTotalCostPerSqft = adjustedTotalCostPerSqft * projectTypeIndex;
+      }
+
       const spaceToSave = {
         ...space,
         buildingType: selectedBuildingType.name,
         buildingTypeId: selectedBuildingType.id,
         projectConstructionType: selectedConstructionType.project_type,
         projectConstructionTypeId: selectedConstructionType.id,
-        totalConstructionCosts: updatedFees
+        totalConstructionCosts: updatedFees,
+        totalCostPerSqft: adjustedTotalCostPerSqft,  // Add the total cost per sq ft
+        totalCost: adjustedTotalCostPerSqft * space.floorArea  // Add the total cost
       };
+
+      console.log('SpaceDialog: Saving space with total cost:', {
+        totalCostPerSqft: adjustedTotalCostPerSqft,
+        totalCost: adjustedTotalCostPerSqft * space.floorArea,
+        floorArea: space.floorArea
+      });
 
       await onSave(spaceToSave);
       onOpenChange(false);
@@ -670,19 +748,19 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     }
   };
 
-  // Update the getDisplayConstructionCosts function to ensure we always return MEP disciplines
+  // Update the getDisplayConstructionCosts function to include Civil and Structural
   const getDisplayConstructionCosts = () => {
     if (!selectedBuildingType || !space.floorArea) {
       // If we don't have building type or floor area, return the current state
       return disciplineConstructionCosts.filter(cost => 
-        ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.discipline)
+        ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].includes(cost.discipline)
       );
     }
-    // Calculate costs for MEP disciplines
+    // Calculate costs for all disciplines
     const calculatedCosts = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
-    // Ensure we have all MEP disciplines
+    // Ensure we have all disciplines
     const existingDisciplines = calculatedCosts.map(cost => cost.discipline);
-    const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical'].filter(
+    const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].filter(
       discipline => !existingDisciplines.includes(discipline)
     );
     return [
@@ -828,6 +906,12 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
             </Popover>
           </div>
 
+          {space.description && (
+            <div className="text-sm text-muted-foreground mt-1">
+              {space.description}
+            </div>
+          )}
+
           <div className="grid gap-2">
             <Label htmlFor="projectConstructionType">Project Construction Type</Label>
             <Popover open={openConstructionTypeCombobox} onOpenChange={setOpenConstructionTypeCombobox}>
@@ -919,78 +1003,31 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
             />
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="description">Description</Label>
-            <Input
-              id="description"
-              value={space.description}
-              onChange={(e) => setSpace(prev => ({ ...prev, description: e.target.value }))}
-              className="w-full"
-            />
-          </div>
-
           {/* Discipline totalConstructionCosts */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Discipline Construction Costs</h3>
-            <div className="space-y-4">
-              {getDisplayConstructionCosts()
-                .filter(constructionCost => ['Mechanical', 'Plumbing', 'Electrical'].includes(constructionCost.discipline))
-                .map((constructionCost) => (
-                <div key={constructionCost.id} className="rounded-lg border p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">{constructionCost.discipline}</div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        try {
-                          handleDisciplineToggle(constructionCost.discipline);
-                        } catch (error) {
-                          console.error('Error toggling discipline:', error);
-                        }
-                      }}
-                      className={`p-1.5 rounded-md transition-colors ${
-                        constructionCost.isActive
-                          ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                      }`}
-                      title={constructionCost.isActive ? 'Disable discipline' : 'Enable discipline'}
-                    >
-                      {constructionCost.isActive ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                          <path d="M20 6 9 17l-5-5"/>
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                          <path d="M18 6 6 18"/>
-                          <path d="m6 6 12 12"/>
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Cost per sq ft:</span>
-                      <div>{formatCurrency(constructionCost.costPerSqft)}</div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Construction Costs</h3>
+            <div>
+              <div className="grid grid-cols-3 gap-4 mb-2">
+                <div className="font-medium text-muted-foreground">Discipline</div>
+                <div className="font-medium text-right text-muted-foreground">Cost per sq ft</div>
+                <div className="font-medium text-right text-muted-foreground">Total Cost</div>
+              </div>
+              <div className="space-y-1">
+                {getDisplayConstructionCosts()
+                  .filter(constructionCost => ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].includes(constructionCost.discipline))
+                  .map((constructionCost) => (
+                    <div key={constructionCost.id} className="grid grid-cols-3 gap-4 py-1">
+                      <div className="font-medium">{constructionCost.discipline}</div>
+                      <div className="text-right">{formatCurrency(constructionCost.costPerSqft)}</div>
+                      <div className="text-right">{formatCurrency(constructionCost.totalConstructionCost)}</div>
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">Total Cost:</span>
-                      <div>{formatCurrency(constructionCost.totalConstructionCost)}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <div className="mt-4 pt-4 border-t">
-                <div className="flex justify-between items-center">
+                  ))}
+              </div>
+              <div className="mt-2 pt-2 border-t">
+                <div className="grid grid-cols-3 gap-4">
                   <div className="font-medium">Total Cost</div>
-                  <div className="font-medium">
-                    {formatCurrency(getDisplayConstructionCosts()
-                      .filter(constructionCost => ['Mechanical', 'Plumbing', 'Electrical'].includes(constructionCost.discipline))
-                      .reduce((sum, constructionCost) => 
-                        sum + (constructionCost.isActive ? constructionCost.totalConstructionCost : 0), 0
-                      ))}
-                  </div>
+                  <div className="text-right">{formatCurrency(totalCostPerSqFt)}</div>
+                  <div className="text-right">{formatCurrency(totalConstructionCost)}</div>
                 </div>
               </div>
             </div>

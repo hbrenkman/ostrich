@@ -269,7 +269,8 @@ export default function FixedFees({
       discipline,
       hasFeeScale: !!designFeeScale,
       feeScaleLength: designFeeScale?.length,
-      constructionCost: constructionCosts[structure.id]?.[discipline],
+      totalConstructionCost: constructionCosts[structure.id]?.['Total'],
+      disciplineConstructionCost: constructionCosts[structure.id]?.[discipline],
       duplicateRates: duplicateStructureRates,
       rawFeeScale: designFeeScale
     });
@@ -279,24 +280,27 @@ export default function FixedFees({
       console.warn('No fee scale data available for:', { 
         structure: structure.name, 
         discipline,
-        constructionCost: constructionCosts[structure.id]?.[discipline]
+        totalConstructionCost: constructionCosts[structure.id]?.['Total'],
+        disciplineConstructionCost: constructionCosts[structure.id]?.[discipline]
       });
       // Return a default rate of 0.05 (5%) if no fee scale data
       return { adjustedRate: 0.05 };
     }
 
-    // Calculate total construction cost for this structure
-    const constructionCost = constructionCosts[structure.id]?.[discipline] || 0;
+    // Get total construction cost for this structure to determine fee scale
+    const totalConstructionCost = constructionCosts[structure.id]?.['Total'] || 0;
+    // Get discipline's construction cost for final calculation
+    const disciplineConstructionCost = constructionCosts[structure.id]?.[discipline] || 0;
 
-    // If no construction cost found, use the first fee scale row
-    if (constructionCost === 0) {
+    // If no total construction cost found, use the first fee scale row
+    if (totalConstructionCost === 0) {
       const firstScale = designFeeScale[0];
       if (!firstScale) {
         console.warn('No fee scale rows available');
         return { adjustedRate: 0.05 }; // Default to 5% if no fee scale
       }
 
-      // Get the base rate (prime consultant fee)
+      // Get the base rate (prime consultant fee) from first scale
       const baseRate = firstScale.prime_consultant_fee;
 
       // Get the fraction rate for the discipline
@@ -334,7 +338,9 @@ export default function FixedFees({
           fractionRate,
           disciplineRate,
           duplicateRate,
-          finalRate: disciplineRate * duplicateRate
+          finalRate: disciplineRate * duplicateRate,
+          totalConstructionCost,
+          disciplineConstructionCost
         });
       }
 
@@ -348,29 +354,42 @@ export default function FixedFees({
         disciplineRate,
         duplicateRate,
         finalRate,
-        constructionCost
+        totalConstructionCost,
+        disciplineConstructionCost
       });
 
       return { adjustedRate: finalRate };
     }
 
-    // Find the appropriate fee scale row
-    const scale = designFeeScale.find((row: FeeScale, index: number) => {
+    // Find the appropriate fee scale row using total construction cost
+    let scale = designFeeScale.find((row: FeeScale, index: number) => {
       const nextRow = designFeeScale[index + 1];
-      return !nextRow || constructionCost <= nextRow.construction_cost;
+      // If there's no next row, use this row if the cost is greater than or equal to this row's cost
+      if (!nextRow) {
+        return totalConstructionCost >= row.construction_cost;
+      }
+      // Otherwise, use this row if the cost is greater than or equal to this row's cost
+      // and less than the next row's cost
+      return totalConstructionCost >= row.construction_cost && totalConstructionCost < nextRow.construction_cost;
     });
 
     if (!scale) {
-      console.warn('No matching fee scale found for construction cost:', {
-        constructionCost,
-        discipline,
-        structure: structure.name
-      });
-      // Return a default rate of 0.05 (5%) if no matching scale
-      return { adjustedRate: 0.05 };
+      // If no scale found, use the last row if the cost is greater than all rows
+      if (totalConstructionCost >= designFeeScale[designFeeScale.length - 1].construction_cost) {
+        scale = designFeeScale[designFeeScale.length - 1];
+      } else {
+        console.warn('No matching fee scale found for total construction cost:', {
+          totalConstructionCost,
+          discipline,
+          structure: structure.name,
+          availableScales: designFeeScale.map(s => s.construction_cost)
+        });
+        // Return a default rate of 0.05 (5%) if no matching scale
+        return { adjustedRate: 0.05 };
+      }
     }
 
-    // Get the base rate (prime consultant fee)
+    // Get the base rate (prime consultant fee) from the scale
     const baseRate = scale.prime_consultant_fee;
 
     // Get the fraction rate for the discipline
@@ -404,7 +423,8 @@ export default function FixedFees({
       console.log('Calculated fee scale:', {
         structure: structure.name,
         discipline,
-        constructionCost,
+        totalConstructionCost,
+        disciplineConstructionCost,
         baseRate,
         fractionRate,
         disciplineRate,
@@ -423,7 +443,8 @@ export default function FixedFees({
       disciplineRate,
       duplicateRate,
       finalRate,
-      constructionCost
+      totalConstructionCost,
+      disciplineConstructionCost
     });
 
     return { adjustedRate: finalRate };
@@ -812,64 +833,12 @@ export default function FixedFees({
     // Filter services based on phase, structure, and construction admin status
     const filteredServices = trackedServices.filter(service => {
       const matchesPhase = service.phase === phase;
-      // Add detailed structure ID comparison logging
-      console.log('Structure ID comparison:', {
-        serviceStructureId: {
-          value: service.structureId,
-          type: typeof service.structureId,
-          length: service.structureId?.length,
-          chars: Array.from(service.structureId || '').map(c => c.charCodeAt(0))
-        },
-        targetStructureId: {
-          value: structureId,
-          type: typeof structureId,
-          length: structureId?.length,
-          chars: Array.from(structureId || '').map(c => c.charCodeAt(0))
-        },
-        exactComparison: `${service.structureId} === ${structureId}`,
-        strictEquality: service.structureId === structureId,
-        looseEquality: service.structureId == structureId,
-        normalizedComparison: service.structureId?.trim() === structureId?.trim()
-      });
       const matchesStructure = service.structureId === structureId;
       const notConstructionAdmin = !service.construction_admin;
       const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
 
-      console.log('Service filter details:', {
-        service: {
-          id: service.id,
-          name: service.service_name,
-          phase: service.phase,
-          structureId: service.structureId,
-          targetStructureId: structureId,
-          construction_admin: service.construction_admin,
-          min_fee: service.min_fee,
-          rate: service.rate,
-          fee_increment: service.fee_increment
-        },
-        matches: matchesPhase && matchesStructure && notConstructionAdmin && hasFeeValues,
-        matchesPhase,
-        matchesStructure,
-        notConstructionAdmin,
-        hasFeeValues
-      });
-
       return matchesPhase && matchesStructure && notConstructionAdmin && hasFeeValues;
     });
-
-    console.log('Filtered services:', filteredServices.map(s => ({
-      id: s.id,
-      name: s.service_name,
-      phase: s.phase,
-      structureId: s.structureId,
-      construction_admin: s.construction_admin,
-      min_fee: s.min_fee,
-      rate: s.rate,
-      fee_increment: s.fee_increment,
-      default_included: s.default_included,
-      isActive: s.isActive,
-      discipline: s.discipline
-    })));
 
     // If no services to display, return null
     if (filteredServices.length === 0) {
@@ -886,165 +855,70 @@ export default function FixedFees({
       return acc;
     }, {} as Record<string, TrackedService[]>);
 
-    console.log('Grouped services:', Object.entries(servicesByName).map(([name, services]) => ({
-      name,
-      services: services.map(s => ({
-        id: s.id,
-        discipline: s.discipline,
-        default_included: s.default_included,
-        isActive: s.isActive
-      }))
-    })));
-
-    // Log the disciplines we're mapping over
-    console.log('Mapping over disciplines:', DISCIPLINES);
-
     return (
       <div className="mt-4 space-y-2">
-        {Object.entries(servicesByName).map(([serviceName, services]) => {
-          console.log('Rendering service group:', {
-            serviceName,
-            services: services.map(s => ({
-              id: s.id,
-              discipline: s.discipline,
-              default_included: s.default_included,
-              isActive: s.isActive
-            }))
-          });
-
-          return (
-            <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
-              {/* Description column */}
-              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
-                <Home className="w-3.5 h-3.5 text-primary/50" />
-                <span className="text-sm">{serviceName}</span>
-              </div>
+        {Object.entries(servicesByName).map(([serviceName, services]) => (
+          <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
+            {/* Description column */}
+            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
+              <Home className="w-3.5 h-3.5 text-primary/50" />
+              <span className="text-sm">{serviceName}</span>
+            </div>
+            
+            {/* Discipline columns */}
+            {DISCIPLINES.map((discipline: string) => {
+              // Find the service for this discipline
+              const service = services.find(s => s.discipline === discipline);
               
-              {/* Discipline columns */}
-              {DISCIPLINES.map(discipline => {
-                // Find the service for this discipline
-                const service = services.find(s => s.discipline === discipline);
-                
-                console.log('Rendering discipline column:', {
-                  serviceName,
-                  discipline,
-                  foundService: service ? {
-                    id: service.id,
-                    default_included: service.default_included,
-                    isActive: service.isActive,
-                    min_fee: service.min_fee,
-                    rate: service.rate,
-                    fee_increment: service.fee_increment
-                  } : 'No service found for this discipline'
-                });
+              if (!service) {
+                return <div key={discipline} className="h-10" />;
+              }
 
-                if (!service) {
-                  return <div key={discipline} className="h-10" />;
-                }
+              const calculatedFee = calculateServiceFee(service, discipline, structureId);
+              const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
+              const hasCustomFee = service.customFee !== undefined && service.customFee !== calculatedFee;
 
-                const calculatedFee = calculateServiceFee(service, discipline, structureId);
-                const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
-                const hasCustomFee = service.customFee !== undefined && service.customFee !== calculatedFee;
-
-                console.log('Service fee calculation:', {
-                  serviceName,
-                  discipline,
-                  calculatedFee,
-                  displayFee,
-                  hasCustomFee,
-                  customFee: service.customFee
-                });
-
-                return (
-                  <div key={discipline} className="flex items-center gap-2">
-                    <div className="flex-1 flex items-center gap-2">
-                      {hasCustomFee && service.default_included && (
-                        <button
-                          type="button"
-                          className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
-                          title="Revert to calculated fee"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (onServiceFeeUpdate) {
-                              onServiceFeeUpdate(service.id, discipline, undefined, phase);
-                            }
-                          }}
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                        </button>
-                      )}
-                      <Input
-                        type="text"
-                        value={formatCurrency(displayFee)}
-                        onChange={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (onServiceFeeUpdate && service.default_included) {
-                            const value = e.target.value.replace(/[^0-9.-]+/g, '');
-                            const numericValue = parseFloat(value) || 0;
-                            onServiceFeeUpdate(service.id, discipline, numericValue, phase);
-                          }
-                        }}
-                        className={`text-right pr-2 bg-transparent ${!service.default_included ? 'text-gray-400' : ''}`}
-                        disabled={!service.default_included}
-                      />
-                    </div>
-                    <div className="w-8 flex items-center justify-center">
+              return (
+                <div key={`${service.id}-${discipline}`} className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-2">
+                    {hasCustomFee && service.default_included && (
                       <button
                         type="button"
-                        className={`p-1.5 rounded-md transition-colors ${service.default_included ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
-                        title={service.default_included ? "Disable service" : "Enable service"}
+                        className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
+                        title="Revert to calculated fee"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           if (onServiceFeeUpdate) {
-                            // When disabling, set fee to undefined to trigger state change
-                            // When enabling, restore the calculated fee
-                            const newFee = service.default_included ? undefined : calculatedFee;
-                            onServiceFeeUpdate(service.id, discipline, newFee, phase);
+                            onServiceFeeUpdate(service.id, discipline, undefined, phase);
                           }
                         }}
                       >
-                        {service.default_included ? (
-                          <svg 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            width="16" 
-                            height="16" 
-                            viewBox="0 0 24 24" 
-                            fill="none" 
-                            stroke="currentColor" 
-                            strokeWidth="2" 
-                            strokeLinecap="round" 
-                            strokeLinejoin="round" 
-                            className="w-4 h-4"
-                          >
-                            <path d="M20 6 9 17l-5-5" />
-                          </svg>
-                        ) : (
-                          <svg 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            width="16" 
-                            height="16" 
-                            viewBox="0 0 24 24" 
-                            fill="none" 
-                            stroke="currentColor" 
-                            strokeWidth="2" 
-                            strokeLinecap="round" 
-                            strokeLinejoin="round" 
-                            className="w-4 h-4"
-                          >
-                            <path d="M5 12h14" />
-                          </svg>
-                        )}
+                        <RotateCcw className="w-4 h-4" />
                       </button>
-                    </div>
+                    )}
+                    <Input
+                      type="text"
+                      value={formatCurrency(displayFee)}
+                      onChange={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (onServiceFeeUpdate && service.default_included) {
+                          const value = e.target.value.replace(/[^0-9.-]+/g, '');
+                          const numericValue = parseFloat(value) || 0;
+                          onServiceFeeUpdate(service.id, discipline, numericValue, phase);
+                        }
+                      }}
+                      className={`text-right pr-2 bg-transparent ${!service.default_included ? 'text-gray-400' : ''}`}
+                      disabled={!service.default_included}
+                    />
                   </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                  <div className="w-8" /> {/* Spacer for alignment with space toggles */}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     );
   }, [trackedServices, DISCIPLINES, calculateServiceFee, formatCurrency, onServiceFeeUpdate]);
@@ -1607,7 +1481,7 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                                             fee?.isActive;
                         
                         return (
-                          <div key={discipline} className="flex items-center gap-2">
+                          <div key={`${space.id}-${discipline}`} className="flex items-center gap-2">
                             <div className="flex-1 flex items-center gap-2">
                               {hasCustomFee && (
                                 <button
@@ -1640,6 +1514,50 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                                 className={`text-right pr-2 bg-transparent ${!fee?.isActive ? 'text-gray-400' : ''}`}
                                 disabled={!fee?.isActive}
                               />
+                            </div>
+                            <div className="w-8 flex items-center justify-center">
+                              {fee && (
+                                <button
+                                  type="button"
+                                  className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
+                                  title={fee.isActive ? "Disable discipline" : "Enable discipline"}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleFeeToggle(structure.id, level.id, space.id, fee.id, !fee.isActive, 'construction');
+                                  }}
+                                >
+                                  {fee.isActive ? (
+                                    <svg 
+                                      xmlns="http://www.w3.org/2000/svg" 
+                                      width="16" 
+                                      height="16" 
+                                      viewBox="0 0 24 24" 
+                                      fill="none" 
+                                      stroke="currentColor" 
+                                      strokeWidth="2" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M20 6L9 17l-5-5" />
+                                    </svg>
+                                  ) : (
+                                    <svg 
+                                      xmlns="http://www.w3.org/2000/svg" 
+                                      width="16" 
+                                      height="16" 
+                                      viewBox="0 0 24 24" 
+                                      fill="none" 
+                                      stroke="currentColor" 
+                                      strokeWidth="2" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M5 12h14" />
+                                    </svg>
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </div>
                         );

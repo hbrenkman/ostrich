@@ -3172,15 +3172,18 @@ export default function EditProposalPage() {
     const ALL_DISCIPLINES = ['Civil', 'Structural', ...DISCIPLINES_WITH_FEES];
 
     for (const structure of structures) {
-      // Initialize costs object for this structure with all disciplines
-      costs[structure.id] = {};
-      ALL_DISCIPLINES.forEach(discipline => {
-        costs[structure.id][discipline] = 0;
-      });
+      // Initialize costs object for this structure with all disciplines and total
+      costs[structure.id] = {
+        ...Object.fromEntries(ALL_DISCIPLINES.map(d => [d, 0])),
+        'Total': 0  // Add Total to store the total construction cost
+      };
 
       for (const level of structure.levels) {
         for (const space of level.spaces) {
-          // Add costs for each fee
+          // Add the total construction cost from the space
+          costs[structure.id]['Total'] += space.totalCost || 0;
+
+          // Add costs for each discipline fee
           for (const fee of space.totalConstructionCosts) {
             // Skip if the fee is not active
             if (!fee.isActive) continue;
@@ -3202,12 +3205,20 @@ export default function EditProposalPage() {
                 floorArea: space.floorArea,
                 calculatedCost: cost,
                 isActive: fee.isActive,
-                runningTotal: costs[structure.id][fee.discipline]
+                runningTotal: costs[structure.id][fee.discipline],
+                spaceTotalCost: space.totalCost  // Log the total cost from the space
               });
             }
           }
         }
       }
+
+      // Log the total construction cost for the structure
+      console.log('getConstructionCosts: Structure total:', {
+        structureId: structure.id,
+        structureName: structure.name,
+        totalCost: costs[structure.id]['Total']
+      });
     }
 
     return costs;
@@ -4055,7 +4066,7 @@ export default function EditProposalPage() {
                                         </div>
                                       </div>
                                       <div className="mt-1 font-medium text-primary">
-                                        Construction Cost: {formatCurrency(space.totalConstructionCosts.reduce((sum, fee) => sum + (fee.isActive ? fee.totalConstructionCost : 0), 0))}
+                                        Construction Cost: {formatCurrency(space.totalCost)}
                                       </div>
                                     </div>
                                   </div>

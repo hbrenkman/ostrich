@@ -20,6 +20,8 @@ export interface Space {
     costPerSqft: number;
   }>;
   splitFees: boolean;
+  totalCost: number;
+  totalCostPerSqft: number;
   engineeringServices?: Array<{
     id: string;
     discipline: string;
