@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,7 @@ interface BuildingType {
   space_type: string | null;
   discipline: string | null;
   hvac_system: string | null;
-  default_fee: number | null;
+  default_constructionCost: number | null;
   default_area: number | null;
 }
 
@@ -39,7 +39,7 @@ interface DisciplineFee {
   discipline: string;
   isActive: boolean;
   costPerSqft: number;
-  totalFee: number;
+  totalConstructionCost: number;
 }
 
 interface ProjectConstructionType {
@@ -63,14 +63,16 @@ interface Space {
   hvacSystem: string;
   projectConstructionType: string;
   projectConstructionTypeId: number;
-  fees: {
+  structureId: string;
+  levelId: string;
+  totalConstructionCosts: {
     id: string;
     discipline: string;
-    totalFee: number;
+    totalConstructionCost: number;
     isActive: boolean;
     costPerSqft: number;
   }[];
-  splitFees: boolean;
+  splitConstructionCosts: boolean;
 }
 
 interface SpaceDialogProps {
@@ -80,7 +82,7 @@ interface SpaceDialogProps {
   defaultValues?: Partial<Space>;
   costIndex: number | null;
   initialSpace: Space | null;
-  onDisciplineFeeToggle: (structureId: string, discipline: string, isActive: boolean) => void;
+  onDisciplineFeeToggle: (structureId: string, levelId: string, spaceId: string, constructionCostId: string, isActive: boolean) => void;
 }
 
 export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costIndex, initialSpace, onDisciplineFeeToggle }: SpaceDialogProps) {
@@ -95,6 +97,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   const [constructionTypeSearchQuery, setConstructionTypeSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   
+  // Add a ref to track if we're initializing
+  const isInitializing = useRef(true);
+
   // Initialize space state with initialSpace or defaultValues
   const [space, setSpace] = useState<Omit<Space, 'id'>>(() => {
     const initialName = initialSpace?.name || defaultValues?.name || '';
@@ -109,19 +114,46 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       hvacSystem: initialSpace?.hvacSystem || defaultValues?.hvacSystem || '',
       projectConstructionType: initialSpace?.projectConstructionType || defaultValues?.projectConstructionType || '',
       projectConstructionTypeId: initialSpace?.projectConstructionTypeId || defaultValues?.projectConstructionTypeId || 0,
-      fees: initialSpace?.fees || defaultValues?.fees || [],
-      splitFees: initialSpace?.splitFees || defaultValues?.splitFees || false
+      structureId: initialSpace?.structureId || defaultValues?.structureId || '',
+      levelId: initialSpace?.levelId || defaultValues?.levelId || '',
+      totalConstructionCosts: initialSpace?.totalConstructionCosts || defaultValues?.totalConstructionCosts || [],
+      splitConstructionCosts: initialSpace?.splitConstructionCosts || defaultValues?.splitConstructionCosts || false
     };
   });
 
-  // Initialize disciplineFees state with initialSpace fees or defaults
-  const [disciplineFees, setDisciplineFees] = useState<DisciplineFee[]>(() => 
-    initialSpace?.fees || [
-      { id: crypto.randomUUID(), discipline: 'Mechanical', isActive: true, costPerSqft: 0, totalFee: 0 },
-      { id: crypto.randomUUID(), discipline: 'Plumbing', isActive: true, costPerSqft: 0, totalFee: 0 },
-      { id: crypto.randomUUID(), discipline: 'Electrical', isActive: true, costPerSqft: 0, totalFee: 0 }
-    ]
-  );
+  // Initialize disciplineConstructionCosts state with initialSpace totalConstructionCosts or defaults
+  const [disciplineConstructionCosts, setDisciplineConstructionCosts] = useState<DisciplineFee[]>(() => {
+    // If we have initial space data, filter to only include MEP disciplines
+    if (initialSpace?.totalConstructionCosts) {
+      const mepCosts = initialSpace.totalConstructionCosts.filter(cost => 
+        ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.discipline)
+      );
+      // If we don't have all MEP disciplines, add the missing ones with new IDs
+      const existingDisciplines = mepCosts.map(cost => cost.discipline);
+      const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical'].filter(
+        discipline => !existingDisciplines.includes(discipline)
+      );
+      return [
+        ...mepCosts, // These already have IDs from the initial space
+        ...missingDisciplines.map(discipline => ({
+          id: crypto.randomUUID(), // Only generate new IDs for missing disciplines
+          discipline,
+          isActive: true,
+          costPerSqft: 0,
+          totalConstructionCost: 0
+        }))
+      ];
+    }
+    // For new spaces, generate consistent IDs
+    const mepDisciplines = ['Mechanical', 'Plumbing', 'Electrical'];
+    return mepDisciplines.map(discipline => ({
+      id: crypto.randomUUID(),
+      discipline,
+      isActive: true,
+      costPerSqft: 0,
+      totalConstructionCost: 0
+    }));
+  });
 
   const supabase = createClientComponentClient();
 
@@ -178,6 +210,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           .order('name');
 
         if (error) throw error;
+        console.log('Fetched building types:', data);
         setBuildingTypes(data || []);
       } catch (error) {
         console.error('Error fetching building types:', error);
@@ -188,6 +221,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
     const fetchConstructionCosts = async () => {
       try {
+        console.log('Fetching construction costs...');
         const { data, error } = await supabase
           .from('construction_costs')
           .select(`
@@ -200,7 +234,18 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           `)
           .order('year', { ascending: false });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error fetching construction costs:', error);
+          throw error;
+        }
+        
+        console.log('Fetched construction costs:', data);
+        // Filter to only MEP disciplines for logging
+        const mepCosts = data?.filter(cost => 
+          ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.cost_type)
+        );
+        console.log('MEP construction costs:', mepCosts);
+        
         setConstructionCosts(data || []);
       } catch (error) {
         console.error('Error fetching construction costs:', error);
@@ -208,6 +253,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     };
 
     if (open) {
+      console.log('Dialog opened, fetching data...');
       fetchBuildingTypes();
       fetchConstructionCosts();
     }
@@ -293,134 +339,152 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return `Year ${mostRecentYear}:\n${costStrings.join('\n')}`;
   };
 
-  const calculateDisciplineFees = (buildingTypeId: string, floorArea: number) => {
-    const costs = constructionCosts.filter(cost => cost.building_type_id === buildingTypeId);
-    if (costs.length === 0) return;
+  const calculateDisciplineConstructionCosts = (buildingTypeId: string, floorArea: number) => {
+    console.log('Calculating costs for:', { buildingTypeId, floorArea });
+    
+    // Get all construction costs for this building type
+    const buildingTypeCosts = constructionCosts.filter(cost => 
+      cost.building_type_id === buildingTypeId
+    );
+    console.log('All construction costs for building type:', buildingTypeCosts.map(cost => ({
+      id: cost.id,
+      cost_type: cost.cost_type,
+      cost_per_sqft: cost.cost_per_sqft,
+      year: cost.year
+    })));
+    
+    // Filter to only MEP disciplines - check the actual cost_type values
+    const mepCosts = buildingTypeCosts.filter(cost => {
+      const costType = cost.cost_type.toLowerCase();
+      const isMEP = ['mechanical', 'plumbing', 'electrical'].includes(costType);
+      console.log('Checking cost type:', { costType, isMEP });
+      return isMEP;
+    });
+    console.log('MEP construction costs:', mepCosts.map(cost => ({
+      id: cost.id,
+      cost_type: cost.cost_type,
+      cost_per_sqft: cost.cost_per_sqft,
+      year: cost.year
+    })));
+
+    if (mepCosts.length === 0) {
+      console.log('No MEP construction costs found for building type');
+      // Instead of returning zeros, let's check what cost types we actually have
+      const availableCostTypes = Array.from(new Set(buildingTypeCosts.map(cost => cost.cost_type)));
+      console.log('Available cost types:', availableCostTypes);
+      
+      // Map the available cost types to MEP disciplines if they match
+      const mappedCosts = buildingTypeCosts.map(cost => {
+        const costType = cost.cost_type.toLowerCase();
+        let mappedDiscipline: string | null = null;
+        
+        // Map the cost types to MEP disciplines
+        if (costType.includes('mech')) mappedDiscipline = 'Mechanical';
+        else if (costType.includes('plumb')) mappedDiscipline = 'Plumbing';
+        else if (costType.includes('elec')) mappedDiscipline = 'Electrical';
+        
+        if (mappedDiscipline) {
+          console.log('Mapped cost type to discipline:', { costType, mappedDiscipline });
+          return {
+            ...cost,
+            discipline: mappedDiscipline
+          };
+        }
+        return null;
+      }).filter((cost): cost is NonNullable<typeof cost> => cost !== null);
+
+      if (mappedCosts.length > 0) {
+        console.log('Mapped construction costs:', mappedCosts);
+        // Use the mapped costs instead of returning zeros
+        const mostRecentYear = Math.max(...mappedCosts.map(cost => cost.year));
+        const recentCosts = mappedCosts.filter(cost => cost.year === mostRecentYear);
+        
+        return ['Mechanical', 'Plumbing', 'Electrical'].map(discipline => {
+          const matchingCost = recentCosts.find(c => c.discipline === discipline);
+          let costPerSqft = matchingCost?.cost_per_sqft || 0;
+          
+          if (costIndex !== null) {
+            costPerSqft = costPerSqft * (costIndex / 100);
+          }
+          
+          const projectTypeIndex = (selectedConstructionType?.relative_cost_index ?? 100) / 100;
+          costPerSqft = costPerSqft * projectTypeIndex;
+          
+          const totalConstructionCost = costPerSqft * floorArea;
+          
+          return {
+            id: crypto.randomUUID(),
+            discipline,
+            isActive: true,
+            costPerSqft,
+            totalConstructionCost
+          };
+        });
+      }
+      
+      return disciplineConstructionCosts.map(cost => ({
+        ...cost,
+        costPerSqft: 0,
+        totalConstructionCost: 0
+      }));
+    }
 
     // Get the most recent year's costs
-    const mostRecentYear = Math.max(...costs.map(cost => cost.year));
-    const recentCosts = costs.filter(cost => cost.year === mostRecentYear);
+    const mostRecentYear = Math.max(...mepCosts.map(cost => cost.year));
+    const recentCosts = mepCosts.filter(cost => cost.year === mostRecentYear);
+    console.log('Most recent MEP costs:', { year: mostRecentYear, costs: recentCosts });
 
-    const updatedFees = disciplineFees.map(fee => {
-      const cost = recentCosts.find(c => c.cost_type.toLowerCase() === fee.discipline.toLowerCase());
+    // Get project type index
+    const projectTypeIndex = (selectedConstructionType?.relative_cost_index ?? 100) / 100;
+    console.log('Project type index:', projectTypeIndex);
+
+    // Calculate costs for each MEP discipline
+    const calculatedCosts = ['Mechanical', 'Plumbing', 'Electrical'].map(discipline => {
+      const cost = recentCosts.find(c => c.cost_type.toLowerCase() === discipline.toLowerCase());
       let costPerSqft = cost?.cost_per_sqft || 0;
       
-      // Apply cost index adjustment if available
+      // Apply cost index adjustment
       if (costIndex !== null) {
         costPerSqft = costPerSqft * (costIndex / 100);
       }
+
+      // Apply project type index
+      costPerSqft = costPerSqft * projectTypeIndex;
       
-      const totalFee = costPerSqft * floorArea;
+      const totalConstructionCost = costPerSqft * floorArea;
+
+      console.log('Cost calculation for discipline:', {
+        discipline,
+        baseCostPerSqft: cost?.cost_per_sqft,
+        costIndex,
+        projectTypeIndex,
+        adjustedCostPerSqft: costPerSqft,
+        floorArea,
+        totalConstructionCost
+      });
+
       return {
-        ...fee,
+        id: crypto.randomUUID(), // We'll replace this with existing ID if available
+        discipline,
+        isActive: true,
         costPerSqft,
-        totalFee
+        totalConstructionCost
       };
     });
 
-    setDisciplineFees(updatedFees);
+    console.log('Final calculated costs:', calculatedCosts);
+    return calculatedCosts;
   };
 
-  useEffect(() => {
-    if (selectedBuildingType && space.floorArea) {
-      const floorArea = parseFloat(space.floorArea.toString());
-      if (!isNaN(floorArea)) {
-        calculateDisciplineFees(selectedBuildingType.id, floorArea);
-      }
-    }
-  }, [selectedBuildingType, space.floorArea, constructionCosts]);
-
-  useEffect(() => {
-    if (selectedBuildingType) {
-      setSpace(prev => {
-        // If we're editing an existing space (initialSpace exists), preserve its values
-        if (initialSpace) {
-          return {
-            ...prev,
-            buildingTypeId: selectedBuildingType.id,
-            buildingType: selectedBuildingType.name || '',
-            name: prev.name || selectedBuildingType.name || '',
-            description: prev.description || selectedBuildingType.description || '',
-            spaceType: prev.spaceType || selectedBuildingType.space_type || '',
-            discipline: prev.discipline || selectedBuildingType.discipline || '',
-            hvacSystem: prev.hvacSystem || selectedBuildingType.hvac_system || '',
-            fees: prev.fees.length > 0 ? prev.fees : disciplineFees,
-            floorArea: prev.floorArea || (selectedBuildingType.default_area || 0),
-            splitFees: prev.splitFees
-          };
-        }
-        // For new spaces, use the building type values
-        return {
-          ...prev,
-          buildingTypeId: selectedBuildingType.id,
-          buildingType: selectedBuildingType.name || '',
-          name: selectedBuildingType.name || '',
-          description: selectedBuildingType.description || '',
-          spaceType: selectedBuildingType.space_type || '',
-          discipline: selectedBuildingType.discipline || '',
-          hvacSystem: selectedBuildingType.hvac_system || '',
-          fees: disciplineFees,
-          floorArea: prev.floorArea || (selectedBuildingType.default_area || 0),
-          splitFees: prev.splitFees
-        };
-      });
-    }
-  }, [selectedBuildingType, constructionCosts, disciplineFees, initialSpace]);
-
-  // Update useEffect to handle initialSpace and set selected building type
-  useEffect(() => {
-    if (initialSpace && buildingTypes.length > 0) {
-      const matchingBuildingType = buildingTypes.find(type => type.id === initialSpace.buildingTypeId);
-      if (matchingBuildingType) {
-        setSelectedBuildingType(matchingBuildingType);
-        // Set the initial space values
-        setSpace({
-          ...initialSpace,
-          fees: initialSpace.fees || disciplineFees
-        });
-      }
-    }
-  }, [initialSpace, buildingTypes]);
-
-  // Update the useEffect that sets initial values
-  useEffect(() => {
-    if (initialSpace) {
-      setSpace({
-        ...initialSpace,
-        projectConstructionType: initialSpace.projectConstructionType || '',
-        projectConstructionTypeId: initialSpace.projectConstructionTypeId || 0
-      });
-      
-      // Find and set the selected building type
-      const matchingBuildingType = buildingTypes.find(
-        type => type.id === initialSpace.buildingTypeId
-      );
-      if (matchingBuildingType) {
-        setSelectedBuildingType(matchingBuildingType);
-      }
-
-      // Find and set the selected construction type
-      const matchingConstructionType = projectConstructionTypes.find(
-        type => type.id === initialSpace.projectConstructionTypeId
-      );
-      if (matchingConstructionType) {
-        setSelectedConstructionType(matchingConstructionType);
-      }
-    }
-  }, [initialSpace, buildingTypes, projectConstructionTypes]);
-
-  // Add useEffect to update dialog state when opened with initialSpace
+  // Update the useEffect that handles initial space
   useEffect(() => {
     if (open && initialSpace) {
       console.log('Dialog opened with initial space:', initialSpace);
       // Update the space state with the latest data from initialSpace
       setSpace({
         ...initialSpace,
-        fees: initialSpace.fees || disciplineFees
+        totalConstructionCosts: initialSpace.totalConstructionCosts || disciplineConstructionCosts
       });
-
-      // Update discipline fees state
-      setDisciplineFees(initialSpace.fees || disciplineFees);
 
       // Find and set the selected building type
       const matchingBuildingType = buildingTypes.find(
@@ -428,6 +492,22 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       );
       if (matchingBuildingType) {
         setSelectedBuildingType(matchingBuildingType);
+        // Recalculate construction costs immediately after setting building type
+        if (initialSpace.floorArea) {
+          const calculatedCosts = calculateDisciplineConstructionCosts(matchingBuildingType.id, initialSpace.floorArea);
+          // Preserve both the ID and isActive state from the initial space
+          const updatedCosts = calculatedCosts.map(calculatedCost => {
+            const existingCost = initialSpace.totalConstructionCosts.find(
+              cost => cost.discipline === calculatedCost.discipline
+            );
+            return {
+              ...calculatedCost,
+              id: existingCost?.id || crypto.randomUUID(), // Preserve original ID
+              isActive: existingCost?.isActive ?? true
+            };
+          });
+          setDisciplineConstructionCosts(updatedCosts);
+        }
       }
 
       // Find and set the selected construction type
@@ -437,8 +517,35 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       if (matchingConstructionType) {
         setSelectedConstructionType(matchingConstructionType);
       }
+
+      // Set initializing to false after a short delay to allow state updates
+      setTimeout(() => {
+        isInitializing.current = false;
+      }, 100);
+    } else if (!open) {
+      // Reset initializing when dialog closes
+      isInitializing.current = true;
     }
-  }, [open, initialSpace, buildingTypes, projectConstructionTypes]);
+  }, [open, initialSpace, buildingTypes, projectConstructionTypes, constructionCosts, costIndex]);
+
+  // Add a useEffect to recalculate costs when building type or floor area changes
+  useEffect(() => {
+    if (!isInitializing.current && selectedBuildingType && space.floorArea) {
+      const calculatedCosts = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
+      // Preserve both the ID and isActive state from the current disciplineConstructionCosts
+      const updatedCosts = calculatedCosts.map(calculatedCost => {
+        const existingCost = disciplineConstructionCosts.find(
+          cost => cost.discipline === calculatedCost.discipline
+        );
+        return {
+          ...calculatedCost,
+          id: existingCost?.id || crypto.randomUUID(), // Preserve original ID
+          isActive: existingCost?.isActive ?? true
+        };
+      });
+      setDisciplineConstructionCosts(updatedCosts);
+    }
+  }, [selectedBuildingType, space.floorArea, constructionCosts, costIndex, selectedConstructionType]);
 
   const formatCurrency = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined) return '';
@@ -468,9 +575,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       floorArea: numericValue
     }));
     
-    // Update fees if we have a valid number and building type
+    // Update totalConstructionCosts if we have a valid number and building type
     if (selectedBuildingType && numericValue > 0) {
-      calculateDisciplineFees(selectedBuildingType.id, numericValue);
+      calculateDisciplineConstructionCosts(selectedBuildingType.id, numericValue);
     }
   };
 
@@ -479,7 +586,54 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     console.log('space.floorArea changed:', space.floorArea);
   }, [space.floorArea]);
 
-  // Update the handleSave function to include floor area validation
+  // Update the handleDisciplineToggle function
+  const handleDisciplineToggle = (discipline: string) => {
+    const constructionCost = disciplineConstructionCosts.find(f => f.discipline === discipline);
+    if (!constructionCost) return;
+
+    const newIsActive = !constructionCost.isActive;
+    console.log('SpaceDialog: Toggling discipline:', {
+      discipline,
+      constructionCostId: constructionCost.id,
+      currentState: constructionCost.isActive,
+      newState: newIsActive,
+      initialSpace: initialSpace ? {
+        id: initialSpace.id,
+        structureId: initialSpace.structureId,
+        levelId: initialSpace.levelId,
+        totalConstructionCosts: initialSpace.totalConstructionCosts
+      } : null
+    });
+
+    setDisciplineConstructionCosts(prev => {
+      const updated = prev.map(f => f.discipline === discipline ? { ...f, isActive: newIsActive } : f);
+      console.log('SpaceDialog: Updated disciplineConstructionCosts state:', updated);
+      return updated;
+    });
+
+    // Only call onDisciplineFeeToggle if we have an initialSpace (editing mode)
+    if (initialSpace) {
+      const feeToToggle = initialSpace.totalConstructionCosts.find(f => f.discipline === discipline);
+      if (feeToToggle) {
+        console.log('SpaceDialog: Calling onDisciplineFeeToggle with:', {
+          structureId: initialSpace.structureId,
+          levelId: initialSpace.levelId,
+          spaceId: initialSpace.id,
+          feeId: feeToToggle.id,
+          isActive: newIsActive
+        });
+        onDisciplineFeeToggle(
+          initialSpace.structureId || '',
+          initialSpace.levelId || '',
+          initialSpace.id,
+          feeToToggle.id,
+          newIsActive
+        );
+      }
+    }
+  };
+
+  // Update the handleSave function to log the state
   const handleSave = async () => {
     try {
       if (!selectedBuildingType || !selectedConstructionType) {
@@ -487,18 +641,26 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
         return;
       }
 
+      console.log('SpaceDialog: Current disciplineConstructionCosts state before save:', disciplineConstructionCosts);
+
+      // Calculate totalConstructionCosts but preserve isActive state
+      const calculatedFees = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
+      const updatedFees = calculatedFees.map(calculatedFee => {
+        const existingFee = disciplineConstructionCosts.find(f => f.discipline === calculatedFee.discipline);
+        const fee = { ...calculatedFee, isActive: existingFee?.isActive ?? true };
+        return fee;
+      });
+      console.log("handleSave: updatedFees (after mapping calculatedFees):", updatedFees);
+      console.log('SpaceDialog: Final totalConstructionCosts state being saved:', updatedFees);
+
       const spaceToSave = {
         ...space,
         buildingType: selectedBuildingType.name,
         buildingTypeId: selectedBuildingType.id,
         projectConstructionType: selectedConstructionType.project_type,
         projectConstructionTypeId: selectedConstructionType.id,
-        fees: disciplineFees  // Ensure we're using the latest discipline fees
+        totalConstructionCosts: updatedFees
       };
-
-      console.log('Saving space with fees:', {
-        fees: disciplineFees
-      });
 
       await onSave(spaceToSave);
       onOpenChange(false);
@@ -508,37 +670,82 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     }
   };
 
-  // Remove the MEP logic and update discipline handling
-  const handleDisciplineToggle = (discipline: string) => {
-    const updatedFees = [...disciplineFees];
-    const feeIndex = updatedFees.findIndex(f => f.discipline === discipline);
-    
-    if (feeIndex === -1) {
-      // Add new fee if it doesn't exist
-      updatedFees.push({
+  // Update the getDisplayConstructionCosts function to ensure we always return MEP disciplines
+  const getDisplayConstructionCosts = () => {
+    if (!selectedBuildingType || !space.floorArea) {
+      // If we don't have building type or floor area, return the current state
+      return disciplineConstructionCosts.filter(cost => 
+        ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.discipline)
+      );
+    }
+    // Calculate costs for MEP disciplines
+    const calculatedCosts = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
+    // Ensure we have all MEP disciplines
+    const existingDisciplines = calculatedCosts.map(cost => cost.discipline);
+    const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical'].filter(
+      discipline => !existingDisciplines.includes(discipline)
+    );
+    return [
+      ...calculatedCosts,
+      ...missingDisciplines.map(discipline => ({
         id: crypto.randomUUID(),
         discipline,
-        totalFee: 0,
         isActive: true,
-        costPerSqft: 0
-      });
-    } else {
-      // Toggle existing fee
-      updatedFees[feeIndex] = {
-        ...updatedFees[feeIndex],
-        isActive: !updatedFees[feeIndex].isActive
-      };
-    }
+        costPerSqft: 0,
+        totalConstructionCost: 0
+      }))
+    ];
+  };
 
-    // Update the primary discipline based on active fees
-    const activeDisciplines: string[] = updatedFees.filter(f => f.isActive).map(f => f.discipline);
-    const primaryDiscipline = activeDisciplines[0] || 'Mechanical'; // Default to Mechanical if no active disciplines
-
-    setDisciplineFees(updatedFees);
+  // Update the building type selection handler
+  const handleBuildingTypeSelect = (type: BuildingType) => {
+    console.log('Building type selected:', type);
+    setSelectedBuildingType(type);
+    setOpenCombobox(false);
+    setSearchQuery('');
+    
+    // Calculate construction costs immediately when building type is selected
+    const floorArea = space.floorArea || (type.default_area || 0);
+    console.log('Using floor area:', floorArea);
+    
+    // Find construction costs for this building type
+    const buildingTypeCosts = constructionCosts.filter(cost => 
+      cost.building_type_id === type.id && 
+      ['Mechanical', 'Plumbing', 'Electrical'].includes(cost.cost_type)
+    );
+    console.log('Found construction costs for building type:', buildingTypeCosts);
+    
+    const calculatedCosts = calculateDisciplineConstructionCosts(type.id, floorArea);
+    console.log('Calculated costs:', calculatedCosts);
+    
     setSpace(prev => ({
       ...prev,
-      fees: updatedFees
+      buildingTypeId: type.id,
+      buildingType: type.name || '',
+      name: type.name || '',
+      description: type.description || '',
+      spaceType: type.space_type || '',
+      discipline: type.discipline || '',
+      hvacSystem: type.hvac_system || '',
+      floorArea: floorArea,
+      splitConstructionCosts: prev.splitConstructionCosts
     }));
+
+    // Update discipline construction costs with calculated values
+    setDisciplineConstructionCosts(prev => {
+      const updatedCosts = calculatedCosts.map(calculatedCost => {
+        const existingCost = prev.find(cost => cost.discipline === calculatedCost.discipline);
+        const updatedCost = {
+          ...calculatedCost,
+          id: existingCost?.id || crypto.randomUUID(),
+          isActive: existingCost?.isActive ?? true
+        };
+        console.log('Updated cost for discipline:', calculatedCost.discipline, updatedCost);
+        return updatedCost;
+      });
+      console.log('Final updated discipline costs:', updatedCosts);
+      return updatedCosts;
+    });
   };
 
   return (
@@ -594,25 +801,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                           <CommandItem
                             key={type.id}
                             value={type.id}
-                            onSelect={() => {
-                              setSelectedBuildingType(type);
-                              setOpenCombobox(false);
-                              setSearchQuery('');
-                              
-                              setSpace(prev => ({
-                                ...prev,
-                                buildingTypeId: type.id,
-                                buildingType: type.name || '',
-                                name: type.name || '',
-                                description: type.description || '',
-                                spaceType: type.space_type || '',
-                                discipline: type.discipline || '',
-                                hvacSystem: type.hvac_system || '',
-                                fees: disciplineFees,
-                                floorArea: prev.floorArea || (type.default_area || 0),
-                                splitFees: prev.splitFees
-                              }));
-                            }}
+                            onSelect={() => handleBuildingTypeSelect(type)}
                             className="flex flex-col items-start py-2 px-3 cursor-pointer hover:bg-accent"
                           >
                             <div className="flex items-center gap-2">
@@ -740,33 +929,35 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
             />
           </div>
 
-          {/* Discipline Fees */}
+          {/* Discipline totalConstructionCosts */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Discipline Construction Costs</h3>
             <div className="space-y-4">
-              {disciplineFees.map((fee) => (
-                <div key={fee.id} className="rounded-lg border p-4">
+              {getDisplayConstructionCosts()
+                .filter(constructionCost => ['Mechanical', 'Plumbing', 'Electrical'].includes(constructionCost.discipline))
+                .map((constructionCost) => (
+                <div key={constructionCost.id} className="rounded-lg border p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">{fee.discipline}</div>
+                    <div className="font-medium">{constructionCost.discipline}</div>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         try {
-                          handleDisciplineToggle(fee.discipline);
+                          handleDisciplineToggle(constructionCost.discipline);
                         } catch (error) {
                           console.error('Error toggling discipline:', error);
                         }
                       }}
                       className={`p-1.5 rounded-md transition-colors ${
-                        fee.isActive
+                        constructionCost.isActive
                           ? 'bg-primary/10 text-primary hover:bg-primary/20' 
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
-                      title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
+                      title={constructionCost.isActive ? 'Disable discipline' : 'Enable discipline'}
                     >
-                      {fee.isActive ? (
+                      {constructionCost.isActive ? (
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                           <path d="M20 6 9 17l-5-5"/>
                         </svg>
@@ -781,11 +972,11 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <span className="text-muted-foreground">Cost per sq ft:</span>
-                      <div>{formatCurrency(fee.costPerSqft)}</div>
+                      <div>{formatCurrency(constructionCost.costPerSqft)}</div>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Total Cost:</span>
-                      <div>{formatCurrency(fee.totalFee)}</div>
+                      <div>{formatCurrency(constructionCost.totalConstructionCost)}</div>
                     </div>
                   </div>
                 </div>
@@ -794,9 +985,11 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                 <div className="flex justify-between items-center">
                   <div className="font-medium">Total Cost</div>
                   <div className="font-medium">
-                    {formatCurrency(disciplineFees.reduce((sum, fee) => 
-                      sum + (fee.isActive ? fee.totalFee : 0), 0
-                    ))}
+                    {formatCurrency(getDisplayConstructionCosts()
+                      .filter(constructionCost => ['Mechanical', 'Plumbing', 'Electrical'].includes(constructionCost.discipline))
+                      .reduce((sum, constructionCost) => 
+                        sum + (constructionCost.isActive ? constructionCost.totalConstructionCost : 0), 0
+                      ))}
                   </div>
                 </div>
               </div>

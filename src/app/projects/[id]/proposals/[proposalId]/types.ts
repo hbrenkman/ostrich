@@ -10,10 +10,12 @@ export interface Space {
   hvacSystem: string;
   projectConstructionType: string;
   projectConstructionTypeId: number;
-  fees: Array<{
+  structureId: string;
+  levelId: string;
+  totalConstructionCosts: Array<{
     id: string;
     discipline: string;
-    totalFee: number;
+    totalConstructionCost: number;
     isActive: boolean;
     costPerSqft: number;
   }>;
@@ -41,6 +43,7 @@ export interface Level {
 
 export interface Structure {
   id: string;
+  name: string;
   constructionType: string;
   floorArea: string;
   description: string;
@@ -51,10 +54,24 @@ export interface Structure {
   parentId?: string;
   designFeeRate?: number;
   constructionSupportEnabled?: boolean;
+  designPercentage?: number;
+  isDuplicate?: boolean;
+  duplicateNumber?: number;
+  duplicateParentId?: string | null;
+  isDuplicateCollapsed?: boolean;
+  constructionCosts?: Array<{
+    id: string;
+    discipline: string;
+    totalConstructionCost: number;
+    isActive: boolean;
+    costPerSqft: number
+  }>;
 }
 
 export interface ManualFeeOverride {
+  id: string;
   structureId: string;
+  levelId: string;
   discipline: string;
   designFee?: number;
   constructionSupportFee?: number;

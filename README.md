@@ -84,3 +84,96 @@ docker ps | grep -E "kong|auth"
 
 # 5. Test the auth endpoint
 curl -i -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ2MDc5MjAwLCJleHAiOjE5MDM4NDU2MDB9.fBnFSBgi2O_ObRR3ByelsgJ7xKaPoPdWYyw6C-7Ci70" http://localhost:8000/auth/v1/health
+
+## Fee Calculations
+# 1 space-dialog
+   building_types:      table contains building or space type by category.  This is cross referenced with construction_costs effectively giving us a construction cost by building or space type.
+   construction_costs:  table contains total construction cost per sq.ft but also broken out by discipline (mech, plumb, elec)
+   construction_index:  data in construction_costs are averages for the USA.  construction_index adjusts these costs to the specifci area
+   project_construction_types: this table has a relative_cost_index that we use to adjust the construction_costs based on project type
+   The above tables are used in space-dialog.tsx when a space is created.
+      On open of space-dialog the construction_index is passed on for the project location.
+      A space type is selected defining the construction cost per sq.ft
+      A project construction type is selected defining an adjustment to the construction cost.
+      as and example region_cost_index x construction_cost_by_disicipline x project_type_index = construction_cost_for discipline.  We calculate this for each discipline.
+      Sum the disciplines togther and pass the total cost on to the structure with levels and spaces component in page.tsx.
+   
+# 2 structure/building component/duplicates   
+   In the structure component we add the construction totals for each space to give as a structure construction total.
+   fee_duplicate_structures:  This table adjust the construction costs for duplicate structures/building.  The parent structure has index 1 in this table with a rate of 1.  The second entry in this table with id 2, would represent the second structure/building and first duplicate.  It has a rate of 0.75.  The thrid entry would have id 3 and represent duplicate 2 with rate 0.5625.  so it goes. The 10th structure (duplicate 9) and subsequent duplicates allhave the same rate represented by the rate with id 10.
+
+   if we have a total structure construction cost of 10000 for the parent structure then the duplicate 1 total construction cost for the structure would be 10000x0.75 = 75000.  The same applies for the discipline construction costs.
+
+# 3 fee calculations using FixedFees.tsx component
+   These construction costs from above are passed on to the FixedFees.tsx component.
+   design_fee_scale:  this table has a field called construction_cost, prime_consultant_fee and then fraction_of_prime_rate_mechanical, fraction_of_prime_rate_electrical, fraction_of_prime_rate_plumbing and fraction_of_prime_rate_structural.  These are used to adjust the prime rate by discipline.
+
+   Calculating a dengineering fee:  we take the total construction cost of the structure passed to FixedFee.tsx after it has been corrected by cost indices etc. as described above.  We find the bracket this corrected construction cost falls in on the design_fee_scale and get the corresponding prime_consultant_fee which is a percentage value.  Let's say the corrected construction cost passed to the FixedFee.tsx component is $170,000 and the mechanical discipline construction cost is $75,000.  In the design_fee_scale table we get the entries:
+         construction_cost    prime_consultant_fee fraction_of_prime_rate_mechanical ....
+         150,000              9.12                 7.5
+         200,000              8.83                 7.5
+
+         to calculate the design fee for mechanical discipline on the $170,000 structure total construction cost we do the following:
+
+         170,000 falls between 150,000 and 200,000 so we use the 8.83% prime_consultant_fee.
+         To get the mechanbical discipline fee we say then 75,000 x 8.83% x 7.5% = 497.
+
+         We do the same for the other disciplines
+
+   to get the design fee we Design percentage field value in the FixedFee.tsx component, which usually is set to 80% and multiply it with the engineering fee calculated above.  When Construction Administartion is active it will use the construction percentage value and multiply that with the engineering fee to get the constrcution admin fee portion
+
+## Services
+
+Let me check the filtering criteria in the `FixedFees` component:
+
+
+Read file: src/app/projects/[id]/proposals/[proposalId]/components/FixedFees.tsx
+Based on the code, here are the criteria used to determine which services should be rendered in the `FixedFees` component:
+
+1. **Phase Matching**: 
+   ```typescript
+   service.phase === phase
+   ```
+   - Services must match the current phase ('design' or 'construction')
+
+2. **Construction Admin Exclusion**:
+   ```typescript
+   !service.construction_admin
+   ```
+   - Construction admin services are explicitly excluded from display
+
+3. **Fee-Related Values**:
+   ```typescript
+   (service.min_fee !== null || service.rate !== null || service.fee_increment !== null)
+   ```
+   - Services must have at least one of these fee-related values:
+     - `min_fee`: A minimum fee amount
+     - `rate`: A percentage rate
+     - `fee_increment`: A fee increment value
+
+4. **Structure Association**:
+   - Services are filtered by `structureId` (passed as a parameter to `renderTrackedServices`)
+   - Only services associated with the specific structure are displayed
+
+5. **Grouping**:
+   - Services are grouped by `service_name` for display
+   - Each group can have multiple services for different disciplines
+
+6. **Service State**:
+   - Services have a `default_included` flag that determines if they're enabled by default
+   - Services can have a `customFee` that overrides the calculated fee
+   - Services can be toggled on/off using the UI
+
+So, for a service to appear in the FixedFees component, it must:
+1. Match the current phase (design/construction)
+2. Not be a construction admin service
+3. Have at least one fee-related value (min_fee, rate, or fee_increment)
+4. Be associated with the correct structure
+5. Be properly grouped with other services of the same name
+
+The issue we were seeing earlier might be because:
+1. The services weren't being created with the correct `structureId`
+2. The services might not have had the required fee-related values
+3. The services might have been marked as construction admin services
+
+Would you like me to check any specific part of these criteria in more detail?

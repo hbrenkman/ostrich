@@ -1,4 +1,4 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Building2, Layers, Home, ChevronDown, ChevronRight, Check, RotateCcw, ChevronUp, ChevronDown as ChevronDownIcon, Copy, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -40,10 +40,10 @@ interface Space {
   hvacSystem: string;
   projectConstructionType: string;
   projectConstructionTypeId: number;
-  fees: Array<{
+  totalConstructionCosts: Array<{
     id: string;
     discipline: string;
-    totalFee: number;
+    totalConstructionCost: number;
     isActive: boolean;
     costPerSqft: number;
     designFee?: number;
@@ -74,8 +74,10 @@ interface Level {
 interface Fee {
   id: string;
   discipline: string;
+  costPerSqft: number;
+  totalConstructionCost: number;
   isActive: boolean;
-  totalFee: number;
+  designPercentage?: number;
   designFee?: number;
   constructionFee?: number;
 }
@@ -109,7 +111,9 @@ interface EngineeringStandardService {
 
 interface TrackedService {
   id: string;
+  serviceId: string;
   service_name: string;
+  name: string;
   discipline: string;
   default_included: boolean;
   min_fee: number | null;
@@ -118,16 +122,34 @@ interface TrackedService {
   phase: 'design' | 'construction';
   customFee?: number;
   construction_admin: boolean;
+  fee: number;
+  structureId: string;
+  levelId: string;
+  spaceId: string;
+  isActive: boolean;
 }
 
-interface FixedFeesProps {
+interface FeeScale {
+  construction_cost: number;
+  prime_consultant_fee: number;
+  fraction_of_prime_rate_mechanical: number;
+  fraction_of_prime_rate_plumbing: number;
+  fraction_of_prime_rate_electrical: number;
+  fraction_of_prime_rate_structural: number;
+}
+
+interface FeeCalculationProps {
   structures: Structure[];
   phase: 'design' | 'construction';
-  onFeeUpdate: (structureId: string, levelId: string, spaceId: string, feeId: string, updates: Partial<Fee>, feePhase: 'design' | 'construction') => void;
-  onCalculateFee: (structure: Structure, discipline: string, phase: 'design' | 'construction', returnRawCost?: boolean) => { fee: number; rate: number };
-  onDesignPercentageChange?: (structureId: string, percentage: number) => void;
+  onFeeUpdate: (structureId: string, levelId: string, spaceId: string, feeId: string, updates: Partial<Fee>, phase: 'design' | 'construction') => void;
+  designFeeScale: FeeScale[];
+  duplicateStructureRates: Array<{ id: number; rate: number }>;
   trackedServices?: TrackedService[];
   onServiceFeeUpdate?: (serviceId: string, discipline: string, fee: number | undefined, phase: 'design' | 'construction') => void;
+  onDisciplineFeeToggle?: (structureId: string, levelId: string, spaceId: string, feeId: string, isActive: boolean) => void;
+  constructionCosts: Record<string, Record<string, number>>;
+  manualFeeOverrides: ManualFeeOverride[];
+  setManualFeeOverrides: React.Dispatch<React.SetStateAction<ManualFeeOverride[]>>;
 }
 
 interface ProjectSummary {
@@ -137,18 +159,76 @@ interface ProjectSummary {
   projectTotal: number;
 }
 
+interface ManualFeeOverride {
+  structureId: string;
+  discipline: string;
+  spaceId?: string;
+}
+
 export default function FixedFees({ 
   structures, 
   phase, 
   onFeeUpdate, 
-  onCalculateFee, 
-  onDesignPercentageChange, 
+  designFeeScale,
+  duplicateStructureRates,
   trackedServices = [],
-  onServiceFeeUpdate 
-}: FixedFeesProps) {
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  onServiceFeeUpdate,
+  onDisciplineFeeToggle,
+  constructionCosts,
+  manualFeeOverrides,
+  setManualFeeOverrides
+}: FeeCalculationProps) {
+  // Add initial props logging with structure details
+  console.log('FixedFees props:', {
+    structures: structures.map(s => ({
+      id: s.id,
+      name: s.name,
+      levels: s.levels.length
+    })),
+    trackedServices: trackedServices.map(s => ({
+      id: s.id,
+      name: s.service_name,
+      structureId: s.structureId,
+      phase: s.phase
+    })),
+    phase
+  });
 
-  const formatCurrency = (value: number | null | undefined): string => {
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const isInitializing = useRef(true);
+
+  // Reset initialization flag when structures change
+  useEffect(() => {
+    // console.log('FixedFees re-rendered. constructionCosts:', constructionCosts);
+  }, [constructionCosts]);
+
+  useEffect(() => {
+    if (isInitializing.current) {
+      // Set a timeout to allow initial render to complete
+      const timer = setTimeout(() => {
+        isInitializing.current = false;
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [structures]);
+
+  // Memoize the disciplines array since it never changes
+  const DISCIPLINES = useMemo(() => [
+    'Civil',
+    'Electrical',
+    'Mechanical',
+    'Plumbing',
+    'Structural'
+  ], []);
+
+  // Memoize the construction admin services check
+  const hasConstructionAdminServices = useMemo(() => 
+    trackedServices.some(service => service.construction_admin && service.default_included),
+    [trackedServices]
+  );
+
+  // Memoize the formatCurrency function
+  const formatCurrency = useCallback((value: number | null | undefined): string => {
     if (value === null || value === undefined) return '$0';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -156,345 +236,321 @@ export default function FixedFees({
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
+  }, []);
+
+  // Helper functions first
+  const getDuplicateRate = (structure: Structure, duplicateStructureRates: Array<{ id: number; rate: number }>): number => {
+    if (!structure.parentId) {
+      // Parent building always uses rate from id=1
+      return duplicateStructureRates.find(r => r.id === 1)?.rate ?? 1.0;
+    }
+
+    // For duplicate buildings, find the appropriate rate
+    const duplicateNumber = getDuplicateNumber(structure);
+    const rateId = Math.min(duplicateNumber + 1, 10); // Cap at id=10
+    return duplicateStructureRates.find(r => r.id === rateId)?.rate ?? 1.0;
   };
 
-  const renderPhasePercentages = (structure: Structure) => {
-    const designPercentage = structure.designPercentage ?? 80;
-    const constructionPercentage = 100 - designPercentage;
+  const getDuplicateNumber = (structure: Structure): number => {
+    if (!structure.parentId) return 0;
+    return parseInt(structure.name.match(/\(Duplicate (\d+)\)$/)?.[1] ?? '1');
+  };
 
-    return (
-      <div className="flex items-center gap-4 mb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Design:</span>
-          <Input
-            type="number"
-            min="0"
-            max="100"
-            value={designPercentage}
-            onChange={(e) => {
-              const newPercentage = Math.min(100, Math.max(0, Number(e.target.value)));
-              onDesignPercentageChange?.(structure.id, newPercentage);
-            }}
-            className="w-20 text-right"
-          />
-          <span className="text-sm text-primary">%</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Construction:</span>
-          <span className="text-sm text-primary">{constructionPercentage}%</span>
-        </div>
-      </div>
+  // Move getFeeScale function before memoizedFeeScales
+  const getFeeScale = (
+    structure: Structure, 
+    discipline: string, 
+    designFeeScale: FeeScale[],
+    duplicateStructureRates: Array<{ id: number; rate: number }>
+  ): { adjustedRate: number } => {
+    // Add detailed fee scale logging
+    console.log('getFeeScale called:', {
+      structure: structure.name,
+      discipline,
+      hasFeeScale: !!designFeeScale,
+      feeScaleLength: designFeeScale?.length,
+      constructionCost: constructionCosts[structure.id]?.[discipline],
+      duplicateRates: duplicateStructureRates,
+      rawFeeScale: designFeeScale
+    });
+
+    // Early return if no fee scale data
+    if (!designFeeScale || designFeeScale.length === 0) {
+      console.warn('No fee scale data available for:', { 
+        structure: structure.name, 
+        discipline,
+        constructionCost: constructionCosts[structure.id]?.[discipline]
+      });
+      // Return a default rate of 0.05 (5%) if no fee scale data
+      return { adjustedRate: 0.05 };
+    }
+
+    // Calculate total construction cost for this structure
+    const constructionCost = constructionCosts[structure.id]?.[discipline] || 0;
+
+    // If no construction cost found, use the first fee scale row
+    if (constructionCost === 0) {
+      const firstScale = designFeeScale[0];
+      if (!firstScale) {
+        console.warn('No fee scale rows available');
+        return { adjustedRate: 0.05 }; // Default to 5% if no fee scale
+      }
+
+      // Get the base rate (prime consultant fee)
+      const baseRate = firstScale.prime_consultant_fee;
+
+      // Get the fraction rate for the discipline
+      let fractionRate: number;
+      const disciplineLower = discipline.toLowerCase();
+      switch (disciplineLower) {
+        case 'mechanical':
+          fractionRate = firstScale.fraction_of_prime_rate_mechanical;
+          break;
+        case 'plumbing':
+          fractionRate = firstScale.fraction_of_prime_rate_plumbing;
+          break;
+        case 'electrical':
+          fractionRate = firstScale.fraction_of_prime_rate_electrical;
+          break;
+        case 'structural':
+          fractionRate = firstScale.fraction_of_prime_rate_structural;
+          break;
+        default:
+          fractionRate = 1;
+      }
+
+      // Calculate the fee using the discipline's fraction of the prime consultant fee
+      const disciplineRate = baseRate * (fractionRate / 100);
+
+      // Get and apply the duplicate rate
+      const duplicateRate = getDuplicateRate(structure, duplicateStructureRates);
+
+      // Log in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Using first fee scale row for new space:', {
+          structure: structure.name,
+          discipline,
+          baseRate,
+          fractionRate,
+          disciplineRate,
+          duplicateRate,
+          finalRate: disciplineRate * duplicateRate
+        });
+      }
+
+      // Add logging before returning the final rate
+      const finalRate = disciplineRate * duplicateRate;
+      console.log('Fee scale calculation result:', {
+        structure: structure.name,
+        discipline,
+        baseRate,
+        fractionRate,
+        disciplineRate,
+        duplicateRate,
+        finalRate,
+        constructionCost
+      });
+
+      return { adjustedRate: finalRate };
+    }
+
+    // Find the appropriate fee scale row
+    const scale = designFeeScale.find((row: FeeScale, index: number) => {
+      const nextRow = designFeeScale[index + 1];
+      return !nextRow || constructionCost <= nextRow.construction_cost;
+    });
+
+    if (!scale) {
+      console.warn('No matching fee scale found for construction cost:', {
+        constructionCost,
+        discipline,
+        structure: structure.name
+      });
+      // Return a default rate of 0.05 (5%) if no matching scale
+      return { adjustedRate: 0.05 };
+    }
+
+    // Get the base rate (prime consultant fee)
+    const baseRate = scale.prime_consultant_fee;
+
+    // Get the fraction rate for the discipline
+    let fractionRate: number;
+    const disciplineLower = discipline.toLowerCase();
+    switch (disciplineLower) {
+      case 'mechanical':
+        fractionRate = scale.fraction_of_prime_rate_mechanical;
+        break;
+      case 'plumbing':
+        fractionRate = scale.fraction_of_prime_rate_plumbing;
+        break;
+      case 'electrical':
+        fractionRate = scale.fraction_of_prime_rate_electrical;
+        break;
+      case 'structural':
+        fractionRate = scale.fraction_of_prime_rate_structural;
+        break;
+      default:
+        fractionRate = 1;
+    }
+
+    // Calculate the fee using the discipline's fraction of the prime consultant fee
+    const disciplineRate = baseRate * (fractionRate / 100);
+
+    // Get and apply the duplicate rate
+    const duplicateRate = getDuplicateRate(structure, duplicateStructureRates);
+
+    // Log in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Calculated fee scale:', {
+        structure: structure.name,
+        discipline,
+        constructionCost,
+        baseRate,
+        fractionRate,
+        disciplineRate,
+        duplicateRate,
+        finalRate: disciplineRate * duplicateRate
+      });
+    }
+
+    // Add logging before returning the final rate
+    const finalRate = disciplineRate * duplicateRate;
+    console.log('Fee scale calculation result:', {
+      structure: structure.name,
+      discipline,
+      baseRate,
+      fractionRate,
+      disciplineRate,
+      duplicateRate,
+      finalRate,
+      constructionCost
+    });
+
+    return { adjustedRate: finalRate };
+  };
+
+  // Add a memoized fee scale lookup
+  const memoizedFeeScales = useMemo(() => {
+    const scales: Record<string, Record<string, { adjustedRate: number }>> = {};
+    
+    structures.forEach(structure => {
+      scales[structure.id] = {};
+      DISCIPLINES.forEach(discipline => {
+        // Only calculate if we have fee scale data
+        if (designFeeScale && designFeeScale.length > 0) {
+          scales[structure.id][discipline] = getFeeScale(structure, discipline, designFeeScale, duplicateStructureRates);
+        }
+      });
+    });
+    
+    return scales;
+  }, [structures, DISCIPLINES, designFeeScale, duplicateStructureRates]);
+
+  // Update calculateDisciplineFee to handle structure updates
+  const calculateDisciplineFee = useCallback((
+    structure: Structure,
+    discipline: string,
+    phase: 'design' | 'construction',
+    returnRawCost: boolean = false
+  ): { fee: number; rate: number } => {
+    // console.log('calculateDisciplineFee called', { structure, discipline, phase, constructionCosts });
+    // Get the memoized fee scale
+    const feeScale = memoizedFeeScales[structure.id]?.[discipline];
+    
+    // Early return if no fee scale data
+    if (!feeScale || feeScale.adjustedRate === 0) {
+      return { fee: 0, rate: 0 };
+    }
+
+    // Calculate the percentage based on phase
+    const percentage = phase === 'design' 
+      ? (structure.designPercentage ?? 80) / 100 
+      : (100 - (structure.designPercentage ?? 80)) / 100;
+    
+    // Calculate discipline-specific construction cost for this structure
+    const totalConstructionCost = structure.levels.reduce((total, level) =>
+      level.spaces.reduce((levelTotal, space) => {
+        const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
+        if (fee) {
+          const spaceConstructionCost = fee.costPerSqft * space.floorArea;
+          return levelTotal + (fee.isActive ? spaceConstructionCost : 0);
+        }
+        return levelTotal;
+      }, 0), 0);
+
+    // If returnRawCost is true, return the raw construction cost
+    if (returnRawCost) {
+      return { fee: totalConstructionCost, rate: 0 };
+    }
+    
+    // Calculate the fee using the memoized rate
+    const calculatedFee = totalConstructionCost * (feeScale.adjustedRate / 100) * percentage;
+    
+    return { fee: calculatedFee, rate: feeScale.adjustedRate };
+  }, [memoizedFeeScales]);
+
+  // Memoized functions
+  const memoizedCalculateFee = useCallback((
+    structure: Structure,
+    discipline: string,
+    feePhase: 'design' | 'construction'
+  ): { fee: number; rate: number } => {
+    return calculateDisciplineFee(
+      structure,
+      discipline,
+      feePhase,
+      false
     );
-  };
+  }, [calculateDisciplineFee]);
 
-  const DISCIPLINES = [
-    'Civil',
-    'Electrical',
-    'Mechanical',
-    'Plumbing',
-    'Structural'
-  ];
+  const getTotalDesignFeesForDiscipline = useCallback((structure: Structure, discipline: string): number => {
+    return structure.levels.reduce((total, level) => {
+      return level.spaces.reduce((levelSum, space) => {
+        // Find the fee regardless of active state
+        const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
+        if (!fee) return levelSum;
 
-  // Add helper function to check for construction admin services
-  const hasConstructionAdminServices = trackedServices.some(service => 
-    service.construction_admin && service.default_included
-  );
+        const { fee: calculatedFee } = memoizedCalculateFee(structure, discipline, 'design');
+        // Only add to total if fee is active
+        return levelSum + (fee.isActive ? calculatedFee : 0);
+      }, 0);
+    }, 0);
+  }, [memoizedCalculateFee]);
 
-  // Move calculateServiceFee outside of renderTrackedServices
-  const calculateServiceFee = (service: TrackedService, discipline: string, structureId: string): number => {
-    console.log('\n=== Calculating Service Fee ===');
-    console.log('Service:', {
-      name: service.service_name,
-      discipline: service.discipline,
-      min_fee: service.min_fee,
+  // Update calculateServiceFee to handle services without spaces
+  const calculateServiceFee = useCallback((service: TrackedService, discipline: string, structureId: string): number => {
+    // Add service fee calculation logging
+    console.log('calculateServiceFee called:', {
+      service: service.service_name,
+      discipline,
+      structureId,
+      hasCustomFee: service.customFee !== undefined,
+      minFee: service.min_fee,
       rate: service.rate,
-      fee_increment: service.fee_increment,
+      defaultIncluded: service.default_included,
       phase: service.phase
     });
 
-    // Get the structure for this service
+    // Find the structure
     const structure = structures.find(s => s.id === structureId);
-    if (!structure) {
-      console.error('Structure not found:', structureId);
-      return 0;
+    if (!structure) return 0;
+
+    // If service has a custom fee, use that
+    if (service.customFee !== undefined) {
+      return service.customFee;
     }
 
-    // Get total design fees for this discipline
-    const totalDesignFees = getTotalDesignFeesForDiscipline(structure, discipline);
-    console.log('Total design fees:', {
-      discipline,
-      totalDesignFees
-    });
+    // If service has a min_fee, use that as base
+    let calculatedFee = service.min_fee ?? 0;
 
-    // If no rate, use min_fee
-    if (!service.rate) {
-      console.log('Using min_fee due to missing rate:', {
-        rate: service.rate,
-        min_fee: service.min_fee
-      });
-      return service.min_fee || 0;
-    }
+    // If service has a rate, calculate based on total design fees
+    if (service.rate !== null && service.rate !== undefined) {
+      // Calculate total design fees for this discipline
+      const totalDesignFees = structure.levels.reduce((total, level) => {
+        return total + level.spaces.reduce((spaceTotal, space) => {
+          const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
+          if (!fee || !fee.isActive) return spaceTotal;
 
-    // Calculate fee based on rate applied to total design fees
-    let calculatedFee = totalDesignFees * (service.rate / 100);
-    console.log('Initial fee calculation:', {
-      totalDesignFees,
-      rate: service.rate,
-      rateAsDecimal: service.rate / 100,
-      calculatedFee
-    });
-
-    // Apply fee increment if specified
-    if (service.fee_increment) {
-      const remainder = calculatedFee % service.fee_increment;
-      if (remainder > 0) {
-        calculatedFee = calculatedFee + (service.fee_increment - remainder);
-      }
-      console.log('After fee increment:', {
-        fee_increment: service.fee_increment,
-        remainder,
-        adjustedFee: calculatedFee
-      });
-    }
-
-    // Use min_fee if calculated fee is less
-    if (service.min_fee && calculatedFee < service.min_fee) {
-      console.log('Using min_fee as calculated fee is lower:', {
-        calculatedFee,
-        min_fee: service.min_fee
-      });
-      calculatedFee = service.min_fee;
-    }
-
-    console.log('Final service fee:', {
-      service: service.service_name,
-      discipline,
-      calculatedFee
-    });
-
-    return calculatedFee;
-  };
-
-  // Helper function to calculate total design fees for a discipline
-  const getTotalDesignFeesForDiscipline = (structure: Structure, discipline: string): number => {
-    console.log('\n=== Calculating Total Design Fees ===');
-    console.log('Structure:', structure.name);
-    console.log('Discipline:', discipline);
-
-    const totalDesignFees = structure.levels.reduce((total, level) => {
-      const levelTotal = level.spaces.reduce((levelSum, space) => {
-        // Get the fee for this discipline in this space
-        const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
-        if (!fee) {
-          console.log('No active fee found for space:', {
-            space: space.name,
-            discipline
-          });
-          return levelSum;
-        }
-
-        // Calculate design fee for this space
-        const { fee: designFee } = onCalculateFee(structure, discipline, 'design');
-        console.log('Space design fee calculation:', {
-          space: space.name,
-          discipline,
-          designFee
-        });
-
-        return levelSum + designFee;
-      }, 0);
-
-      console.log('Level total:', {
-        level: level.name,
-        total: levelTotal
-      });
-
-      return total + levelTotal;
-    }, 0);
-
-    console.log('Final total design fees:', {
-      structure: structure.name,
-      discipline,
-      totalDesignFees
-    });
-
-    return totalDesignFees;
-  };
-
-  // Update renderTrackedServices to use the moved calculateServiceFee function
-  const renderTrackedServices = (structureId: string, phase: 'design' | 'construction') => {
-    // Filter services for this phase and structure, excluding construction admin services from display
-    const services = trackedServices.filter(service => 
-      service.phase === phase && 
-      service.default_included && 
-      service.min_fee !== null &&
-      !service.construction_admin  // Don't display construction admin services
-    );
-
-    // If no services to display, return null
-    if (services.length === 0) return null;
-
-    // Group services by name
-    const servicesByName = services.reduce((acc, service) => {
-      if (!acc[service.service_name]) {
-        acc[service.service_name] = [];
-      }
-      acc[service.service_name].push(service);
-      return acc;
-    }, {} as Record<string, TrackedService[]>);
-
-    return (
-      <div className="mt-4 space-y-2">
-        {Object.entries(servicesByName).map(([serviceName, services]) => (
-          <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
-            {/* Description column */}
-            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
-              <Home className="w-3.5 h-3.5 text-primary/50" />
-              <span className="text-sm">{serviceName}</span>
-            </div>
-            
-            {/* Discipline columns */}
-            {DISCIPLINES.map(discipline => {
-              // Find the service for this discipline
-              const service = services.find(s => s.discipline === discipline);
-              if (!service) {
-                return <div key={discipline} className="h-10" />;
-              }
-
-              const calculatedFee = calculateServiceFee(service, discipline, structureId);
-              const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
-
-              return (
-                <div key={discipline} className="flex items-center gap-2">
-                  <div className="flex-1 flex items-center gap-2">
-                    {service.customFee !== undefined && (
-                      <button
-                        type="button"
-                        className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
-                        title="Revert to calculated fee"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (onServiceFeeUpdate) {
-                            onServiceFeeUpdate(service.id, discipline, undefined, phase);
-                          }
-                        }}
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <Input
-                      type="text"
-                      value={formatCurrency(displayFee)}
-                      onChange={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (onServiceFeeUpdate) {
-                          const value = e.target.value.replace(/[^0-9.-]+/g, '');
-                          const numericValue = parseFloat(value) || 0;
-                          onServiceFeeUpdate(service.id, discipline, numericValue, phase);
-                        }
-                      }}
-                      className="text-right pr-2 bg-transparent"
-                    />
-                  </div>
-                  <div className="w-8 flex items-center justify-center">
-                    <button
-                      type="button"
-                      className={`p-1.5 rounded-md transition-colors ${service.default_included ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
-                      title={service.default_included ? "Disable service" : "Enable service"}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (onServiceFeeUpdate) {
-                          onServiceFeeUpdate(service.id, discipline, service.default_included ? 0 : calculatedFee, phase);
-                        }
-                      }}
-                    >
-                      <svg 
-                        xmlns="http://www.w3.org/2000/svg" 
-                        width="16" 
-                        height="16" 
-                        viewBox="0 0 24 24" 
-                        fill="none" 
-                        stroke="currentColor" 
-                        strokeWidth="2" 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        className="w-4 h-4"
-                      >
-                        <path d="M20 6 9 17l-5-5" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  // Add helper function to get service fees for a discipline
-  const getServiceFeesForDiscipline = (structureId: string, discipline: string): number => {
-    const fees = trackedServices
-      .filter((service): service is TrackedService & { min_fee: number } => 
-        service.default_included &&
-        service.min_fee !== null && 
-        service.discipline === discipline
-      )
-      .reduce((sum, service) => sum + service.min_fee, 0);
-    
-    return fees;
-  };
-
-  // Add helper function to determine if spaces should be shown for a discipline
-  const shouldShowSpacesForDiscipline = (discipline: string): boolean => {
-    if (phase === 'design') return true; // Always show spaces in design phase
-    
-    // In construction phase, only show spaces if there are construction admin services
-    return hasConstructionAdminServices;
-  };
-
-  // Update the rendering of spaces to use the new helper function
-  const renderSpacesForDiscipline = (structure: Structure, discipline: string) => {
-    if (!shouldShowSpacesForDiscipline(discipline)) return null;
-
-    return structure.levels.map(level => 
-      level.spaces.map(space => {
-        const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
-        if (!fee) return null;
-
-        return (
-          <div key={space.id} className="pl-4 mt-1 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600 dark:text-gray-400">{space.name}</span>
-              <span className="font-medium">
-                {formatCurrency(fee.totalFee)}
-              </span>
-            </div>
-          </div>
-        );
-      })
-    ).filter(Boolean);
-  };
-
-  // Update calculatePhaseTotals to respect construction admin condition
-  const calculatePhaseTotals = (structure: Structure, phase: 'design' | 'construction') => {
-    const totals = DISCIPLINES.reduce((acc, discipline) => {
-      // Calculate space fees total
-      const spaceFeesTotal = structure.levels.reduce((levelTotal, level) => {
-        return levelTotal + level.spaces.reduce((spaceTotal, space) => {
-          const fee = space.fees.find(f => f.discipline === discipline && f.isActive);
-          if (!fee) return spaceTotal;
-          
-          // Skip space fees in construction phase if no construction admin services
-          if (phase === 'construction' && !hasConstructionAdminServices) {
-            return spaceTotal;
-          }
-          
-          // Create a temporary structure with just this space to calculate its fee
           const tempStructure: Structure = {
             ...structure,
             levels: [{
@@ -502,69 +558,206 @@ export default function FixedFees({
               spaces: [space]
             }]
           };
-          
-          const { fee: calculatedFee } = onCalculateFee(tempStructure, discipline, phase);
-          const feeValue = phase === 'design' ? (fee.designFee ?? calculatedFee) : (fee.constructionFee ?? calculatedFee);
-          return spaceTotal + (fee.isActive ? feeValue : 0);
+          const { fee: calculatedFee } = calculateDisciplineFee(tempStructure, discipline, 'design');
+          return spaceTotal + calculatedFee;
         }, 0);
       }, 0);
 
-      // Calculate service fees total
-      const serviceFeesTotal = trackedServices
-        .filter(service => 
-          service.discipline === discipline && 
-          service.phase === phase && 
-          service.default_included && 
-          service.min_fee !== null &&
-          !service.construction_admin
-        )
-        .reduce((total, service) => {
-          const calculatedFee = calculateServiceFee(service, discipline, structure.id);
-          return total + (service.customFee !== undefined ? service.customFee : calculatedFee);
-        }, 0);
+      // Calculate fee based on rate applied to total design fees
+      calculatedFee = totalDesignFees * (service.rate / 100);
+    }
 
-      acc[discipline] = spaceFeesTotal + serviceFeesTotal;
+    // Apply fee increment if specified
+    if (service.fee_increment) {
+      const remainder = calculatedFee % service.fee_increment;
+      if (remainder > 0) {
+        calculatedFee = calculatedFee + (service.fee_increment - remainder);
+      }
+    }
+
+    // Use min_fee if calculated fee is less
+    if (service.min_fee && calculatedFee < service.min_fee) {
+      calculatedFee = service.min_fee;
+    }
+
+    // Add logging before returning the final fee
+    console.log('Service fee calculation result:', {
+      service: service.service_name,
+      discipline,
+      structureId,
+      calculatedFee,
+      minFee: service.min_fee,
+      customFee: service.customFee,
+      rate: service.rate
+    });
+
+    return calculatedFee;
+  }, [structures, calculateDisciplineFee]);
+
+  // Add a function to calculate totals for a single discipline first
+  const calculateDisciplineTotal = useCallback((
+    structure: Structure,
+    discipline: string,
+    phase: 'design' | 'construction'
+  ): Record<string, number> => {
+    // Add defensive check for constructionCosts
+    if (!constructionCosts) {
+      console.warn('FixedFees: constructionCosts is undefined', {
+        structureId: structure.id,
+        structureName: structure.name,
+        discipline,
+        phase
+      });
+      return { spaceFees: 0, serviceFees: 0, total: 0 };
+    }
+
+    // Add discipline total calculation logging with safe access
+    console.log('calculateDisciplineTotal called:', {
+      structure: structure.name,
+      structureId: structure.id,
+      discipline,
+      phase,
+      trackedServicesCount: trackedServices.length,
+      activeTrackedServices: trackedServices.filter(s => 
+        s.discipline === discipline && 
+        s.phase === phase && 
+        s.default_included && 
+        s.min_fee !== null &&
+        !s.construction_admin
+      ).length,
+      hasConstructionCosts: !!constructionCosts,
+      structureConstructionCosts: constructionCosts[structure.id] ? 'exists' : 'undefined',
+      disciplineConstructionCost: constructionCosts[structure.id]?.[discipline] ?? 0
+    });
+
+    // Calculate space fees for this discipline using the constructionCosts prop
+    const spaceFeesTotal = structure.levels.length > 0 ? structure.levels.reduce((levelTotal, level) => {
+      return levelTotal + level.spaces.reduce((spaceTotal, space) => {
+        // Get the construction cost, defaulting to 0 if not found
+        const constructionCost = constructionCosts[structure.id]?.[discipline] ?? 0;
+        
+        if (phase === 'construction' && !hasConstructionAdminServices) return spaceTotal;
+        
+        const tempStructure: Structure = {
+          ...structure,
+          levels: [{
+            ...level,
+            spaces: [{
+              ...space,
+              totalConstructionCosts: [{
+                id: crypto.randomUUID(),
+                discipline,
+                totalConstructionCost: constructionCost,
+                isActive: true,
+                costPerSqft: constructionCost / space.floorArea
+              }]
+            }]
+          }]
+        };
+        const { fee: calculatedFee } = calculateDisciplineFee(tempStructure, discipline, phase);
+        return spaceTotal + calculatedFee;
+      }, 0);
+    }, 0) : 0;
+
+    // Calculate service fees for this discipline
+    const serviceFeesTotal = trackedServices
+      .filter(service => 
+        service.discipline === discipline && 
+        service.phase === phase && 
+        service.default_included && 
+        service.min_fee !== null &&
+        !service.construction_admin
+      )
+      .reduce((total, service) => {
+        const calculatedFee = calculateServiceFee(service, discipline, structure.id);
+        return total + calculatedFee;
+      }, 0);
+
+    // Add logging before returning totals
+    console.log('Discipline total calculation result:', {
+      structure: structure.name,
+      structureId: structure.id,
+      discipline,
+      phase,
+      spaceFeesTotal,
+      serviceFeesTotal,
+      total: spaceFeesTotal + serviceFeesTotal,
+      constructionCost: constructionCosts?.[structure.id]?.[discipline] ?? 0
+    });
+
+    return {
+      spaceFees: spaceFeesTotal,
+      serviceFees: serviceFeesTotal,
+      total: spaceFeesTotal + serviceFeesTotal
+    };
+  }, [hasConstructionAdminServices, trackedServices, calculateServiceFee, calculateDisciplineFee, constructionCosts]);
+
+  // Then add the memoized discipline totals calculation
+  const memoizedDisciplineTotals = useMemo(() => {
+    const totals: Record<string, Record<string, Record<string, Record<string, number>>>> = {};
+    
+    structures.forEach(structure => {
+      totals[structure.id] = {};
+      DISCIPLINES.forEach(discipline => {
+        totals[structure.id][discipline] = {
+          design: calculateDisciplineTotal(structure, discipline, 'design'),
+          construction: calculateDisciplineTotal(structure, discipline, 'construction')
+        };
+      });
+    });
+    
+    return totals;
+  }, [structures, DISCIPLINES, calculateDisciplineTotal]);
+
+  // Memoize the calculateProjectSummary function
+  const calculateProjectSummary = useCallback((): ProjectSummary => {
+    const designTotals = DISCIPLINES.reduce((acc, discipline) => {
+      acc[discipline] = structures.reduce((sum, structure) => {
+        const totals = calculateDisciplineTotal(structure, discipline, 'design');
+        return sum + (totals.total ?? 0);
+      }, 0);
       return acc;
     }, {} as Record<string, number>);
 
-    return totals;
-  };
+    const constructionTotals = DISCIPLINES.reduce((acc, discipline) => {
+      acc[discipline] = structures.reduce((sum, structure) => {
+        const totals = calculateDisciplineTotal(structure, discipline, 'construction');
+        return sum + (totals.total ?? 0);
+      }, 0);
+      return acc;
+    }, {} as Record<string, number>);
 
-  // Update renderTotalsRow to account for checkbox column
-  const renderTotalsRow = (structure: Structure, phase: 'design' | 'construction') => {
-    const totals = calculatePhaseTotals(structure, phase);
-    
-    return (
-      <div className="mt-4 border-t border-gray-200 pt-4">
-        <div className="grid grid-cols-6 gap-2 px-4">
-          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 font-medium">
-            <span className="text-sm">Total {phase === 'design' ? 'Design' : 'Construction'} Fees</span>
-          </div>
-          {DISCIPLINES.map(discipline => (
-            <div key={discipline} className="flex items-center gap-2">
-              <div className="flex-1 text-right font-medium">
-                {formatCurrency(totals[discipline])}
-              </div>
-              <div className="w-8" /> {/* Spacer for checkbox column */}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  // Update renderGrandTotals to use structure name in both places
-  const renderGrandTotals = (structure: Structure) => {
-    const designTotals = calculatePhaseTotals(structure, 'design');
-    const constructionTotals = calculatePhaseTotals(structure, 'construction');
-    
     const grandTotals = DISCIPLINES.reduce((acc, discipline) => {
       acc[discipline] = (designTotals[discipline] || 0) + (constructionTotals[discipline] || 0);
       return acc;
     }, {} as Record<string, number>);
 
-    // Calculate total sum of all discipline totals
-    const totalSum = Object.values(grandTotals).reduce((sum, value) => sum + value, 0);
+    const projectTotal = Object.values(grandTotals).reduce((sum: number, value: number) => sum + value, 0);
+
+    return {
+      designTotals,
+      constructionTotals,
+      grandTotals,
+      projectTotal
+    };
+  }, [DISCIPLINES, structures, calculateDisciplineTotal]);
+
+  // Add the design percentage handler before it's used
+  const handleDesignPercentageUpdate = useCallback((structureId: string, newPercentage: number) => {
+    // Update the structure's design percentage in the parent component
+    onFeeUpdate(structureId, '', '', '', { designPercentage: newPercentage } as Partial<Fee>, phase);
+  }, [onFeeUpdate, phase]);
+
+  // Update renderGrandTotals to handle the new totals structure
+  const renderGrandTotals = useCallback((structure: Structure) => {
+    const grandTotals = DISCIPLINES.reduce((acc, discipline) => {
+      const designTotal = memoizedDisciplineTotals[structure.id]?.[discipline]?.design?.total ?? 0;
+      const constructionTotal = memoizedDisciplineTotals[structure.id]?.[discipline]?.construction?.total ?? 0;
+      acc[discipline] = designTotal + constructionTotal;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const totalSum = Object.values(grandTotals).reduce((sum: number, value: number) => sum + value, 0);
     
     return (
       <>
@@ -595,65 +788,296 @@ export default function FixedFees({
         </div>
       </>
     );
-  };
+  }, [memoizedDisciplineTotals, formatCurrency, DISCIPLINES]);
 
-  // Add function to calculate project summary
-  const calculateProjectSummary = (): ProjectSummary => {
-    const designTotals = DISCIPLINES.reduce((acc, discipline) => {
-      acc[discipline] = structures.reduce((sum, structure) => {
-        const totals = calculatePhaseTotals(structure, 'design');
-        return sum + (totals[discipline] || 0);
-      }, 0);
-      return acc;
-    }, {} as Record<string, number>);
-
-    const constructionTotals = DISCIPLINES.reduce((acc, discipline) => {
-      acc[discipline] = structures.reduce((sum, structure) => {
-        const totals = calculatePhaseTotals(structure, 'construction');
-        return sum + (totals[discipline] || 0);
-      }, 0);
-      return acc;
-    }, {} as Record<string, number>);
-
-    const grandTotals = DISCIPLINES.reduce((acc, discipline) => {
-      acc[discipline] = (designTotals[discipline] || 0) + (constructionTotals[discipline] || 0);
-      return acc;
-    }, {} as Record<string, number>);
-
-    const projectTotal = Object.values(grandTotals).reduce((sum, value) => sum + value, 0);
-
-    return {
-      designTotals,
-      constructionTotals,
-      grandTotals,
-      projectTotal
-    };
-  };
-
-  // Add function to copy summary to clipboard
-  const copySummaryToClipboard = () => {
-    const summary = calculateProjectSummary();
-    const text = `Project Summary
-────────────────
-Design Phase Totals
-${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.designTotals[d])}`).join('\n')}
-Design Total: ${formatCurrency(Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0))}
-
-Construction Phase Totals
-${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.constructionTotals[d])}`).join('\n')}
-Construction Total: ${formatCurrency(Object.values(summary.constructionTotals).reduce((sum, val) => sum + val, 0))}
-
-Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
-
-    navigator.clipboard.writeText(text).then(() => {
-      console.log('Summary copied to clipboard');
-    }).catch(() => {
-      console.error('Failed to copy summary');
+  // Memoize the renderTrackedServices function
+  const renderTrackedServices = useCallback((structureId: string, phase: 'design' | 'construction') => {
+    console.log('=== renderTrackedServices ===');
+    console.log('Input:', { structureId, phase });
+    console.log('Structure ID comparison:', {
+      targetStructureId: structureId,
+      targetStructureIdType: typeof structureId,
+      trackedServices: trackedServices.map(s => ({
+        id: s.id,
+        name: s.service_name,
+        structureId: s.structureId,
+        structureIdType: typeof s.structureId,
+        matches: s.structureId === structureId,
+        exactComparison: `${s.structureId} === ${structureId}`,
+        length: s.structureId?.length,
+        targetLength: structureId?.length
+      }))
     });
-  };
 
-  // Update renderSummaryPanel with proper event handling
-  const renderSummaryPanel = () => {
+    // Filter services based on phase, structure, and construction admin status
+    const filteredServices = trackedServices.filter(service => {
+      const matchesPhase = service.phase === phase;
+      // Add detailed structure ID comparison logging
+      console.log('Structure ID comparison:', {
+        serviceStructureId: {
+          value: service.structureId,
+          type: typeof service.structureId,
+          length: service.structureId?.length,
+          chars: Array.from(service.structureId || '').map(c => c.charCodeAt(0))
+        },
+        targetStructureId: {
+          value: structureId,
+          type: typeof structureId,
+          length: structureId?.length,
+          chars: Array.from(structureId || '').map(c => c.charCodeAt(0))
+        },
+        exactComparison: `${service.structureId} === ${structureId}`,
+        strictEquality: service.structureId === structureId,
+        looseEquality: service.structureId == structureId,
+        normalizedComparison: service.structureId?.trim() === structureId?.trim()
+      });
+      const matchesStructure = service.structureId === structureId;
+      const notConstructionAdmin = !service.construction_admin;
+      const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
+
+      console.log('Service filter details:', {
+        service: {
+          id: service.id,
+          name: service.service_name,
+          phase: service.phase,
+          structureId: service.structureId,
+          targetStructureId: structureId,
+          construction_admin: service.construction_admin,
+          min_fee: service.min_fee,
+          rate: service.rate,
+          fee_increment: service.fee_increment
+        },
+        matches: matchesPhase && matchesStructure && notConstructionAdmin && hasFeeValues,
+        matchesPhase,
+        matchesStructure,
+        notConstructionAdmin,
+        hasFeeValues
+      });
+
+      return matchesPhase && matchesStructure && notConstructionAdmin && hasFeeValues;
+    });
+
+    console.log('Filtered services:', filteredServices.map(s => ({
+      id: s.id,
+      name: s.service_name,
+      phase: s.phase,
+      structureId: s.structureId,
+      construction_admin: s.construction_admin,
+      min_fee: s.min_fee,
+      rate: s.rate,
+      fee_increment: s.fee_increment,
+      default_included: s.default_included,
+      isActive: s.isActive,
+      discipline: s.discipline
+    })));
+
+    // If no services to display, return null
+    if (filteredServices.length === 0) {
+      console.log('No services to display after filtering');
+      return null;
+    }
+
+    // Group services by name
+    const servicesByName = filteredServices.reduce((acc, service) => {
+      if (!acc[service.service_name]) {
+        acc[service.service_name] = [];
+      }
+      acc[service.service_name].push(service);
+      return acc;
+    }, {} as Record<string, TrackedService[]>);
+
+    console.log('Grouped services:', Object.entries(servicesByName).map(([name, services]) => ({
+      name,
+      services: services.map(s => ({
+        id: s.id,
+        discipline: s.discipline,
+        default_included: s.default_included,
+        isActive: s.isActive
+      }))
+    })));
+
+    // Log the disciplines we're mapping over
+    console.log('Mapping over disciplines:', DISCIPLINES);
+
+    return (
+      <div className="mt-4 space-y-2">
+        {Object.entries(servicesByName).map(([serviceName, services]) => {
+          console.log('Rendering service group:', {
+            serviceName,
+            services: services.map(s => ({
+              id: s.id,
+              discipline: s.discipline,
+              default_included: s.default_included,
+              isActive: s.isActive
+            }))
+          });
+
+          return (
+            <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
+              {/* Description column */}
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
+                <Home className="w-3.5 h-3.5 text-primary/50" />
+                <span className="text-sm">{serviceName}</span>
+              </div>
+              
+              {/* Discipline columns */}
+              {DISCIPLINES.map(discipline => {
+                // Find the service for this discipline
+                const service = services.find(s => s.discipline === discipline);
+                
+                console.log('Rendering discipline column:', {
+                  serviceName,
+                  discipline,
+                  foundService: service ? {
+                    id: service.id,
+                    default_included: service.default_included,
+                    isActive: service.isActive,
+                    min_fee: service.min_fee,
+                    rate: service.rate,
+                    fee_increment: service.fee_increment
+                  } : 'No service found for this discipline'
+                });
+
+                if (!service) {
+                  return <div key={discipline} className="h-10" />;
+                }
+
+                const calculatedFee = calculateServiceFee(service, discipline, structureId);
+                const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
+                const hasCustomFee = service.customFee !== undefined && service.customFee !== calculatedFee;
+
+                console.log('Service fee calculation:', {
+                  serviceName,
+                  discipline,
+                  calculatedFee,
+                  displayFee,
+                  hasCustomFee,
+                  customFee: service.customFee
+                });
+
+                return (
+                  <div key={discipline} className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-2">
+                      {hasCustomFee && service.default_included && (
+                        <button
+                          type="button"
+                          className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
+                          title="Revert to calculated fee"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (onServiceFeeUpdate) {
+                              onServiceFeeUpdate(service.id, discipline, undefined, phase);
+                            }
+                          }}
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      )}
+                      <Input
+                        type="text"
+                        value={formatCurrency(displayFee)}
+                        onChange={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (onServiceFeeUpdate && service.default_included) {
+                            const value = e.target.value.replace(/[^0-9.-]+/g, '');
+                            const numericValue = parseFloat(value) || 0;
+                            onServiceFeeUpdate(service.id, discipline, numericValue, phase);
+                          }
+                        }}
+                        className={`text-right pr-2 bg-transparent ${!service.default_included ? 'text-gray-400' : ''}`}
+                        disabled={!service.default_included}
+                      />
+                    </div>
+                    <div className="w-8 flex items-center justify-center">
+                      <button
+                        type="button"
+                        className={`p-1.5 rounded-md transition-colors ${service.default_included ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
+                        title={service.default_included ? "Disable service" : "Enable service"}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (onServiceFeeUpdate) {
+                            // When disabling, set fee to undefined to trigger state change
+                            // When enabling, restore the calculated fee
+                            const newFee = service.default_included ? undefined : calculatedFee;
+                            onServiceFeeUpdate(service.id, discipline, newFee, phase);
+                          }
+                        }}
+                      >
+                        {service.default_included ? (
+                          <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            width="16" 
+                            height="16" 
+                            viewBox="0 0 24 24" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            strokeWidth="2" 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round" 
+                            className="w-4 h-4"
+                          >
+                            <path d="M20 6 9 17l-5-5" />
+                          </svg>
+                        ) : (
+                          <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            width="16" 
+                            height="16" 
+                            viewBox="0 0 24 24" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            strokeWidth="2" 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round" 
+                            className="w-4 h-4"
+                          >
+                            <path d="M5 12h14" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [trackedServices, DISCIPLINES, calculateServiceFee, formatCurrency, onServiceFeeUpdate]);
+
+  // Update renderTotalsRow to use memoized discipline totals
+  const renderTotalsRow = useCallback((structure: Structure, phase: 'design' | 'construction') => {
+    const totals = DISCIPLINES.reduce((acc, discipline) => {
+      const disciplineTotals = memoizedDisciplineTotals[structure.id]?.[discipline]?.[phase];
+      acc[discipline] = disciplineTotals?.total ?? 0;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    return (
+      <div className="mt-4 border-t border-gray-200 pt-4">
+        <div className="grid grid-cols-6 gap-2 px-4">
+          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 font-medium">
+            <span className="text-sm">Total {phase === 'design' ? 'Design' : 'Construction'} Fees</span>
+          </div>
+          {DISCIPLINES.map(discipline => (
+            <div key={discipline} className="flex items-center gap-2">
+              <div className="flex-1 text-right font-medium">
+                {formatCurrency(totals[discipline])}
+              </div>
+              <div className="w-8" /> {/* Spacer for checkbox column */}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }, [memoizedDisciplineTotals, formatCurrency, DISCIPLINES]);
+
+  // Memoize the renderSummaryPanel function
+  const renderSummaryPanel = useCallback(() => {
     const summary = calculateProjectSummary();
     const designTotal = Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0);
     const constructionTotal = Object.values(summary.constructionTotals).reduce((sum, val) => sum + val, 0);
@@ -739,7 +1163,26 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={copySummaryToClipboard}
+                    onClick={() => {
+                      const summary = calculateProjectSummary();
+                      const text = `Project Summary
+────────────────
+Design Phase Totals
+${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.designTotals[d])}`).join('\n')}
+Design Total: ${formatCurrency(Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0))}
+
+Construction Phase Totals
+${DISCIPLINES.map(d => `${d.padEnd(12)}: ${formatCurrency(summary.constructionTotals[d])}`).join('\n')}
+Construction Total: ${formatCurrency(Object.values(summary.constructionTotals).reduce((sum, val) => sum + val, 0))}
+
+Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
+
+                      navigator.clipboard.writeText(text).then(() => {
+                        console.log('Summary copied to clipboard');
+                      }).catch(() => {
+                        console.error('Failed to copy summary');
+                      });
+                    }}
                     className="flex items-center gap-2"
                   >
                     <Copy className="h-4 w-4" />
@@ -760,6 +1203,194 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
           </div>
         )}
       </div>
+    );
+  }, [calculateProjectSummary, formatCurrency, DISCIPLINES, isSummaryOpen]);
+
+  const renderPhasePercentages = (structure: Structure) => {
+    const designPercentage = structure.designPercentage ?? 80;
+    const constructionPercentage = 100 - designPercentage;
+
+    return (
+      <div className="flex items-center gap-4 mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Design:</span>
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            value={designPercentage}
+            onChange={(e) => {
+              const newPercentage = Math.min(100, Math.max(0, Number(e.target.value)));
+              handleDesignPercentageUpdate(structure.id, newPercentage);
+            }}
+            className="w-20 text-right"
+          />
+          <span className="text-sm text-primary">%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Construction:</span>
+          <span className="text-sm text-primary">{constructionPercentage}%</span>
+        </div>
+      </div>
+    );
+  };
+
+  // Add helper function to get service fees for a discipline
+  const getServiceFeesForDiscipline = (structureId: string, discipline: string): number => {
+    const fees = trackedServices
+      .filter((service): service is TrackedService & { min_fee: number } => 
+        service.default_included &&
+        service.min_fee !== null && 
+        service.discipline === discipline
+      )
+      .reduce((sum, service) => sum + service.min_fee, 0);
+    
+    return fees;
+  };
+
+  // Add helper function to determine if spaces should be shown for a discipline
+  const shouldShowSpacesForDiscipline = (discipline: string): boolean => {
+    if (phase === 'design') return true; // Always show spaces in design phase
+    
+    // In construction phase, only show spaces if there are construction admin services
+    return hasConstructionAdminServices;
+  };
+
+  // Update the renderSpacesForDiscipline function to properly handle return type
+  const renderSpacesForDiscipline = (structure: Structure, discipline: string): JSX.Element[] => {
+    if (!shouldShowSpacesForDiscipline(discipline)) return [];
+
+    return structure.levels.flatMap(level => 
+      level.spaces.map((space: Space): JSX.Element | null => {
+        // Find the fee regardless of active state
+        const fee = space.totalConstructionCosts.find((f: Fee) => f.discipline === discipline);
+        if (!fee) return null;
+
+        // Calculate the current fee value regardless of active state
+        const tempStructure: Structure = {
+          ...structure,
+          levels: [{
+            ...level,
+            spaces: [space]
+          }]
+        };
+        const { fee: calculatedFee } = memoizedCalculateFee(tempStructure, discipline, phase);
+        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
+        const displayFee = fee?.isActive && fee.designFee !== undefined 
+          ? fee.designFee 
+          : calculatedFee;
+        // Only show revert icon if this specific fee has been manually edited and is active
+        const hasCustomFee = fee?.designFee !== undefined && 
+                            fee.designFee !== calculatedFee && 
+                            fee.isActive;
+        
+        return (
+          <div key={space.id} className="pl-4 mt-1 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600 dark:text-gray-400">{space.name}</span>
+              <span className={`font-medium ${!fee.isActive ? 'text-gray-400' : ''}`}>
+                {formatCurrency(displayFee)}
+              </span>
+            </div>
+          </div>
+        );
+      }).filter((element): element is JSX.Element => element !== null)
+    );
+  };
+
+  // Update handleFeeToggle to only recalculate affected discipline
+  const handleFeeToggle = useCallback((
+    structureId: string,
+    levelId: string,
+    spaceId: string,
+    feeId: string,
+    isActive: boolean,
+    feePhase: 'design' | 'construction'
+  ) => {
+    // Find the fee to get its discipline
+    const structure = structures.find(s => s.id === structureId);
+    if (!structure) return;
+
+    const level = structure.levels.find(l => l.id === levelId);
+    if (!level) return;
+
+    const space = level.spaces.find(s => s.id === spaceId);
+    if (!space) return;
+
+    const fee = space.totalConstructionCosts.find(f => f.id === feeId);
+    if (!fee) return;
+
+    console.log('FixedFees: handleFeeToggle called with:', {
+      structureId,
+      levelId,
+      spaceId,
+      feeId,
+      isActive,
+      feePhase,
+      currentFee: fee,
+      spaceName: space.name,
+      discipline: fee.discipline
+    });
+
+    // Use the dedicated toggle handler if available
+    if (onDisciplineFeeToggle) {
+      console.log('FixedFees: Calling onDisciplineFeeToggle');
+      onDisciplineFeeToggle(structureId, levelId, spaceId, feeId, isActive);
+    } else {
+      // Fallback to onFeeUpdate but only update isActive
+      console.log('FixedFees: Falling back to onFeeUpdate');
+      onFeeUpdate(structureId, levelId, spaceId, feeId, { isActive }, feePhase);
+    }
+
+    // Log in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('FixedFees: Toggled fee:', {
+        structureId,
+        levelId,
+        spaceId,
+        feeId,
+        discipline: fee.discipline,
+        isActive,
+        phase: feePhase,
+        spaceName: space.name
+      });
+    }
+  }, [structures, onDisciplineFeeToggle, onFeeUpdate]);
+
+  // Add effect to log when structures prop changes
+  useEffect(() => {
+    console.log('FixedFees: structures prop changed:', {
+      structures: structures.map(s => ({
+        id: s.id,
+        name: s.name,
+        levels: s.levels.map(l => ({
+          id: l.id,
+          name: l.name,
+          spaces: l.spaces.map(sp => ({
+            id: sp.id,
+            name: sp.name,
+            fees: sp.totalConstructionCosts.map(f => ({
+              id: f.id,
+              discipline: f.discipline,
+              isActive: f.isActive
+            }))
+          }))
+        }))
+      }))
+    });
+  }, [structures]);
+
+  // Helper function to get manual fee override for a given structure, discipline, and optional space
+  // Usage: getManualOverride(structureId, discipline, spaceId)
+  const getManualOverride = (
+    structureId: string,
+    discipline: string,
+    spaceId?: string
+  ): ManualFeeOverride | undefined => {
+    return manualFeeOverrides.find(o =>
+      o.structureId === structureId &&
+      o.discipline === discipline &&
+      (!spaceId || o.spaceId === spaceId)
     );
   };
 
@@ -801,75 +1432,79 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                       <div key={discipline} className="h-10" />
                     ))}
                   </div>
-                  {level.spaces.map(space => (
-                    <div key={`design-${space.id}`} className="space-y-2">
-                      <div className="grid grid-cols-6 gap-2 px-4">
-                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                          <Home className="w-3.5 h-3.5 text-primary/50" />
-                          <span className="text-sm font-medium">{space.name}</span>
-                        </div>
-                        {DISCIPLINES.map(discipline => {
-                          const fee = space.fees.find(f => f.discipline === discipline);
-                          // Create a temporary structure with just this space to calculate its fee
-                          const tempStructure: Structure = {
-                            ...structure,
-                            levels: [{
-                              ...level,
-                              spaces: [space]
-                            }]
-                          };
-                          // Calculate design fee for this specific space
-                          const { fee: calculatedDesignFee } = onCalculateFee(tempStructure, discipline, 'design');
-                          const displayFee = fee?.isActive ? (fee.designFee ?? calculatedDesignFee) : 0;
-                          
-                          return (
-                            <div key={discipline} className="flex items-center gap-2">
-                              <div className="flex-1 flex items-center gap-2">
-                                {fee?.designFee !== undefined && (
-                                  <button
-                                    type="button"
-                                    className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
-                                    title="Revert to calculated fee"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (onFeeUpdate && fee) {
-                                        onFeeUpdate(structure.id, level.id, space.id, fee.id, { designFee: undefined }, 'design');
-                                      }
-                                    }}
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                <Input
-                                  type="text"
-                                  value={formatCurrency(displayFee)}
-                                  onChange={(e) => {
+                  {level.spaces.map((space: Space) => (
+                    <div key={`design-${space.id}`} className="grid grid-cols-6 gap-2 px-4">
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                        <Home className="w-3.5 h-3.5 text-primary/50" />
+                        <span className="text-sm font-medium">{space.name}</span>
+                      </div>
+                      {DISCIPLINES.map(discipline => {
+                        const fee = space.totalConstructionCosts.find((f: Fee) => f.discipline === discipline);
+                        const tempStructure: Structure = {
+                          ...structure,
+                          levels: [{
+                            ...level,
+                            spaces: [space]
+                          }]
+                        };
+                        const { fee: calculatedDesignFee } = memoizedCalculateFee(tempStructure, discipline, 'design');
+                        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
+                        const displayFee = fee?.isActive && fee.designFee !== undefined 
+                          ? fee.designFee 
+                          : calculatedDesignFee;
+                        // Only show revert icon if this specific fee has been manually edited and is active
+                        const hasCustomFee = fee?.designFee !== undefined && 
+                                            fee.designFee !== calculatedDesignFee && 
+                                            fee.isActive;
+                        
+                        return (
+                          <div key={discipline} className="flex items-center gap-2">
+                            <div className="flex-1 flex items-center gap-2">
+                              {hasCustomFee && (
+                                <button
+                                  type="button"
+                                  className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
+                                  title="Revert to calculated fee"
+                                  onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    if (onFeeUpdate && fee) {
-                                      const value = e.target.value.replace(/[^0-9.-]+/g, '');
-                                      const numericValue = parseFloat(value) || 0;
-                                      onFeeUpdate(structure.id, level.id, space.id, fee.id, { designFee: numericValue }, 'design');
+                                    if (onFeeUpdate) {
+                                      onFeeUpdate(structure.id, level.id, space.id, fee.id, { designFee: undefined }, 'design');
                                     }
                                   }}
-                                  className="text-right pr-2 bg-transparent"
-                                />
-                              </div>
-                              <div className="w-8 flex items-center justify-center">
-                                {fee && (
-                                  <button
-                                    type="button"
-                                    className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
-                                    title={fee.isActive ? "Disable discipline" : "Enable discipline"}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (onFeeUpdate) {
-                                        onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive }, 'design');
-                                      }
-                                    }}
-                                  >
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                              )}
+                              <Input
+                                type="text"
+                                value={formatCurrency(displayFee)}
+                                onChange={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (onFeeUpdate && fee) {
+                                    const value = e.target.value.replace(/[^0-9.-]+/g, '');
+                                    const numericValue = parseFloat(value) || 0;
+                                    onFeeUpdate(structure.id, level.id, space.id, fee.id, { designFee: numericValue }, 'design');
+                                  }
+                                }}
+                                className={`text-right pr-2 bg-transparent ${!fee?.isActive ? 'text-gray-400' : ''}`}
+                                disabled={!fee?.isActive}
+                              />
+                            </div>
+                            <div className="w-8 flex items-center justify-center">
+                              {fee && (
+                                <button
+                                  type="button"
+                                  className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
+                                  title={fee.isActive ? "Disable discipline" : "Enable discipline"}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleFeeToggle(structure.id, level.id, space.id, fee.id, !fee.isActive, 'design');
+                                  }}
+                                >
+                                  {fee.isActive ? (
                                     <svg 
                                       xmlns="http://www.w3.org/2000/svg" 
                                       width="16" 
@@ -879,18 +1514,31 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                                       stroke="currentColor" 
                                       strokeWidth="2" 
                                       strokeLinecap="round" 
-                                      strokeLinejoin="round" 
-                                      className="w-4 h-4"
+                                      strokeLinejoin="round"
                                     >
-                                      <path d="M20 6 9 17l-5-5" />
+                                      <path d="M20 6L9 17l-5-5" />
                                     </svg>
-                                  </button>
-                                )}
-                              </div>
+                                  ) : (
+                                    <svg 
+                                      xmlns="http://www.w3.org/2000/svg" 
+                                      width="16" 
+                                      height="16" 
+                                      viewBox="0 0 24 24" 
+                                      fill="none" 
+                                      stroke="currentColor" 
+                                      strokeWidth="2" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M5 12h14" />
+                                    </svg>
+                                  )}
+                                </button>
+                              )}
                             </div>
-                          );
-                        })}
-                      </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -933,96 +1581,69 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                       <div key={discipline} className="h-10" />
                     ))}
                   </div>
-                  {level.spaces.map(space => (
-                    <div key={`construction-${space.id}`} className="space-y-2">
-                      <div className="grid grid-cols-6 gap-2 px-4">
-                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                          <Home className="w-3.5 h-3.5 text-primary/50" />
-                          <span className="text-sm font-medium">{space.name}</span>
-                        </div>
-                        {DISCIPLINES.map(discipline => {
-                          const fee = space.fees.find(f => f.discipline === discipline);
-                          // Create a temporary structure with just this space to calculate its fee
-                          const tempStructure: Structure = {
-                            ...structure,
-                            levels: [{
-                              ...level,
-                              spaces: [space]
-                            }]
-                          };
-                          // Calculate construction fee for this specific space
-                          const { fee: calculatedConstructionFee } = onCalculateFee(tempStructure, discipline, 'construction');
-                          const displayFee = fee?.isActive ? (fee.constructionFee ?? calculatedConstructionFee) : 0;
-                          
-                          return (
-                            <div key={discipline} className="flex items-center gap-2">
-                              <div className="flex-1 flex items-center gap-2">
-                                {fee?.constructionFee !== undefined && (
-                                  <button
-                                    type="button"
-                                    className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-primary"
-                                    title="Revert to calculated fee"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (onFeeUpdate && fee) {
-                                        onFeeUpdate(structure.id, level.id, space.id, fee.id, { constructionFee: undefined }, 'construction');
-                                      }
-                                    }}
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                <Input
-                                  type="text"
-                                  value={formatCurrency(displayFee)}
-                                  onChange={(e) => {
+                  {level.spaces.map((space: Space) => (
+                    <div key={`construction-${space.id}`} className="grid grid-cols-6 gap-2 px-4">
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                        <Home className="w-3.5 h-3.5 text-primary/50" />
+                        <span className="text-sm font-medium">{space.name}</span>
+                      </div>
+                      {DISCIPLINES.map(discipline => {
+                        const fee = space.totalConstructionCosts.find((f: Fee) => f.discipline === discipline);
+                        const tempStructure: Structure = {
+                          ...structure,
+                          levels: [{
+                            ...level,
+                            spaces: [space]
+                          }]
+                        };
+                        const { fee: calculatedConstructionFee } = memoizedCalculateFee(tempStructure, discipline, 'construction');
+                        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
+                        const displayFee = fee?.isActive && fee?.constructionFee !== undefined 
+                          ? fee.constructionFee 
+                          : calculatedConstructionFee;
+                        // Only show revert icon if this specific fee has been manually edited and is active
+                        const hasCustomFee = fee?.constructionFee !== undefined && 
+                                            fee?.constructionFee !== calculatedConstructionFee && 
+                                            fee?.isActive;
+                        
+                        return (
+                          <div key={discipline} className="flex items-center gap-2">
+                            <div className="flex-1 flex items-center gap-2">
+                              {hasCustomFee && (
+                                <button
+                                  type="button"
+                                  className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
+                                  title="Revert to calculated fee"
+                                  onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
                                     if (onFeeUpdate && fee) {
-                                      const value = e.target.value.replace(/[^0-9.-]+/g, '');
-                                      const numericValue = parseFloat(value) || 0;
-                                      onFeeUpdate(structure.id, level.id, space.id, fee.id, { constructionFee: numericValue }, 'construction');
+                                      onFeeUpdate(structure.id, level.id, space.id, fee.id, { constructionFee: undefined }, 'construction');
                                     }
                                   }}
-                                  className="text-right pr-2 bg-transparent"
-                                />
-                              </div>
-                              <div className="w-8 flex items-center justify-center">
-                                {fee && (
-                                  <button
-                                    type="button"
-                                    className={`p-1.5 rounded-md transition-colors ${fee.isActive ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-gray-400 hover:bg-gray-100'}`}
-                                    title={fee.isActive ? "Disable discipline" : "Enable discipline"}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (onFeeUpdate) {
-                                        onFeeUpdate(structure.id, level.id, space.id, fee.id, { isActive: !fee.isActive }, 'construction');
-                                      }
-                                    }}
-                                  >
-                                    <svg 
-                                      xmlns="http://www.w3.org/2000/svg" 
-                                      width="16" 
-                                      height="16" 
-                                      viewBox="0 0 24 24" 
-                                      fill="none" 
-                                      stroke="currentColor" 
-                                      strokeWidth="2" 
-                                      strokeLinecap="round" 
-                                      strokeLinejoin="round" 
-                                      className="w-4 h-4"
-                                    >
-                                      <path d="M20 6 9 17l-5-5" />
-                                    </svg>
-                                  </button>
-                                )}
-                              </div>
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                              )}
+                              <Input
+                                type="text"
+                                value={formatCurrency(displayFee)}
+                                onChange={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (onFeeUpdate && fee) {
+                                    const value = e.target.value.replace(/[^0-9.-]+/g, '');
+                                    const numericValue = parseFloat(value) || 0;
+                                    onFeeUpdate(structure.id, level.id, space.id, fee.id, { constructionFee: numericValue }, 'construction');
+                                  }
+                                }}
+                                className={`text-right pr-2 bg-transparent ${!fee?.isActive ? 'text-gray-400' : ''}`}
+                                disabled={!fee?.isActive}
+                              />
                             </div>
-                          );
-                        })}
-                      </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
