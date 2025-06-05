@@ -1018,11 +1018,11 @@ const FlexFees: React.FC = () => {
 
       {/* Summary Section */}
       {isSummaryExpanded && (
-        <div className="mb-6 p-4 bg-muted/5 rounded-lg border border-[#4DB6AC]/20">
+        <div className="mb-6 bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
           <div className="space-y-4">
-            {categories.map(category => (
-              <div key={category.id} className="space-y-2">
-                <div className="flex items-center justify-between">
+            {categories.map((category, index) => (
+              <div key={category.id} className={`space-y-2 ${index % 2 === 0 ? 'bg-white dark:bg-[#374151]' : 'bg-muted/5 dark:bg-[#374151]/50'} rounded-lg p-4`}>
+                <div className="flex items-center justify-between border-b border-[#4DB6AC]/20 pb-2">
                   <h3 className="font-medium text-gray-700 dark:text-[#E5E7EB]">{category.name}</h3>
                   <div className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">
                     ${formatCurrency(calculateCategoryTotal(category))}
@@ -1030,13 +1030,12 @@ const FlexFees: React.FC = () => {
                 </div>
                 <div className="pl-4 space-y-2">
                   {category.fees.map(fee => (
-                    <div key={fee.id} className="space-y-1">
+                    <div key={fee.id} className="space-y-1 border-b border-[#4DB6AC]/10 pb-2">
                       <div className="flex items-center justify-between">
                         <div className="text-sm text-gray-600 dark:text-[#9CA3AF]">{fee.name}</div>
                         <div className="text-sm text-gray-600 dark:text-[#9CA3AF]">
                           {fee.subcomponents?.length ? (
                             <div className="flex flex-col items-end">
-                              <div className="text-xs text-gray-500">Subtotal:</div>
                               <div>${formatCurrency(calculateSubcomponentsTotal(fee.subcomponents))}</div>
                             </div>
                           ) : fee.type === 'simple' ? (
@@ -1047,9 +1046,9 @@ const FlexFees: React.FC = () => {
                         </div>
                       </div>
                       {fee.subcomponents?.map(sub => (
-                        <div key={sub.id} className="pl-4 flex items-center justify-between">
-                          <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">{sub.name}</div>
-                          <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
+                        <div key={sub.id} className="pl-4 flex items-center justify-between border-l-2 border-[#4DB6AC]/20 ml-2">
+                          <div className="text-sm text-gray-500 dark:text-[#9CA3AF] italic">{sub.name}</div>
+                          <div className="text-sm text-gray-400 dark:text-[#6B7280] italic">
                             {sub.type === 'simple' ? (
                               <div>${formatCurrency((sub.amount || 0) * (sub.quantity || 1))}</div>
                             ) : sub.type === 'hourly' ? (
@@ -1064,7 +1063,7 @@ const FlexFees: React.FC = () => {
               </div>
             ))}
             {/* Grand Total */}
-            <div className="pt-4 mt-4 border-t border-[#4DB6AC]/20">
+            <div className="pt-4 mt-4 border-t border-[#4DB6AC]">
               <div className="flex items-center justify-between">
                 <div className="font-semibold text-gray-700 dark:text-[#E5E7EB]">Grand Total</div>
                 <div className="font-semibold text-gray-700 dark:text-[#E5E7EB]">
@@ -1169,8 +1168,11 @@ const FlexFees: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Column 2: Empty space (removed category total) */}
+                  {/* Column 2: Category total */}
                   <div className="min-w-[120px] flex justify-end">
+                    <div className="text-sm font-medium text-gray-700 dark:text-[#E5E7EB]">
+                      ${formatCurrency(calculateCategoryTotal(category))}
+                    </div>
                   </div>
 
                   {/* Column 3: Action buttons */}
@@ -1599,8 +1601,7 @@ const FlexFees: React.FC = () => {
                                     </div>
                                   ) : fee.subcomponents?.length ? (
                                     <div className="flex flex-col items-end">
-                                      <div className="text-xs text-gray-500">{fee.name} Subtotal:</div>
-                                      <div className="font-semibold">${formatCurrency(calculateSubcomponentsTotal(fee.subcomponents))}</div>
+                                      <div>${formatCurrency(calculateSubcomponentsTotal(fee.subcomponents))}</div>
                                     </div>
                                   ) : null}
                                 </div>
