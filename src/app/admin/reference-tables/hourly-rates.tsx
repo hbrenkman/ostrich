@@ -91,6 +91,7 @@ export function HourlyRatesTable({ showContainer = true }: HourlyRatesTableProps
   const [error, setError] = useState<Error | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleSearchQuery, setRoleSearchQuery] = useState('');
+  const [selectedDisciplineFilter, setSelectedDisciplineFilter] = useState<number | 'all'>('all');
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedRate, setSelectedRate] = useState<HourlyRate | null>(null);
   const [editingRate, setEditingRate] = useState<Partial<HourlyRate>>({});
@@ -574,6 +575,11 @@ export function HourlyRatesTable({ showContainer = true }: HourlyRatesTableProps
     }
   };
 
+  // Add filtered disciplines computation
+  const filteredDisciplines = selectedDisciplineFilter === 'all' 
+    ? disciplines 
+    : disciplines.filter(d => d.id === selectedDisciplineFilter);
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -604,8 +610,42 @@ export function HourlyRatesTable({ showContainer = true }: HourlyRatesTableProps
         <div className="grid grid-cols-2 gap-6">
           {/* Disciplines Panel */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">Disciplines</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div className="flex items-center gap-4 flex-1">
+                <CardTitle className="text-lg">Disciplines</CardTitle>
+                <div className="w-[200px]">
+                  <Select
+                    value={selectedDisciplineFilter === 'all' ? 'all' : selectedDisciplineFilter.toString()}
+                    onValueChange={(value) => setSelectedDisciplineFilter(value === 'all' ? 'all' : Number(value))}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue placeholder="Filter disciplines">
+                        {selectedDisciplineFilter === 'all' 
+                          ? 'All Disciplines' 
+                          : disciplines.find(d => d.id === selectedDisciplineFilter)?.name || 'Select discipline'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Disciplines</SelectItem>
+                      {disciplines.map((discipline) => (
+                        <SelectItem key={discipline.id} value={discipline.id.toString()}>
+                          {discipline.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedDisciplineFilter !== 'all' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedDisciplineFilter('all')}
+                    className="h-8 px-2 text-muted-foreground hover:text-primary"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
               <div
                 onClick={() => setIsNewDisciplineDialogOpen(true)}
                 className="cursor-pointer text-muted-foreground hover:text-primary transition-colors"
@@ -614,13 +654,15 @@ export function HourlyRatesTable({ showContainer = true }: HourlyRatesTableProps
               </div>
             </CardHeader>
             <CardContent>
-              {disciplines.length === 0 ? (
+              {filteredDisciplines.length === 0 ? (
                 <div className="text-center text-muted-foreground py-4">
-                  No disciplines found
+                  {selectedDisciplineFilter === 'all' 
+                    ? 'No disciplines found' 
+                    : 'No disciplines match the current filter'}
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {disciplines.map((discipline) => (
+                  {filteredDisciplines.map((discipline) => (
                     <div
                       key={discipline.id}
                       className="border rounded-lg p-4 bg-card"
