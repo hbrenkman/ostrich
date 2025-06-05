@@ -35,6 +35,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { SpaceDialog } from './space-dialog';
 import { createClient } from '@supabase/supabase-js'
 import FixedFees from './components/FixedFees';
+import FlexFees from './components/FlexFees';
 import { Space, Level, Structure, ManualFeeOverride, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
 
 const supabase = createClient(
@@ -4186,6 +4187,10 @@ export default function EditProposalPage() {
                           </div>
                         </div>
                       </div>
+
+        <div className="mt-8">
+          <FlexFees />
+        </div>
 
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
