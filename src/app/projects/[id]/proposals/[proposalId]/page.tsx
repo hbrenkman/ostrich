@@ -12,7 +12,7 @@
 "use client";
 
 import React, { useState, useEffect, DragEvent, useRef, useCallback, useMemo } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical, ChevronDown, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ import { SpaceDialog } from './space-dialog';
 import { createClient } from '@supabase/supabase-js'
 import FixedFees from './components/FixedFees';
 import FlexFees from './components/FlexFees';
-import { Space, Level, Structure, ManualFeeOverride, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
+import { Space, Level, Structure, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
 import { EngineeringServicesManager } from './components/EngineeringServicesManager';
 
 const supabase = createClient(
@@ -121,7 +121,6 @@ interface ProposalFormData {
   designFeeScale: FeeScale[];
   duplicateStructureRates: FeeDuplicateStructure[];
   trackedServices: TrackedService[];
-  manualFeeOverrides: ManualFeeOverride[];
   dbEngineeringServices: EngineeringService[];
   engineeringAdditionalServices: EngineeringAdditionalServices[];
   phase: 'design' | 'construction';
@@ -160,15 +159,6 @@ interface FeeDuplicateStructure {
   rate: number;
 }
 
-// Add new interfaces for manual fee overrides
-interface ManualFeeOverride {
-  id: string;
-  structureId: string;
-  levelId: string;
-  spaceId: string;
-  discipline: string;
-}
-
 interface TrackedService {
   id: string;
   serviceId: string;
@@ -179,43 +169,22 @@ interface TrackedService {
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
-  phase: 'design' | 'construction';
+  phase: 'design' | 'construction' | null;  // Allow null for phase
   customFee?: number;
   isConstructionAdmin: boolean;
   fee: number;
   structureId: string;
   levelId: string;
   spaceId: string;
-  isIncluded: boolean;  // Renamed from isActive
-}
-
-// Add interface for tracked services
-interface TrackedService {
-  id: string;
-  serviceId: string;
-  service_name: string;
-  name: string;
-  discipline: string;
-  isDefaultIncluded: boolean;
-  min_fee: number | null;
-  rate: number | null;
-  fee_increment: number | null;
-  phase: 'design' | 'construction';
-  customFee?: number;
-  isConstructionAdmin: boolean;
-  fee: number;
-  structureId: string;
-  levelId: string;
-  spaceId: string;
-  isIncluded: boolean;  // Renamed from isActive
+  isIncluded: boolean;
 }
 
 // Add DebugState type
 interface DebugState {
   lastAction: string | null;
-  serviceId: string | null;
-  oldIncluded: boolean | null;
-  newIncluded: boolean | null;
+    serviceId: string | null;
+    oldIncluded: boolean | null;
+    newIncluded: boolean | null;
   timestamp: number;
   error: string | null;
 }
@@ -252,6 +221,19 @@ const contacts: Contact[] = [
   },
 ];
 
+// Add UUID generation fallback
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback UUID generation
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 export default function EditProposalPage() {
   const router = useRouter();
   const params = useParams();
@@ -279,9 +261,8 @@ export default function EditProposalPage() {
   const [editingSpace, setEditingSpace] = useState<Space | null>(null);
   const [duplicateStructureRates, setDuplicateStructureRates] = useState<FeeDuplicateStructure[]>([]);
   const [collapsedDuplicates, setCollapsedDuplicates] = useState<Set<string>>(new Set());
-  const [manualFeeOverrides, setManualFeeOverrides] = useState<ManualFeeOverride[]>([]);
   const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringService[]>([]);
-  const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(true);
+  const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(false);
   const [isLoadingAdditionalServices, setIsLoadingAdditionalServices] = useState(true);
   const [phase, setPhase] = useState<'design' | 'construction'>('design');
   const [designFeeScale, setDesignFeeScale] = useState<FeeScale[]>([]);
@@ -300,16 +281,15 @@ export default function EditProposalPage() {
     constructionSupportBudget: '',
     status: 'Pending',
     structures: [],
-    costIndex: null,
-    resCheckItems: [],
-    nestedFeeItems: [],
-    designFeeScale: [],
-    duplicateStructureRates: [],
+    dbEngineeringServices: [],  // Initialize as empty array
     trackedServices: [],
-    manualFeeOverrides: [],
-    dbEngineeringServices: [],
-    engineeringAdditionalServices: [],
-    phase: 'design'
+    engineeringAdditionalServices: [],  // Use correct property name
+    designFeeScale: [],
+    duplicateStructureRates: [],  // Add back this required property
+    costIndex: null,  // Add back this required property
+    resCheckItems: [],  // Add back this required property
+    nestedFeeItems: [],  // Add back this required property
+    phase: 'design'  // Add back this required property
   });
 
   // Add a ref to track if we're opening the dialog
@@ -383,40 +363,6 @@ export default function EditProposalPage() {
     // console.log('Project cost index:', project?.costIndex);
     // console.log('Proposal cost index:', proposal.costIndex);
   }, [project?.costIndex, proposal.costIndex]);
-
-  useEffect(() => {
-    const fetchDesignFeeScale = async () => {
-      try {
-        // console.log('Fetching design fee scale from frontend...');
-        const response = await fetch('/api/design-fee-scale');
-        if (!response.ok) {
-          console.error('Failed to fetch design fee scale:', response.status, response.statusText);
-          throw new Error('Failed to fetch design fee scale');
-        }
-        const data = await response.json();
-        // console.log('Received design fee scale data:', data);
-        if (!data || data.length === 0) {
-          console.warn('No design fee scale data received from API');
-        }
-        setDesignFeeScale(data);
-      } catch (error) {
-        console.error('Error fetching design fee scale:', error);
-      }
-    };
-
-    fetchDesignFeeScale();
-  }, []);
-
-  // Add useEffect to update proposal state when designFeeScale changes
-  useEffect(() => {
-    if (designFeeScale.length > 0) {
-      console.log('Updating proposal state with design fee scale data:', designFeeScale);
-      setProposal(prev => ({
-        ...prev,
-        designFeeScale
-      }));
-    }
-  }, [designFeeScale]);
 
   // Remove or consolidate these logs in fetchEngineeringAdditionalServices
   const fetchEngineeringAdditionalServices = async () => {
@@ -564,36 +510,49 @@ export default function EditProposalPage() {
 
   // Add useEffect to fetch engineering standard services
   useEffect(() => {
-    const fetchEngineeringStandardServices = async () => {
+    const loadServices = async () => {
+      setIsLoadingStandardServices(true);
       try {
-        console.log('Fetching engineering standard services...');
         const response = await fetch('/api/engineering-services');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch engineering standard services: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error('Failed to fetch engineering services');
         const data = await response.json();
-        console.log('Engineering standard services data:', data);
-        if (data.services) {
-          const servicesWithValidPhase = data.services.map((service: any) => ({
-            ...service,
-            phase: service.phase === 'design' || service.phase === 'construction' ? service.phase : 'design'
-          }));
-          setEngineeringStandardServices(servicesWithValidPhase);
-          console.log("fetchEngineeringStandardServices: loaded services:", servicesWithValidPhase);
-        } else {
-          console.error('No services array in response:', data);
-          setEngineeringStandardServices([]);
+        console.log('API response:', data); // Add logging to see the response format
+        if (!data.services || !Array.isArray(data.services)) {
+          throw new Error('Invalid response format from API');
         }
+        setEngineeringStandardServices(data.services);
+        // Update proposal state immediately after loading services
+        setProposal(prev => ({
+          ...prev,
+          dbEngineeringServices: data.services
+        }));
       } catch (error) {
-        console.error('Error fetching engineering standard services:', error);
+        console.error('Error loading engineering services:', error);
+        // Set empty arrays on error to prevent undefined values
         setEngineeringStandardServices([]);
+        setProposal(prev => ({
+          ...prev,
+          dbEngineeringServices: []
+        }));
       } finally {
         setIsLoadingStandardServices(false);
       }
     };
 
-    fetchEngineeringStandardServices();
+    if (engineeringStandardServices.length === 0) {
+      loadServices();
+    }
   }, []);
+
+  // Update the proposal state when services are loaded
+  useEffect(() => {
+    if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
+      setProposal(prev => ({
+        ...prev,
+        dbEngineeringServices: engineeringStandardServices
+      }));
+    }
+  }, [isLoadingStandardServices, engineeringStandardServices]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -716,6 +675,12 @@ export default function EditProposalPage() {
     e.stopPropagation();
 
     try {
+      // Check if engineering services are loaded
+      if (!proposal.dbEngineeringServices || proposal.dbEngineeringServices.length === 0) {
+        console.error('Engineering services not loaded yet');
+        throw new Error('Engineering services not loaded yet. Please try again in a moment.');
+      }
+
       const data = e.dataTransfer.getData('application/json');
       if (!data) {
         throw new Error('No data received in drop event');
@@ -745,17 +710,17 @@ export default function EditProposalPage() {
           discipline: "Mechanical",
           hvacSystem: "VAV System",
           levels: [{
-            id: crypto.randomUUID(),
-            name: "Level 0",
-            floorArea: "0",
+        id: generateUUID(),  // Use the fallback function
+        name: "Level 0",
+        floorArea: "0",
             description: "Default Level",
-            spaceType: "Office",
-            discipline: "Mechanical",
-            hvacSystem: "VAV System",
-            spaces: []
+        spaceType: "Office",
+        discipline: "Mechanical",
+        hvacSystem: "VAV System",
+        spaces: []
           }],
-          designFeeRate: 0,
-          constructionSupportEnabled: false,
+        designFeeRate: 0,
+        constructionSupportEnabled: false,
           designPercentage: 80
         };
 
@@ -791,7 +756,7 @@ export default function EditProposalPage() {
         // Create tracked services for both phases
         for (const service of [...designServices, ...constructionServices]) {
           const newService = {
-            id: crypto.randomUUID(),
+            id: generateUUID(),  // Use the fallback function
             serviceId: service.id,
             service_name: service.service_name,
             name: service.service_name,
@@ -827,8 +792,8 @@ export default function EditProposalPage() {
           structureName: newStructure.name,
           defaultLevelId: newStructure.levels[0].id,
           servicesCount: newTrackedServices.length,
-          designServicesCount: designServices.length,
-          constructionServicesCount: constructionServices.length,
+        designServicesCount: designServices.length,
+        constructionServicesCount: constructionServices.length,
           allServices: newTrackedServices.map(s => ({
             id: s.id,
             name: s.service_name,
@@ -839,12 +804,12 @@ export default function EditProposalPage() {
         });
 
         // Update the proposal state with both the new structure and its tracked services
-        setProposal(prev => {
+      setProposal(prev => {
           const updatedProposal = {
-            ...prev,
-            structures: [...prev.structures, newStructure],
-            trackedServices: [...prev.trackedServices, ...newTrackedServices]
-          };
+          ...prev,
+          structures: [...prev.structures, newStructure],
+          trackedServices: [...prev.trackedServices, ...newTrackedServices]
+        };
           console.log('Updated proposal state:', {
             structuresCount: updatedProposal.structures.length,
             trackedServicesCount: updatedProposal.trackedServices.length,
@@ -1026,7 +991,9 @@ export default function EditProposalPage() {
         totalConstructionCosts: space.totalConstructionCosts.map(f => ({
           ...f,
           isActive: f.isActive
-        }))
+        })),
+        totalCost: space.totalCost,
+        totalCostPerSqft: space.totalCostPerSqft
       },
       selectedStructureId,
       selectedLevelId
@@ -1035,14 +1002,16 @@ export default function EditProposalPage() {
     // Log current proposal state before update
     console.log('Page: Current proposal state before adding space:', {
       structures: proposal.structures,
-      constructionCosts: getConstructionCosts(proposal.structures),
-      manualFeeOverrides
+      constructionCosts: getConstructionCosts(proposal.structures)
     });
 
     // Create a new space with a unique ID and ensure all disciplines have construction costs
     const newSpace: Space = {
       id: crypto.randomUUID(),
       ...space,
+      // Preserve the totalCost and totalCostPerSqft values
+      totalCost: space.totalCost,
+      totalCostPerSqft: space.totalCostPerSqft,
       // Initialize construction costs for all disciplines
       totalConstructionCosts: DISCIPLINES.map(discipline => {
         // Find existing fee for this discipline or create a new one
@@ -1058,6 +1027,15 @@ export default function EditProposalPage() {
         };
       })
     };
+
+    // Log the new space being added
+    console.log('Page: New space being added:', {
+      ...newSpace,
+      totalConstructionCosts: newSpace.totalConstructionCosts.map(f => ({
+        ...f,
+        isActive: f.isActive
+      }))
+    });
 
     // If we're editing an existing space, update it instead of creating a new one
     if (editingSpace) {
@@ -1076,6 +1054,9 @@ export default function EditProposalPage() {
                         return {
                           ...space,
                           id: sp.id,
+                          // Preserve totalCost and totalCostPerSqft values
+                          totalCost: space.totalCost,
+                          totalCostPerSqft: space.totalCostPerSqft,
                           totalConstructionCosts: DISCIPLINES.map(discipline => {
                             const existingFee = space.totalConstructionCosts.find(f => f.discipline === discipline);
                             const costPerSqft = existingFee?.costPerSqft ?? DEFAULT_COST_PER_SQFT[discipline as keyof typeof DEFAULT_COST_PER_SQFT] ?? 0;
@@ -1159,7 +1140,6 @@ export default function EditProposalPage() {
         console.log('Page: Updated proposal state after editing space:', {
           structures: updatedProposal.structures,
           constructionCosts: updatedConstructionCosts,
-          manualFeeOverrides,
           trackedServices: updatedProposal.trackedServices
         });
 
@@ -1240,7 +1220,6 @@ export default function EditProposalPage() {
         console.log('Page: Updated proposal state after adding new space:', {
           structures: updatedProposal.structures,
           constructionCosts: updatedConstructionCosts,
-          manualFeeOverrides,
           trackedServices: updatedProposal.trackedServices
         });
 
@@ -1908,9 +1887,8 @@ export default function EditProposalPage() {
   const calculateTotalConstructionCost = (structure: Structure): number => {
     return structure.levels.reduce((total, level) => {
       const levelTotal = level.spaces.reduce((levelSum, space) => {
-        const spaceCost = space.totalConstructionCosts.reduce((feeSum, fee) => 
-          feeSum + (fee.isActive ? fee.totalConstructionCost : 0), 0);
-        return levelSum + spaceCost;
+        // Use the totalCost value that was calculated and saved in space-dialog.tsx
+        return levelSum + (space.totalCost || 0);
       }, 0);
       return total + levelTotal;
     }, 0);
@@ -1949,191 +1927,6 @@ export default function EditProposalPage() {
     });
     
     return rate;
-  };
-
-  /**
-   * Calculates the fee scale rate for a given structure and discipline.
-   * IMPORTANT: Construction cost calculation notes:
-   * 1. Construction cost is NOT calculated from fees.totalFee
-   * 2. Instead, it is calculated as: costPerSqft * floorArea for each space
-   * 3. This is done per discipline, so we only look at fees matching the target discipline
-   * 4. Only active fees are included in the calculation
-   * 5. The total construction cost is used to determine which fee scale row to use
-   * 
-   * Multi-discipline calculation process:
-   * 1. For each discipline (Mechanical, Electrical, Plumbing, etc.):
-   *    - Calculate discipline-specific construction cost = sum(costPerSqft * floorArea) for all spaces
-   *    - This gives us the construction cost for that discipline
-   * 2. The total construction cost for a space is the sum of all discipline-specific costs
-   * 
-   * Example calculation for a space with multiple disciplines:
-   * Space A (1000 sqft):
-   * - Mechanical: $50/sqft = $50,000
-   * - Electrical: $40/sqft = $40,000
-   * - Plumbing: $30/sqft = $30,000
-   * Total construction cost for Space A = $120,000
-   * 
-   * Space B (2000 sqft):
-   * - Mechanical: $45/sqft = $90,000
-   * - Electrical: $35/sqft = $70,000
-   * - Plumbing: $25/sqft = $50,000
-   * Total construction cost for Space B = $210,000
-   * 
-   * Total construction cost for structure = $330,000
-   * This total is then used to find the appropriate fee scale row
-   * 
-   * Note: Each discipline's fee scale is calculated independently using its own
-   * discipline-specific construction cost. This ensures accurate fee rates for
-   * each discipline based on their respective construction costs.
-   */
-  const getFeeScale = (structure: Structure, discipline: string): { adjustedRate: number } => {
-    // Calculate total construction cost for this structure using costPerSqft * floorArea for each discipline
-    // Note: This calculation is specific to the given discipline
-    const constructionCost = structure.levels.reduce((total, level) =>
-      level.spaces.reduce((levelTotal, space) => {
-        // Find the fee for this discipline
-        const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
-        if (fee && fee.isActive) {
-          // Calculate construction cost for this space using costPerSqft * floorArea
-          // This is the correct way to calculate construction cost, NOT using fee.totalFee
-          const spaceConstructionCost = fee.costPerSqft * space.floorArea;
-          console.log('Adding construction cost for space:', {
-            level: level.name,
-            space: space.name,
-            discipline: fee.discipline,
-            costPerSqft: fee.costPerSqft,
-            floorArea: space.floorArea,
-            constructionCost: spaceConstructionCost,
-            note: 'Construction cost = costPerSqft * floorArea (discipline-specific)'
-          });
-          return levelTotal + spaceConstructionCost;
-        }
-        return levelTotal;
-      }, 0), 0);
-
-    console.log('Total construction cost for fee scale:', {
-      structure: structure.name,
-      discipline,
-      constructionCost,
-      note: 'This is the discipline-specific construction cost used to determine the fee scale row. ' +
-            'Each discipline has its own construction cost calculation and fee scale determination.'
-    });
-
-    // Get the current fee scale from state
-    const currentFeeScale = designFeeScale;
-    if (!currentFeeScale || currentFeeScale.length === 0) {
-      console.warn('No fee scale data available');
-      return { adjustedRate: 0 };
-    }
-
-    // Find the appropriate fee scale row
-    // If construction cost is higher than all rows, use the last row
-    let scale: FeeScale | undefined;
-    if (constructionCost > currentFeeScale[currentFeeScale.length - 1].construction_cost) {
-      scale = currentFeeScale[currentFeeScale.length - 1];
-    } else {
-      scale = currentFeeScale.find((row: FeeScale, index: number) => {
-        const nextRow = currentFeeScale[index + 1];
-        return !nextRow || constructionCost <= nextRow.construction_cost;
-      });
-    }
-
-    if (!scale) {
-      console.warn('No matching fee scale found for construction cost:', constructionCost);
-      return { adjustedRate: 0 };
-    }
-
-    // Get the base rate (prime consultant rate)
-    const baseRate = scale.prime_consultant_rate;
-
-    // Get the fraction rate for the discipline
-    let fractionRate: number;
-    const disciplineLower = discipline.toLowerCase();
-    switch (disciplineLower) {
-      case 'mechanical':
-        fractionRate = scale.fraction_of_prime_rate_mechanical;
-        break;
-      case 'plumbing':
-        fractionRate = scale.fraction_of_prime_rate_plumbing;
-        break;
-      case 'electrical':
-        fractionRate = scale.fraction_of_prime_rate_electrical;
-        break;
-      case 'structural':
-        fractionRate = scale.fraction_of_prime_rate_structural;
-        break;
-      default:
-        fractionRate = 1;
-    }
-
-    // Calculate the fee using the discipline's fraction of the prime consultant rate
-    // Note: fractionRate is already in decimal form (e.g., 0.85 for mechanical)
-    const disciplineRate = baseRate * fractionRate;
-
-    // Get and apply the duplicate rate
-    const duplicateRate = getDuplicateRate(structure);
-    console.log('Fee scale calculation:', {
-      structure: structure.name,
-      discipline,
-      constructionCost,
-      baseRate,
-      fractionRate,
-      disciplineRate,
-      duplicateRate,
-      finalRate: disciplineRate * duplicateRate
-    });
-
-    return { adjustedRate: disciplineRate * duplicateRate };
-  };
-
-  const calculateDisciplineFee = (structure: Structure, discipline: string, phase: 'design' | 'construction'): { fee: number } => {
-    const { adjustedRate } = getFeeScale(structure, discipline);
-    const totalConstructionCost = calculateTotalConstructionCost(structure);
-    const fee = totalConstructionCost * (adjustedRate / 100);
-    return { fee };
-  };
-
-  const calculateTotalDesignFee = (structure: Structure): number => {
-    console.log('=== Calculating Total Design Fee ===');
-    let total = 0;
-
-    // Calculate fees for each space
-    structure.levels.forEach(level => {
-      level.spaces.forEach(space => {
-        console.log(`\nSpace: ${space.name}`);
-        
-        // Calculate fees for each active discipline
-        space.totalConstructionCosts.forEach(fee => {
-          if (!fee.isActive) {
-            console.log(`Skipping inactive fee for ${fee.discipline}`);
-            return;
-          }
-
-          const { fee: disciplineFee } = calculateDisciplineFee(structure, fee.discipline, 'design');
-          console.log(`${fee.discipline} Fee:`, {
-            constructionCost: fee.totalConstructionCost,
-            designFee: disciplineFee
-          });
-          
-          total += disciplineFee;
-        });
-
-        // Add any engineering services fees
-        if (space.engineeringServices) {
-          space.engineeringServices.forEach(service => {
-            if (service.isActive && service.estimated_fee) {
-              total += Number(service.estimated_fee) || 0;
-            }
-          });
-        }
-      });
-    });
-
-    console.log('\nFinal Total:', {
-      total
-    });
-
-    return total;
   };
 
   const handleDesignFeeRateChange = (structureId: string, rate: number) => {
@@ -2460,9 +2253,8 @@ export default function EditProposalPage() {
 
   // Add helper function to reset fees
   const handleResetFees = (structureId: string, discipline: string, spaceId?: string) => {
-    setManualFeeOverrides((prev: ManualFeeOverride[]) => 
-      prev.filter(o => !(o.structureId === structureId && o.discipline === discipline && (!spaceId || o.spaceId === spaceId)))
-    );
+    // Remove manual override reset logic
+    console.log('Resetting fees for:', { structureId, discipline, spaceId });
   };
 
   // Add helper function to format input value
@@ -2709,7 +2501,8 @@ export default function EditProposalPage() {
 
   // Add logging for trackedServices changes
   useEffect(() => {
-    console.log('=== TrackedServices Updated ===');
+    // Remove console.clear() to preserve our logs
+    console.group('=== TrackedServices Updated ===');
     console.log('Total services:', trackedServices.length);
     console.log('Services:', trackedServices.map(service => ({
       id: service.id,
@@ -2721,48 +2514,28 @@ export default function EditProposalPage() {
       fee_increment: service.fee_increment,
       phase: service.phase
     })));
+    console.groupEnd();
   }, [trackedServices]);
 
   // Add handler for services change
   const handleServicesChange = async (updatedServices: TrackedService[]) => {
-    const servicesWithValidPhase = updatedServices.map(service => ({
-      ...service,
-      phase: service.phase === 'design' || service.phase === 'construction' ? service.phase : 'design'
-    }));
-    
     setProposal(prev => ({
       ...prev,
-      trackedServices: servicesWithValidPhase
+      trackedServices: updatedServices
     }));
   };
 
   // Add handler for service fee updates
-  const handleServiceFeeUpdate = (serviceId: string, discipline: string, fee: number | undefined, phase: 'design' | 'construction') => {
-    console.log('Updating service:', { serviceId, discipline, fee, phase });
-    
-    setTrackedServices(prevServices => 
-      prevServices.map(prevService => {
-        if (prevService.id === serviceId) {
-          const isDisabling = fee === undefined;
-          const isEnabling = fee !== undefined;
-          
-          return {
-            ...prevService,
-            fee: fee !== undefined ? fee : prevService.fee,
-            isIncluded: isEnabling ? true : (isDisabling ? false : prevService.isIncluded)
-          };
-        }
-        return prevService;
-      })
-    );
+  const handleServiceFeeUpdate = (serviceId: string, discipline: string, fee: number, phase: 'design' | 'construction' | null) => {
+    // Remove manual override update logic
+    console.log('Updating service fee:', { serviceId, discipline, fee, phase });
   };
 
   // Add handleDeleteSpace function before the return statement
   const handleDeleteSpace = (structureId: string, levelId: string, spaceId: string) => {
     // Update proposal state to remove the space
-    setProposal(prevProposal => ({
-      ...prevProposal,
-      structures: prevProposal.structures.map(s => {
+    setProposal(prev => {
+      const updatedStructures = prev.structures.map(s => {
         if (s.id === structureId) {
           return {
             ...s,
@@ -2778,59 +2551,20 @@ export default function EditProposalPage() {
           };
         }
         return s;
-      })
-    }));
-
-    // Clean up tracked services associated with the deleted space
-    setTrackedServices(prevServices => 
-      prevServices.filter(service => 
-        !(service.structureId === structureId && 
-          service.levelId === levelId && 
-          service.spaceId === spaceId)
-      )
-    );
-
-    // Clean up manual fee overrides associated with the deleted space
-    setManualFeeOverrides(prevOverrides => 
-      prevOverrides.filter(override => 
-        !(override.structureId === structureId && 
-          override.levelId === levelId && 
-          override.spaceId === spaceId)
-      )
-    );
-
-    setProposal(prev => {
-      const updated = {
-        ...prev,
-        structures: prev.structures.map(s => {
-          if (s.id === structureId) {
-            return {
-              ...s,
-              levels: s.levels.map(l => {
-                if (l.id === levelId) {
-                  return {
-                    ...l,
-                    spaces: l.spaces.filter(sp => sp.id !== spaceId)
-                  };
-                }
-                return l;
-              })
-            };
-          }
-          return s;
-        }),
-        designFeeScale: prev.designFeeScale,
-        duplicateStructureRates: prev.duplicateStructureRates,
-        trackedServices: prev.trackedServices,
-      };
-      console.log('[handleDeleteSpace] Updated proposal:', {
-        structures: updated.structures,
-        designFeeScale: updated.designFeeScale,
-        duplicateStructureRates: updated.duplicateStructureRates,
-        trackedServices: updated.trackedServices,
-        constructionCosts: getConstructionCosts(updated.structures)
       });
-      return updated;
+
+      // Clean up tracked services for the deleted space
+      const updatedTrackedServices = prev.trackedServices.filter(
+        service => !(service.structureId === structureId && 
+                    service.levelId === levelId && 
+                    service.spaceId === spaceId)
+      );
+
+      return {
+        ...prev,
+        structures: updatedStructures,
+        trackedServices: updatedTrackedServices
+      };
     });
   };
 
@@ -2851,10 +2585,10 @@ export default function EditProposalPage() {
 
       for (const level of structure.levels) {
         for (const space of level.spaces) {
-          // Add the total construction cost from the space
+          // Add the total construction cost from the space (this comes from the "Total" cost type in construction_costs table)
           costs[structure.id]['Total'] += space.totalCost || 0;
 
-          // Add costs for each discipline fee
+          // Add costs for each discipline fee (these are used for fee calculations only)
           for (const fee of space.totalConstructionCosts) {
             // Skip if the fee is not active
             if (!fee.isActive) continue;
@@ -3079,99 +2813,12 @@ export default function EditProposalPage() {
 
   // Update handleDeleteStructure to properly clean up state
   const handleDeleteStructure = (structureId: string) => {
-    const structureToDelete = proposal.structures.find(s => s.id === structureId);
-    if (!structureToDelete) return;
-
-    console.log('Starting structure deletion:', {
-      structureId,
-      isDuplicate: !!structureToDelete.parentId,
-      parentId: structureToDelete.parentId
-    });
-
-    setProposal(prev => {
-      // Get all structure IDs to delete (parent and duplicates)
-      const structureIdsToDelete = [
-        structureId,
-        ...prev.structures
-          .filter(s => s.parentId === structureId)
-          .map(s => s.id)
-      ];
-
-      console.log('Structure IDs to delete:', structureIdsToDelete);
-
-      // Remove structures
-      let updatedStructures = prev.structures.filter(
-        s => !structureIdsToDelete.includes(s.id)
-      );
-
-      // If this was a duplicate structure, renumber the remaining duplicates
-      if (structureToDelete.parentId) {
-        updatedStructures = renumberDuplicates(
-          updatedStructures,
-          structureToDelete.parentId
-        );
-      }
-
-      // Clean up tracked services for all deleted structures
-      const updatedTrackedServices = prev.trackedServices.filter(
-        service => !structureIdsToDelete.includes(service.structureId)
-      );
-
-      // Clean up manual fee overrides for all deleted structures
-      const updatedManualFeeOverrides = prev.manualFeeOverrides.filter(
-        override => !structureIdsToDelete.includes(override.structureId)
-      );
-
-      console.log('Structure deletion complete:', {
-        structureId,
-        isDuplicate: !!structureToDelete.parentId,
-        deletedStructureIds: structureIdsToDelete,
-        remainingStructures: updatedStructures.length,
-        remainingTrackedServices: updatedTrackedServices.length,
-        remainingManualFeeOverrides: updatedManualFeeOverrides.length,
-        trackedServices: updatedTrackedServices.map(s => ({
-          id: s.id,
-          name: s.service_name,
-          structureId: s.structureId,
-          isIncluded: s.isIncluded
-        }))
-      });
-
-      return {
-        ...prev,
-        structures: updatedStructures,
-        trackedServices: updatedTrackedServices,
-        manualFeeOverrides: updatedManualFeeOverrides
-      };
-    });
+    setProposal(prev => ({
+      ...prev,
+      structures: prev.structures.filter(s => s.id !== structureId && s.parentId !== structureId)
+    }));
   };
 
-  // Add logging before rendering FixedFees
-  console.log('🔍 PAGE_DEBUG - Tracked Services being passed to FixedFees:', {
-    trackedServices: trackedServices.map(s => ({
-      id: s.id,
-      service_name: s.service_name,
-      discipline: s.discipline,
-      phase: s.phase,
-      structureId: s.structureId,
-      isIncluded: s.isIncluded,
-      isConstructionAdmin: s.isConstructionAdmin,
-      min_fee: s.min_fee,
-      rate: s.rate,
-      fee_increment: s.fee_increment,
-      customFee: s.customFee
-    }))
-  });
-
-  // Update the useEffect that loads services to use dbEngineeringServices
-  useEffect(() => {
-    if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
-      setProposal(prev => ({
-        ...prev,
-        dbEngineeringServices: engineeringStandardServices  // Store in dbEngineeringServices instead of trackedServices
-      }));
-    }
-  }, [isLoadingStandardServices, engineeringStandardServices]);
 
   // Remove the useEffect that was creating trackedServices on load
   // (Remove the useEffect that was watching engineeringStandardServices and proposal.structures.length)
@@ -3296,29 +2943,36 @@ export default function EditProposalPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold dark:text-[#E5E7EB]">Structures</h2>
             <div className="flex items-center gap-2">
-              <div
-                draggable
-                onDragStart={(e) => {
-                  console.log('Starting structure drag...');
-                  const dragData = {
-                    type: 'structure',
-                    id: crypto.randomUUID()  // Generate a new UUID for the structure
-                  };
-                  console.log('Setting drag data:', dragData);
-                  e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-                  e.dataTransfer.effectAllowed = 'copy';
-                  setIsDragging(true);
-                }}
-                onDragEnd={() => {
-                  console.log('Ending structure drag...');
-                  setIsDragging(false);
-                }}
-                className={`inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-move ${isDragging ? 'opacity-50' : ''}`}
-                title="Drag to add structure"
-              >
-                <Building2 className="w-4 h-4" />
-                <span>Add Structure</span>
-              </div>
+              {isLoadingStandardServices ? (
+                <div className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+                  <span>Loading services...</span>
+                </div>
+              ) : (
+                <div
+                  draggable
+                  onDragStart={(e) => {
+                    console.log('Starting structure drag...');
+                    const dragData = {
+                      type: 'structure',
+                      id: crypto.randomUUID()  // Generate a new UUID for the structure
+                    };
+                    console.log('Setting drag data:', dragData);
+                    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+                    e.dataTransfer.effectAllowed = 'copy';
+                    setIsDragging(true);
+                  }}
+                  onDragEnd={() => {
+                    console.log('Ending structure drag...');
+                    setIsDragging(false);
+                  }}
+                  className={`inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-move ${isDragging ? 'opacity-50' : ''}`}
+                  title="Drag to add structure"
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span>Add Structure</span>
+                </div>
+              )}
             </div>
           </div>
           <div 
@@ -3326,6 +2980,10 @@ export default function EditProposalPage() {
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              if (isLoadingStandardServices) {
+                e.dataTransfer.dropEffect = 'none';
+                return;
+              }
               const hasJsonData = e.dataTransfer.types.includes('application/json');
               if (!hasJsonData) {
                 e.dataTransfer.dropEffect = 'none';
@@ -3336,6 +2994,10 @@ export default function EditProposalPage() {
             onDrop={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              if (isLoadingStandardServices) {
+                console.error('Cannot drop while services are loading');
+                return;
+              }
               console.log('Drop event triggered on structure container');
               try {
                 const data = e.dataTransfer.getData('application/json');
@@ -3345,7 +3007,6 @@ export default function EditProposalPage() {
                   return;
                 }
                 const dragData = JSON.parse(data);
-                console.log('Parsed drag data:', dragData);
                 if (dragData.type === 'structure') {
                   handleDrop(e);
                 } else {
@@ -3356,562 +3017,419 @@ export default function EditProposalPage() {
               }
             }}
           >
-            {proposal.structures.map((structure) => (
-              <div 
-                key={structure.id} 
-                className={`border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md overflow-hidden ${
-                  structure.parentId ? 'ml-16 relative' : ''
-                }`}
-              >
-                <div
-                  className={`p-4 bg-muted/5 hover:bg-muted/10 cursor-pointer flex items-start gap-4 border-b border-[#4DB6AC]/50 dark:border-[#4DB6AC]/50 ${
-                    structure.parentId ? 'bg-muted/10' : ''
-                  }`}
-                  onDragOver={(e) => handleDragOver(e)}
-                  onDrop={(e) => handleDrop(e, structure.id)}
-                >
-                  <div className="p-2 bg-primary/10 rounded-md">
-                    <Building2 className="w-6 h-6 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {editingStructureId === structure.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={editingStructureName}
-                          onChange={(e) => setEditingStructureName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleStructureNameUpdate(structure.id);
-                            } else if (e.key === 'Escape') {
-                              setEditingStructureId(null);
-                            }
-                          }}
-                          className="flex-1 px-2 py-1 border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleStructureNameUpdate(structure.id)}
-                          className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                        >
-                          <Save className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingStructureId(null)}
-                          className="p-1 text-gray-500 hover:text-destructive"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {structure.parentId && (
-                          <button
-                            type="button"
-                            onClick={() => toggleDuplicateCollapse(structure.id)}
-                            className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                            title={collapsedDuplicates.has(structure.id) ? "Expand" : "Collapse"}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="16"
-                              height="16"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className={`w-4 h-4 transition-transform ${
-                                collapsedDuplicates.has(structure.id) ? 'rotate-90' : ''
-                              }`}
-                            >
-                              <path d="m9 18 6-6-6-6"/>
-                            </svg>
-                          </button>
-                        )}
-                        <div className="font-medium dark:text-[#E5E7EB]">{structure.name}</div>
-                        {!structure.parentId && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingStructureId(structure.id);
-                              setEditingStructureName(structure.name);
-                            }}
-                            className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                            title="Edit Structure Name"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <div className="text-sm text-gray-500 dark:text-[#9CA3AF] mt-1">
-                      {structure.constructionType} • {calculateTotalSquareFootage(structure).toLocaleString()} sq ft • {formatCurrency(calculateTotalConstructionCost(structure))}
-                    </div>
-                    {!structure.parentId && (
-                      <div className="mt-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const isCollapsed = collapsedServices.has(structure.id);
-                              if (isCollapsed) {
-                                setCollapsedServices(prev => {
-                                  const next = new Set(prev);
-                                  next.delete(structure.id);
-                                  return next;
-                                });
-                              } else {
-                                setCollapsedServices(prev => new Set(prev).add(structure.id));
-                              }
-                            }}
-                            className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                            title={collapsedServices.has(structure.id) ? "Show Engineering Services" : "Hide Engineering Services"}
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="24"
-                              height="24"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className={`w-4 h-4 transition-transform ${
-                                collapsedServices.has(structure.id) ? 'rotate-90' : ''
-                              }`}
-                            >
-                              <polyline points="9 18 15 12 9 6"></polyline>
-                            </svg>
-                          </button>
-                          <span className="text-sm font-medium text-gray-500">Engineering Services</span>
-                        </div>
-                        
-                        {!collapsedServices.has(structure.id) && (
-                          <div className="mt-2">
-                            <EngineeringServicesManager
-                              proposalId={proposalId}
-                              structureId={structure.id}
-                              onServicesChange={handleServicesChange}
-                              initialTrackedServices={proposal.trackedServices.filter(service => service.structureId === structure.id)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-start gap-2 pt-1">
-                    {!structure.parentId && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicateStructure(structure.id)}
-                          className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                          title="Duplicate Structure"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="w-4 h-4"
-                          >
-                            <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
-                            <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyStructure(structure.id)}
-                          className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                          title="Copy Structure (Independent)"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="w-4 h-4"
-                          >
-                            <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
-                            <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                            <path d="M8 2v14" />
-                            <path d="M2 8h14" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddLowerLevel(structure.id)}
-                          className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                          title="Add Lower Level"
-                        >
-                          <Layers className="w-4 h-4 rotate-180" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddUpperLevel(structure.id)}
-                          className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                          title="Add Upper Level"
-                        >
-                          <Layers className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddFiveUpperLevels(structure.id)}
-                          className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                          title="Add 5 Upper Levels"
-                        >
-                          <Building className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteStructure(structure.id)}
-                      className="p-2 text-gray-500 hover:text-destructive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+            {isLoadingStandardServices ? (
+              <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400 mx-auto mb-2"></div>
+                  <p>Loading services...</p>
                 </div>
-                {(!structure.parentId || !collapsedDuplicates.has(structure.id)) && structure.levels.length > 0 && (
-                  <div className="bg-muted/5 divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
-                    {structure.levels.map((level) => (
-                      <div
-                        key={level.id}
-                        className="border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20"
-                      >
-                        <div className="p-3 flex items-center gap-3 hover:bg-muted/10 cursor-pointer">
-                          <div className="p-1.5 bg-primary/5 rounded-md">
-                            <Layers className="w-4 h-4 text-primary/70" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium dark:text-[#E5E7EB]">{level.name}</div>
-                            <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                              {level.spaceType} • {calculateLevelArea(level).toLocaleString()} sq ft
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {!structure.parentId && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedStructureId(structure.id);
-                                    setSelectedLevelId(level.id);
-                                    setEditingSpace(null);
-                                    setIsSpaceDialogOpen(true);
-                                  }}
-                                  className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                  title="Add space"
-                                >
-                                  <Home className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDuplicateLevelUp(structure.id, level.id)}
-                                  className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                  title="Duplicate Level Up"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    className="w-3.5 h-3.5"
-                                  >
-                                    <path d="M12 5v14" />
-                                    <path d="m5 12 7-7 7 7" />
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDuplicateLevelDown(structure.id, level.id)}
-                                  className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                  title="Duplicate Level Down"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    className="w-3.5 h-3.5"
-                                  >
-                                    <path d="M12 5v14" />
-                                    <path d="m19 12-7 7-7-7" />
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDuplicateLevel(structure.id, level.id)}
-                                  className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                  title="Duplicate Level (Same Level)"
-                                >
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    className="w-3.5 h-3.5"
-                                  >
-                                    <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
-                                    <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteLevel(structure.id, level.id)}
-                                  className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
-                                  title="Delete level"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        {level.spaces && level.spaces.length > 0 && (
-                          <div className="bg-muted/5 divide-y divide-[#4DB6AC]/10 dark:divide-[#4DB6AC]/10">
-                            {level.spaces.map((space) => (
-                              <div 
-                                key={space.id} 
-                                className="p-3 pl-12"
-                              >
-                                <div className="flex items-start gap-3">
-                                  <div className="p-1.5 bg-primary/5 rounded-md">
-                                    <Home className="w-4 h-4 text-primary/70" />
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <div className="font-medium dark:text-[#E5E7EB]">{space.name}</div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setProposal(prev => ({
-                                            ...prev,
-                                            structures: prev.structures.map(s => {
-                                              if (s.id === structure.id) {
-                                                return {
-                                                  ...s,
-                                                  levels: s.levels.map(l => {
-                                                    if (l.id === level.id) {
-                                                      return {
-                                                        ...l,
-                                                        spaces: l.spaces.map(sp => {
-                                                          if (sp.id === space.id) {
-                                                            return { ...sp, splitFees: !sp.splitFees };
-                                                          }
-                                                          return sp;
-                                                        })
-                                                      };
-                                                    }
-                                                    return l;
-                                                  })
-                                                };
-                                              }
-                                              if (s.parentId === structure.id) {
-                                                return {
-                                                  ...s,
-                                                  levels: s.levels.map(l => {
-                                                    if (l.name === level.name) {
-                                                      return {
-                                                        ...l,
-                                                        spaces: l.spaces.map(sp => {
-                                                          if (sp.name === space.name) {
-                                                            return { ...sp, splitFees: !sp.splitFees };
-                                                          }
-                                                          return sp;
-                                                        })
-                                                      };
-                                                    }
-                                                    return l;
-                                                  })
-                                                };
-                                              }
-                                              return s;
-                                            })
-                                          }));
-                                        }}
-                                        className={`p-1 rounded-md transition-colors ${
-                                          space.splitFees 
-                                            ? 'bg-primary/10 text-primary hover:bg-primary/20' 
-                                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                        }`}
-                                        title={space.splitFees ? 'Split fees enabled' : 'Split fees disabled'}
-                                      >
-                                        <SplitSquareVertical className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteSpace(structure.id, level.id, space.id)}
-                                        className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
-                                        title="Delete space"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                    <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                      {space.description}
-                                    </div>
-                                    <div className="mt-2 text-sm">
-                                      <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                        Building Type: {space.buildingType}
-                                      </div>
-                                      <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                        Space Type: {space.spaceType}
-                                      </div>
-                                      <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                        Project Construction Type: {space.projectConstructionType}
-                                      </div>
-                                      <div className="mt-1">
-                                        <div className="text-gray-500 dark:text-[#9CA3AF] mb-1">Disciplines:</div>
-                                        <div className="flex flex-wrap gap-2">
-                                          {space.totalConstructionCosts.map((fee) => (
-                                            <button
-                                              key={fee.id}
-                                              onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                try {
-                                                  handleDisciplineFeeToggle(structure.id, level.id, space.id, fee.id, !fee.isActive);
-                                                } catch (error) {
-                                                  console.error('Error toggling discipline:', error);
-                                                }
-                                              }}
-                                              className={`px-2 py-1 rounded-md text-sm transition-colors ${
-                                                fee.isActive
-                                                  ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                              }`}
-                                              title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
-                                            >
-                                              {fee.discipline}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                      <div className="mt-1 font-medium text-primary">
-                                        Construction Cost: {formatCurrency(space.totalCost)}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedStructureId(structure.id);
-                                      setSelectedLevelId(level.id);
-                                      handleEditSpace(space);
-                                    }}
-                                    className={`p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors ${structure.parentId ? 'hidden' : ''}`}
-                                    title="Edit space"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const parentStructure = proposal.structures.find(s => s.id === structure.id);
-                                      if (!parentStructure) return;
-
-                                      const parentLevel = parentStructure.levels.find(l => l.id === level.id);
-                                      if (!parentLevel) return;
-
-                                      const spaceToDelete = parentLevel.spaces.find(sp => sp.id === space.id);
-                                      if (!spaceToDelete) return;
-
-                                      setProposal({
-                                        ...proposal,
-                                        structures: proposal.structures.map(s => {
-                                          // If this is the parent structure
-                                          if (s.id === structure.id) {
-                                            return {
-                                              ...s,
-                                              levels: s.levels.map(l =>
-                                                l.id === level.id
-                                                  ? { ...l, spaces: l.spaces.filter(sp => sp.id !== space.id) }
-                                                  : l
-                                              )
-                                            };
-                                          }
-                                          // If this is a duplicate structure
-                                          if (s.parentId === structure.id) {
-                                            return {
-                                              ...s,
-                                              levels: s.levels.map(l =>
-                                                l.name === parentLevel.name
-                                                  ? { ...l, spaces: l.spaces.filter(sp => sp.name !== spaceToDelete.name) }
-                                                  : l
-                                              )
-                                            };
-                                          }
-                                          return s;
-                                        })
-                                      });
-                                    }}
-                                    className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
-                                    title="Delete space"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  {/* ... existing buttons ... */}
-                                </div>
-                  </div>
-                            ))}
-                  </div>
-                        )}
-                  </div>
-                    ))}
-                  </div>
-                )}
-                {(!structure.parentId || !collapsedDuplicates.has(structure.id)) && structure.levels.length === 0 && (
-                  <div 
-                    className="p-4 text-center text-gray-400 border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 cursor-pointer hover:bg-muted/5"
-                    onDragOver={(e) => handleDragOver(e)}
-                    onDrop={(e) => handleDrop(e, structure.id)}
-                  >
-                    <Layers className="w-5 h-5 mx-auto mb-1 text-gray-400" />
-                    <p className="text-sm">Drop a level here</p>
-                  </div>
-                )}
-                  </div>
-            ))}
-            {proposal.structures.length === 0 && (
+              </div>
+            ) : proposal.structures.length === 0 ? (
               <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
                 <div className="text-center">
                   <Building2 className="w-8 h-8 mx-auto mb-2 text-gray-400" />
                   <p>Drag and drop a structure here</p>
                 </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {proposal.structures.map((structure) => (
+                  <div 
+                    key={structure.id} 
+                    className={`border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md overflow-hidden ${
+                      structure.parentId ? 'ml-16 relative' : ''
+                    }`}
+                  >
+                    <div
+                      className={`p-4 bg-muted/5 hover:bg-muted/10 cursor-pointer flex items-start gap-4 ${
+                        structure.parentId ? 'bg-muted/10' : ''
+                      }`}
+                      onDragOver={(e) => handleDragOver(e)}
+                      onDrop={(e) => handleDrop(e, structure.id)}
+                    >
+                      <div className="p-2 bg-primary/10 rounded-md">
+                        <Building2 className="w-6 h-6 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          {structure.parentId && (
+                            <button
+                              type="button"
+                              onClick={() => toggleDuplicateCollapse(structure.id)}
+                              className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title={collapsedDuplicates.has(structure.id) ? "Expand" : "Collapse"}
+                            >
+                              <ChevronDown className={`w-4 h-4 transition-transform ${
+                                collapsedDuplicates.has(structure.id) ? 'rotate-180' : ''
+                              }`} />
+                            </button>
+                          )}
+                          {editingStructureId === structure.id ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editingStructureName}
+                                onChange={(e) => setEditingStructureName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleStructureNameUpdate(structure.id);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingStructureId(null);
+                                  }
+                                }}
+                                className="flex-1 px-2 py-1 border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleStructureNameUpdate(structure.id)}
+                                className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              >
+                                <Save className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingStructureId(null)}
+                                className="p-1 text-gray-500 hover:text-destructive"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="font-medium dark:text-[#E5E7EB]">{structure.name}</div>
+                              {!structure.parentId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingStructureId(structure.id);
+                                    setEditingStructureName(structure.name);
+                                  }}
+                                  className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                                  title="Edit Structure Name"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        <div className="mt-1 font-medium text-primary">
+                          Construction Cost: {formatCurrency(calculateTotalConstructionCost(structure))}
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2 pt-1">
+                        {!structure.parentId && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateStructure(structure.id)}
+                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title="Duplicate Structure (Linked)"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="w-4 h-4"
+                              >
+                                <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
+                                <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyStructure(structure.id)}
+                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title="Copy Structure (Independent)"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="w-4 h-4"
+                              >
+                                <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
+                                <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                                <path d="M8 2v14" />
+                                <path d="M2 8h14" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAddLowerLevel(structure.id)}
+                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title="Add Lower Level"
+                            >
+                              <Layers className="w-4 h-4 rotate-180" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAddUpperLevel(structure.id)}
+                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title="Add Upper Level"
+                            >
+                              <Layers className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAddFiveUpperLevels(structure.id)}
+                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                              title="Add 5 Upper Levels"
+                            >
+                              <Building className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStructure(structure.id)}
+                          className="p-2 text-gray-500 hover:text-destructive"
+                          title="Delete Structure"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {!structure.isDuplicateCollapsed && (
+                      <>
+                        {/* Engineering Services Section */}
+                        <div className="border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
+                          <div className="p-3 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newCollapsed = new Set(collapsedServices);
+                                if (collapsedServices.has(structure.id)) {
+                                  newCollapsed.delete(structure.id);
+                                } else {
+                                  newCollapsed.add(structure.id);
+                                }
+                                setCollapsedServices(newCollapsed);
+                              }}
+                              className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                            >
+                              <ChevronDown className={`w-4 h-4 transition-transform ${collapsedServices.has(structure.id) ? 'rotate-180' : ''}`} />
+                            </button>
+                            <span className="text-sm font-medium text-gray-500">Engineering Services</span>
+                          </div>
+                          
+                          {!collapsedServices.has(structure.id) && (
+                            <div className="px-3 pb-3">
+                              <EngineeringServicesManager
+                                proposalId={proposalId}
+                                structureId={structure.id}
+                                onServicesChange={handleServicesChange}
+                                initialTrackedServices={proposal.trackedServices.filter(service => service.structureId === structure.id)}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Levels Section */}
+                        <div className="bg-muted/5 divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
+                          {structure.levels.map((level) => (
+                            <div
+                              key={level.id}
+                              className="border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20"
+                            >
+                              <div className="p-3 flex items-center gap-3 hover:bg-muted/10 cursor-pointer">
+                                <div className="p-1.5 bg-primary/5 rounded-md">
+                                  <Layers className="w-4 h-4 text-primary/70" />
+                                </div>
+                                <div className="flex-1">
+                                  <div className="font-medium dark:text-[#E5E7EB]">{level.name}</div>
+                                  <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
+                                    {level.spaceType} • {calculateLevelArea(level).toLocaleString()} sq ft
+                                  </div>
+                                </div>
+                                {!structure.parentId && (
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedStructureId(structure.id);
+                                        setSelectedLevelId(level.id);
+                                        setEditingSpace(null);
+                                        setIsSpaceDialogOpen(true);
+                                      }}
+                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                                      title="Add space"
+                                    >
+                                      <Home className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDuplicateLevelUp(structure.id, level.id)}
+                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                                      title="Duplicate Level Up"
+                                    >
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        className="w-3.5 h-3.5"
+                                      >
+                                        <path d="M12 5v14" />
+                                        <path d="m5 12 7-7 7 7" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDuplicateLevelDown(structure.id, level.id)}
+                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
+                                      title="Duplicate Level Down"
+                                    >
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        className="w-3.5 h-3.5"
+                                      >
+                                        <path d="M12 5v14" />
+                                        <path d="m19 12-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteLevel(structure.id, level.id)}
+                                      className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
+                                      title="Delete level"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              {level.spaces && level.spaces.length > 0 && (
+                                <div className="bg-muted/5 divide-y divide-[#4DB6AC]/10 dark:divide-[#4DB6AC]/10">
+                                  {level.spaces.map((space) => (
+                                    <div 
+                                      key={space.id} 
+                                      className="p-3 pl-12"
+                                    >
+                                      <div className="flex items-start gap-3">
+                                        <div className="p-1.5 bg-primary/5 rounded-md">
+                                          <Home className="w-4 h-4 text-primary/70" />
+                                        </div>
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-2">
+                                            <div className="font-medium dark:text-[#E5E7EB]">{space.name}</div>
+                                            {space.floorArea > 0 && (
+                                              <span className="text-sm text-gray-500 dark:text-[#9CA3AF]">
+                                                ({space.floorArea} sq ft)
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
+                                            {space.description}
+                                          </div>
+                                          <div className="mt-2 text-sm">
+                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
+                                              Building Type: {space.buildingType}
+                                            </div>
+                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
+                                              Space Type: {space.spaceType}
+                                            </div>
+                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
+                                              Project Construction Type: {space.projectConstructionType}
+                                            </div>
+                                            <div className="mt-1">
+                                              <div className="text-gray-500 dark:text-[#9CA3AF] mb-1">Disciplines:</div>
+                                              <div className="flex flex-wrap gap-2">
+                                                {space.totalConstructionCosts.map((fee) => (
+                                                  <button
+                                                    key={fee.id}
+                                                    onClick={(e) => {
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                      try {
+                                                        handleDisciplineFeeToggle(structure.id, level.id, space.id, fee.id, !fee.isActive);
+                                                      } catch (error) {
+                                                        console.error('Error toggling discipline:', error);
+                                                      }
+                                                    }}
+                                                    className={`px-2 py-1 rounded-md text-sm transition-colors ${
+                                                      fee.isActive
+                                                        ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                                                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                                    }`}
+                                                    title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
+                                                  >
+                                                    {fee.discipline}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                            <div className="mt-1 font-medium text-primary">
+                                              Construction Cost: {formatCurrency(space.totalCost)}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleEditSpace(space)}
+                                            className="p-1.5 text-gray-500 hover:text-primary"
+                                            title="Edit space"
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteSpace(structure.id, level.id, space.id)}
+                                            className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
+                                            title="Delete space"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {(!structure.parentId || !collapsedDuplicates.has(structure.id)) && structure.levels.length === 0 && (
+                      <div 
+                        className="p-4 text-center text-gray-400 border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 cursor-pointer hover:bg-muted/5"
+                        onDragOver={(e) => handleDragOver(e)}
+                        onDrop={(e) => handleDrop(e, structure.id)}
+                      >
+                        <Layers className="w-5 h-5 mx-auto mb-1 text-gray-400" />
+                        <p className="text-sm">Drop a level here</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -3924,22 +3442,18 @@ export default function EditProposalPage() {
               {/* Before rendering FixedFees in the main render/return block:
               console.log('Rendering FixedFees with trackedServices:', proposal.trackedServices); */}
               <FixedFees
-                key={proposal.structures.map(s => s.id).join('-') + '-' + trackedServices.map(s => s.id).join('-')}
                 structures={proposal.structures}
                 phase={proposal.phase}
                 onFeeUpdate={handleFeeUpdate}
-                designFeeScale={proposal.designFeeScale}
                 duplicateStructureRates={proposal.duplicateStructureRates}
                 trackedServices={proposal.trackedServices}
                 onServiceFeeUpdate={handleServiceFeeUpdate}
                 onDisciplineFeeToggle={handleDisciplineFeeToggle}
                 constructionCosts={getConstructionCosts(proposal.structures)}
-                manualFeeOverrides={manualFeeOverrides}
-                setManualFeeOverrides={setManualFeeOverrides}
               />
-                          </div>
-                        </div>
-                      </div>
+            </div>
+          </div>
+        </div>
 
         <div className="mt-8">
           <FlexFees />

@@ -3,6 +3,7 @@ import { Building2, Layers, Home, ChevronDown, ChevronRight, Check, RotateCcw, C
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { TrackedService, FeeScale } from '../types';
 
 interface DesignFeeScale {
   id: number;
@@ -109,47 +110,15 @@ interface EngineeringStandardService {
   rate: number | null;
 }
 
-interface TrackedService {
-  id: string;
-  serviceId: string;
-  service_name: string;
-  name: string;
-  discipline: string;
-  isDefaultIncluded: boolean;
-  min_fee: number | null;
-  rate: number | null;
-  fee_increment: number | null;
-  phase: 'design' | 'construction';
-  customFee?: number;
-  isConstructionAdmin: boolean;
-  fee: number;
-  structureId: string;
-  levelId: string;
-  spaceId: string;
-  isIncluded: boolean;
-}
-
-interface FeeScale {
-  construction_cost: number;
-  prime_consultant_rate: number;
-  fraction_of_prime_rate_mechanical: number;
-  fraction_of_prime_rate_plumbing: number;
-  fraction_of_prime_rate_electrical: number;
-  fraction_of_prime_rate_structural: number;
-}
-
 interface FeeCalculationProps {
   structures: Structure[];
   phase: 'design' | 'construction';
   onFeeUpdate: (structureId: string, levelId: string, spaceId: string, feeId: string, updates: Partial<Fee>, phase: 'design' | 'construction') => void;
-  designFeeScale: FeeScale[];
   duplicateStructureRates: Array<{ id: number; rate: number }>;
   trackedServices?: TrackedService[];
-  onServiceFeeUpdate?: (serviceId: string, discipline: string, fee: number | undefined, phase: 'design' | 'construction') => void;
+  onServiceFeeUpdate?: (serviceId: string, discipline: string, fee: number, phase: 'design' | 'construction' | null) => void;
   onDisciplineFeeToggle?: (structureId: string, levelId: string, spaceId: string, feeId: string, isActive: boolean) => void;
   constructionCosts: Record<string, Record<string, number>>;
-  manualFeeOverrides: ManualFeeOverride[];
-  setManualFeeOverrides: React.Dispatch<React.SetStateAction<ManualFeeOverride[]>>;
 }
 
 interface ProjectSummary {
@@ -159,59 +128,23 @@ interface ProjectSummary {
   projectTotal: number;
 }
 
-interface ManualFeeOverride {
-  structureId: string;
-  discipline: string;
-  spaceId?: string;
-}
-
 export default function FixedFees({ 
   structures, 
   phase, 
   onFeeUpdate, 
-  designFeeScale,
   duplicateStructureRates,
   trackedServices = [],
   onServiceFeeUpdate,
   onDisciplineFeeToggle,
-  constructionCosts,
-  manualFeeOverrides,
-  setManualFeeOverrides
+  constructionCosts
 }: FeeCalculationProps) {
-  // Add initial props logging with structure details
-  console.log('FixedFees props:', {
-    structures: structures.map(s => ({
-      id: s.id,
-      name: s.name,
-      levels: s.levels.length
-    })),
-    trackedServices: trackedServices.map(s => ({
-      id: s.id,
-      name: s.service_name,
-      structureId: s.structureId,
-      phase: s.phase,
-      discipline: s.discipline,
-      isConstructionAdmin: s.isConstructionAdmin,
-      isIncluded: s.isIncluded,
-      min_fee: s.min_fee,
-      rate: s.rate,
-      fee_increment: s.fee_increment,
-      customFee: s.customFee,
-    })),
-    phase
-  });
-
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [feeScale, setFeeScale] = useState<FeeScale[]>([]);
   const isInitializing = useRef(true);
-
-  // Reset initialization flag when structures change
-  useEffect(() => {
-    // console.log('FixedFees re-rendered. constructionCosts:', constructionCosts);
-  }, [constructionCosts]);
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isInitializing.current) {
-      // Set a timeout to allow initial render to complete
       const timer = setTimeout(() => {
         isInitializing.current = false;
       }, 100);
@@ -219,7 +152,29 @@ export default function FixedFees({
     }
   }, [structures]);
 
-  // Memoize the disciplines array since it never changes
+  useEffect(() => {
+    const fetchFeeScale = async () => {
+      try {
+        console.log('Fetching design fee scale from FixedFees component...');
+        const response = await fetch('/api/design-fee-scale');
+        if (!response.ok) {
+          console.error('Failed to fetch design fee scale:', response.status, response.statusText);
+          throw new Error('Failed to fetch design fee scale');
+        }
+        const data = await response.json();
+        console.log('Received design fee scale data:', data);
+        if (!data || data.length === 0) {
+          console.warn('No design fee scale data received from API');
+        }
+        setFeeScale(data);
+      } catch (error) {
+        console.error('Error fetching design fee scale:', error);
+      }
+    };
+
+    fetchFeeScale();
+  }, []);
+
   const DISCIPLINES = useMemo(() => [
     'Civil',
     'Electrical',
@@ -228,15 +183,12 @@ export default function FixedFees({
     'Structural'
   ], []);
 
-  // Update hasConstructionAdminServices to use isIncluded
   const hasConstructionAdminServices = useMemo(() => 
     trackedServices.some(service => service.isConstructionAdmin && service.isIncluded),
     [trackedServices]
   );
 
-  // Memoize the formatCurrency function
   const formatCurrency = useCallback((value: number | null | undefined): string => {
-    // Add logging to catch NaN values
     if (typeof value === 'number' && isNaN(value)) {
       console.error('formatCurrency received NaN value:', {
         value,
@@ -253,16 +205,13 @@ export default function FixedFees({
     }).format(value);
   }, []);
 
-  // Helper functions first
   const getDuplicateRate = (structure: Structure, duplicateStructureRates: Array<{ id: number; rate: number }>): number => {
     if (!structure.parentId) {
-      // Parent building always uses rate from id=1
       return duplicateStructureRates.find(r => r.id === 1)?.rate ?? 1.0;
     }
 
-    // For duplicate buildings, find the appropriate rate
     const duplicateNumber = getDuplicateNumber(structure);
-    const rateId = Math.min(duplicateNumber + 1, 10); // Cap at id=10
+    const rateId = Math.min(duplicateNumber + 1, 10);
     return duplicateStructureRates.find(r => r.id === rateId)?.rate ?? 1.0;
   };
 
@@ -271,54 +220,80 @@ export default function FixedFees({
     return parseInt(structure.name.match(/\(Duplicate (\d+)\)$/)?.[1] ?? '1');
   };
 
-  // Move getFeeScale function before memoizedFeeScales
+  /**
+   * Calculates the fee scale rate for a given structure and discipline.
+   * IMPORTANT: Construction cost calculation notes:
+   * 1. Construction cost is NOT calculated from fees.totalFee
+   * 2. Instead, it is calculated as: costPerSqft * floorArea for each space
+   * 3. This is done per discipline, so we only look at fees matching the target discipline
+   * 4. Only active fees are included in the calculation
+   * 5. The total construction cost is used to determine which fee scale row to use
+   * 
+   * Multi-discipline calculation process:
+   * 1. For each discipline (Mechanical, Electrical, Plumbing, etc.):
+   *    - Calculate discipline-specific construction cost = sum(costPerSqft * floorArea) for all spaces
+   *    - This gives us the construction cost for that discipline
+   * 2. The total construction cost for a space is the sum of all discipline-specific costs
+   * 
+   * Example calculation for a space with multiple disciplines:
+   * Space A (1000 sqft):
+   * - Mechanical: $50/sqft = $50,000
+   * - Electrical: $40/sqft = $40,000
+   * - Plumbing: $30/sqft = $30,000
+   * Total construction cost for Space A = $120,000
+   * 
+   * Space B (2000 sqft):
+   * - Mechanical: $45/sqft = $90,000
+   * - Electrical: $35/sqft = $70,000
+   * - Plumbing: $25/sqft = $50,000
+   * Total construction cost for Space B = $210,000
+   * 
+   * Total construction cost for structure = $330,000
+   * This total is then used to find the appropriate fee scale row
+   * 
+   * Note: Each discipline's fee scale is calculated independently using its own
+   * discipline-specific construction cost. This ensures accurate fee rates for
+   * each discipline based on their respective construction costs.
+   */
   const getFeeScale = (
     structure: Structure, 
     discipline: string, 
-    designFeeScale: FeeScale[],
     duplicateStructureRates: Array<{ id: number; rate: number }>
   ): { adjustedRate: number } => {
-    // Add detailed fee scale logging
     console.log('getFeeScale called:', {
       structure: structure.name,
       discipline,
-      hasFeeScale: !!designFeeScale,
-      feeScaleLength: designFeeScale?.length,
+      hasFeeScale: !!feeScale,
+      feeScaleLength: feeScale?.length,
       totalConstructionCost: constructionCosts[structure.id]?.['Total'],
       disciplineConstructionCost: constructionCosts[structure.id]?.[discipline],
       duplicateRates: duplicateStructureRates,
-      rawFeeScale: designFeeScale
+      rawFeeScale: feeScale
     });
 
-    // Early return if no fee scale data
-    if (!designFeeScale || designFeeScale.length === 0) {
+    if (!feeScale || feeScale.length === 0) {
       console.warn('No fee scale data available for:', { 
         structure: structure.name, 
         discipline,
         totalConstructionCost: constructionCosts[structure.id]?.['Total'],
         disciplineConstructionCost: constructionCosts[structure.id]?.[discipline]
       });
-      // Return a default rate of 0.05 (5%) if no fee scale data
       return { adjustedRate: 0.05 };
     }
 
-    // Get total construction cost for this structure to determine fee scale
-    const totalConstructionCost = constructionCosts[structure.id]?.['Total'] || 0;
-    // Get discipline's construction cost for final calculation
+    // Get the discipline-specific construction cost
     const disciplineConstructionCost = constructionCosts[structure.id]?.[discipline] || 0;
+    const totalConstructionCost = constructionCosts[structure.id]?.['Total'] || 0;
 
-    // If no total construction cost found, use the first fee scale row
+    // If no construction cost, use the first fee scale row
     if (totalConstructionCost === 0) {
-      const firstScale = designFeeScale[0];
+      const firstScale = feeScale[0];
       if (!firstScale) {
         console.warn('No fee scale rows available');
-        return { adjustedRate: 0.05 }; // Default to 5% if no fee scale
+        return { adjustedRate: 0.05 };
       }
 
-      // Get the base rate (prime consultant rate) from first scale
       const baseRate = firstScale.prime_consultant_rate;
-
-      // Get the fraction rate for the discipline
       let fractionRate: number;
       const disciplineLower = discipline.toLowerCase();
       switch (disciplineLower) {
@@ -338,13 +313,9 @@ export default function FixedFees({
           fractionRate = 1;
       }
 
-      // Calculate the fee using the discipline's fraction of the prime consultant rate
       const disciplineRate = baseRate * (fractionRate / 100);
-
-      // Get and apply the duplicate rate
       const duplicateRate = getDuplicateRate(structure, duplicateStructureRates);
 
-      // Log in development
       if (process.env.NODE_ENV === 'development') {
         console.log('Using first fee scale row for new space:', {
           structure: structure.name,
@@ -359,55 +330,34 @@ export default function FixedFees({
         });
       }
 
-      // Add logging before returning the final rate
-      const finalRate = disciplineRate * duplicateRate;
-      console.log('Fee scale calculation result:', {
-        structure: structure.name,
-        discipline,
-        baseRate,
-        fractionRate,
-        disciplineRate,
-        duplicateRate,
-        finalRate,
-        totalConstructionCost,
-        disciplineConstructionCost
-      });
-
-      return { adjustedRate: finalRate };
+      return { adjustedRate: disciplineRate * duplicateRate };
     }
 
-    // Find the appropriate fee scale row using total construction cost
-    let scale = designFeeScale.find((row: FeeScale, index: number) => {
-      const nextRow = designFeeScale[index + 1];
-      // If there's no next row, use this row if the cost is greater than or equal to this row's cost
+    // Find the appropriate fee scale row based on total construction cost
+    let scale = feeScale.find((row: FeeScale, index: number) => {
+      const nextRow = feeScale[index + 1];
       if (!nextRow) {
         return totalConstructionCost >= row.construction_cost;
       }
-      // Otherwise, use this row if the cost is greater than or equal to this row's cost
-      // and less than the next row's cost
       return totalConstructionCost >= row.construction_cost && totalConstructionCost < nextRow.construction_cost;
     });
 
     if (!scale) {
-      // If no scale found, use the last row if the cost is greater than all rows
-      if (totalConstructionCost >= designFeeScale[designFeeScale.length - 1].construction_cost) {
-        scale = designFeeScale[designFeeScale.length - 1];
+      if (totalConstructionCost >= feeScale[feeScale.length - 1].construction_cost) {
+        scale = feeScale[feeScale.length - 1];
       } else {
         console.warn('No matching fee scale found for total construction cost:', {
           totalConstructionCost,
           discipline,
           structure: structure.name,
-          availableScales: designFeeScale.map(s => s.construction_cost)
+          availableScales: feeScale.map(s => s.construction_cost)
         });
-        // Return a default rate of 0.05 (5%) if no matching scale
         return { adjustedRate: 0.05 };
       }
     }
 
-    // Get the base rate (prime consultant rate) from the scale
+    // Calculate the discipline-specific rate
     const baseRate = scale.prime_consultant_rate;
-
-    // Get the fraction rate for the discipline
     let fractionRate: number;
     const disciplineLower = discipline.toLowerCase();
     switch (disciplineLower) {
@@ -427,13 +377,9 @@ export default function FixedFees({
         fractionRate = 1;
     }
 
-    // Calculate the fee using the discipline's fraction of the prime consultant rate
     const disciplineRate = baseRate * (fractionRate / 100);
-
-    // Get and apply the duplicate rate
     const duplicateRate = getDuplicateRate(structure, duplicateStructureRates);
 
-    // Log in development
     if (process.env.NODE_ENV === 'development') {
       console.log('Calculated fee scale:', {
         structure: structure.name,
@@ -448,24 +394,9 @@ export default function FixedFees({
       });
     }
 
-    // Add logging before returning the final rate
-    const finalRate = disciplineRate * duplicateRate;
-    console.log('Fee scale calculation result:', {
-      structure: structure.name,
-      discipline,
-      baseRate,
-      fractionRate,
-      disciplineRate,
-      duplicateRate,
-      finalRate,
-      totalConstructionCost,
-      disciplineConstructionCost
-    });
-
-    return { adjustedRate: finalRate };
+    return { adjustedRate: disciplineRate * duplicateRate };
   };
 
-  // Add logging to memoizedFeeScales calculation
   const memoizedFeeScales = useMemo(() => {
     console.log('Calculating memoizedFeeScales with inputs:', {
       structures: structures.map(s => ({
@@ -473,7 +404,7 @@ export default function FixedFees({
         name: s.name,
         designPercentage: s.designPercentage
       })),
-      designFeeScale,
+      feeScale,
       duplicateStructureRates
     });
 
@@ -482,9 +413,8 @@ export default function FixedFees({
     structures.forEach(structure => {
       scales[structure.id] = {};
       DISCIPLINES.forEach(discipline => {
-        // Only calculate if we have fee scale data
-        if (designFeeScale && designFeeScale.length > 0) {
-          const result = getFeeScale(structure, discipline, designFeeScale, duplicateStructureRates);
+        if (feeScale && feeScale.length > 0) {
+          const result = getFeeScale(structure, discipline, duplicateStructureRates);
           console.log('Fee scale calculation result:', {
             structure: structure.name,
             discipline,
@@ -498,16 +428,14 @@ export default function FixedFees({
     });
     
     return scales;
-  }, [structures, DISCIPLINES, designFeeScale, duplicateStructureRates, constructionCosts]);
+  }, [structures, DISCIPLINES, feeScale, duplicateStructureRates, constructionCosts]);
 
-  // Update calculateDisciplineFee to handle structure updates
   const calculateDisciplineFee = useCallback((
     structure: Structure,
     discipline: string,
     phase: 'design' | 'construction',
     returnRawCost: boolean = false
   ): { fee: number; rate: number } => {
-    // Add logging for fee calculation inputs
     console.log('calculateDisciplineFee inputs:', {
       structure: structure.name,
       discipline,
@@ -517,27 +445,22 @@ export default function FixedFees({
       constructionCosts: constructionCosts[structure.id]?.[discipline]
     });
 
-    // Get the memoized fee scale
     const feeScale = memoizedFeeScales[structure.id]?.[discipline];
     
-    // Early return if no fee scale data
     if (!feeScale || feeScale.adjustedRate === 0) {
       console.log('No fee scale data or zero rate:', { structure: structure.name, discipline, feeScale });
       return { fee: 0, rate: 0 };
     }
 
-    // Calculate the percentage based on phase
     const percentage = phase === 'design' 
       ? (structure.designPercentage ?? 80) / 100 
       : (100 - (structure.designPercentage ?? 80)) / 100;
     
-    // Calculate discipline-specific construction cost for this structure
     const totalConstructionCost = structure.levels.reduce((total, level) =>
       level.spaces.reduce((levelTotal, space) => {
         const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
         if (fee) {
           const spaceConstructionCost = fee.costPerSqft * space.floorArea;
-          // Add logging for construction cost calculation
           if (isNaN(spaceConstructionCost)) {
             console.error('NaN construction cost calculated:', {
               structure: structure.name,
@@ -554,15 +477,12 @@ export default function FixedFees({
         return levelTotal;
       }, 0), 0);
 
-    // If returnRawCost is true, return the raw construction cost
     if (returnRawCost) {
       return { fee: totalConstructionCost, rate: 0 };
     }
     
-    // Calculate the fee using the memoized rate
     const calculatedFee = totalConstructionCost * (feeScale.adjustedRate / 100) * percentage;
     
-    // Add logging for final fee calculation
     if (isNaN(calculatedFee)) {
       console.error('NaN fee calculated:', {
         structure: structure.name,
@@ -578,7 +498,45 @@ export default function FixedFees({
     return { fee: calculatedFee, rate: feeScale.adjustedRate };
   }, [memoizedFeeScales, constructionCosts]);
 
-  // Memoized functions
+  const calculateTotalDesignFee = useCallback((structure: Structure): number => {
+    let total = 0;
+
+    structure.levels.forEach(level => {
+      level.spaces.forEach(space => {
+        // Calculate fees for each discipline in the space
+        space.totalConstructionCosts.forEach(fee => {
+          if (!fee.isActive) {
+            console.log(`Skipping inactive fee for ${fee.discipline}`);
+            return;
+          }
+
+          const { fee: disciplineFee } = calculateDisciplineFee(structure, fee.discipline, 'design');
+          console.log(`${fee.discipline} Fee:`, {
+            constructionCost: fee.totalConstructionCost,
+            designFee: disciplineFee
+          });
+          
+          total += disciplineFee;
+        });
+
+        // Add any engineering services fees
+        if (space.engineeringServices) {
+          space.engineeringServices.forEach(service => {
+            if (service.isActive && service.estimated_fee) {
+              total += Number(service.estimated_fee) || 0;
+            }
+          });
+        }
+      });
+    });
+
+    console.log('\nFinal Total:', {
+      total
+    });
+
+    return total;
+  }, [calculateDisciplineFee]);
+
   const memoizedCalculateFee = useCallback((
     structure: Structure,
     discipline: string,
@@ -595,20 +553,16 @@ export default function FixedFees({
   const getTotalDesignFeesForDiscipline = useCallback((structure: Structure, discipline: string): number => {
     return structure.levels.reduce((total, level) => {
       return level.spaces.reduce((levelSum, space) => {
-        // Find the fee regardless of active state
         const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
         if (!fee) return levelSum;
 
         const { fee: calculatedFee } = memoizedCalculateFee(structure, discipline, 'design');
-        // Only add to total if fee is active
         return levelSum + (fee.isActive ? calculatedFee : 0);
       }, 0);
     }, 0);
   }, [memoizedCalculateFee]);
 
-  // Update calculateServiceFee to handle services without spaces
   const calculateServiceFee = useCallback((service: TrackedService, discipline: string, structureId: string): number => {
-    // Add service fee calculation logging
     console.log('calculateServiceFee called:', {
       service: service.service_name,
       discipline,
@@ -620,21 +574,16 @@ export default function FixedFees({
       phase: service.phase
     });
 
-    // Find the structure
     const structure = structures.find(s => s.id === structureId);
     if (!structure) return 0;
 
-    // If service has a custom fee, use that
     if (service.customFee !== undefined) {
       return service.customFee;
     }
 
-    // If service has a min_fee, use that as base
     let calculatedFee = service.min_fee ?? 0;
 
-    // If service has a rate, calculate based on total design fees
     if (service.rate !== null && service.rate !== undefined) {
-      // Calculate total design fees for this discipline
       const totalDesignFees = structure.levels.reduce((total, level) => {
         return total + level.spaces.reduce((spaceTotal, space) => {
           const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
@@ -652,11 +601,9 @@ export default function FixedFees({
         }, 0);
       }, 0);
 
-      // Calculate fee based on rate applied to total design fees
       calculatedFee = totalDesignFees * (service.rate / 100);
     }
 
-    // Apply fee increment if specified
     if (service.fee_increment) {
       const remainder = calculatedFee % service.fee_increment;
       if (remainder > 0) {
@@ -664,12 +611,10 @@ export default function FixedFees({
       }
     }
 
-    // Use min_fee if calculated fee is less
     if (service.min_fee && calculatedFee < service.min_fee) {
       calculatedFee = service.min_fee;
     }
 
-    // Add logging before returning the final fee
     console.log('Service fee calculation result:', {
       service: service.service_name,
       discipline,
@@ -683,7 +628,6 @@ export default function FixedFees({
     return calculatedFee;
   }, [structures, calculateDisciplineFee]);
 
-  // Add logging to calculateDisciplineTotal
   const calculateDisciplineTotal = useCallback((
     structure: Structure,
     discipline: string,
@@ -704,10 +648,8 @@ export default function FixedFees({
       }))
     });
 
-    // Calculate space fees for this discipline using the constructionCosts prop
     const spaceFeesTotal = structure.levels.length > 0 ? structure.levels.reduce((levelTotal, level) => {
       return levelTotal + level.spaces.reduce((spaceTotal, space) => {
-        // Get the construction cost, defaulting to 0 if not found
         const constructionCost = constructionCosts[structure.id]?.[discipline] ?? 0;
         
         if (phase === 'construction' && !hasConstructionAdminServices) return spaceTotal;
@@ -731,7 +673,6 @@ export default function FixedFees({
 
         const { fee: calculatedFee } = calculateDisciplineFee(tempStructure, discipline, phase);
         
-        // Add logging for space fee calculation
         console.log('Space fee calculation:', {
           structure: structure.name,
           level: level.name,
@@ -748,7 +689,6 @@ export default function FixedFees({
       }, 0);
     }, 0) : 0;
 
-    // Calculate service fees for this discipline
     const serviceFeesTotal = trackedServices
       .filter(service => 
         service.discipline === discipline && 
@@ -760,7 +700,6 @@ export default function FixedFees({
       .reduce((total, service) => {
         const calculatedFee = calculateServiceFee(service, discipline, structure.id);
         
-        // Add logging for service fee calculation
         console.log('Service fee calculation:', {
           structure: structure.name,
           service: service.service_name,
@@ -775,7 +714,6 @@ export default function FixedFees({
 
     const total = spaceFeesTotal + serviceFeesTotal;
 
-    // Add logging for final totals
     console.log('Discipline total calculation result:', {
       structure: structure.name,
       discipline,
@@ -793,7 +731,6 @@ export default function FixedFees({
     };
   }, [hasConstructionAdminServices, trackedServices, calculateServiceFee, calculateDisciplineFee, constructionCosts]);
 
-  // Then add the memoized discipline totals calculation
   const memoizedDisciplineTotals = useMemo(() => {
     const totals: Record<string, Record<string, Record<string, Record<string, number>>>> = {};
     
@@ -810,7 +747,6 @@ export default function FixedFees({
     return totals;
   }, [structures, DISCIPLINES, calculateDisciplineTotal]);
 
-  // Memoize the calculateProjectSummary function
   const calculateProjectSummary = useCallback((): ProjectSummary => {
     const designTotals = DISCIPLINES.reduce((acc, discipline) => {
       acc[discipline] = structures.reduce((sum, structure) => {
@@ -843,13 +779,10 @@ export default function FixedFees({
     };
   }, [DISCIPLINES, structures, calculateDisciplineTotal]);
 
-  // Add the design percentage handler before it's used
   const handleDesignPercentageUpdate = useCallback((structureId: string, newPercentage: number) => {
-    // Update the structure's design percentage in the parent component
     onFeeUpdate(structureId, '', '', '', { designPercentage: newPercentage } as Partial<Fee>, phase);
   }, [onFeeUpdate, phase]);
 
-  // Update renderGrandTotals to handle the new totals structure
   const renderGrandTotals = useCallback((structure: Structure) => {
     const grandTotals = DISCIPLINES.reduce((acc, discipline) => {
       const designTotal = memoizedDisciplineTotals[structure.id]?.[discipline]?.design?.total ?? 0;
@@ -860,9 +793,20 @@ export default function FixedFees({
 
     const totalSum = Object.values(grandTotals).reduce((sum: number, value: number) => sum + value, 0);
     
+    // Get the structure's total construction cost from the constructionCosts prop
+    const structureTotalCost = constructionCosts[structure.id]?.['Total'] ?? 0;
+    
     return (
       <>
         <div className="mt-4 border-t-2 border-gray-300 pt-4">
+          <div className="flex justify-end mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{structure.name} Total Construction Cost:</span>
+              <span className="text-right font-medium">
+                {formatCurrency(structureTotalCost)}
+              </span>
+            </div>
+          </div>
           <div className="grid grid-cols-6 gap-2 px-4">
             <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 font-medium">
               <span className="text-sm">{structure.name} Grand Total Fees</span>
@@ -872,7 +816,7 @@ export default function FixedFees({
                 <div className="flex-1 text-right font-medium">
                   {formatCurrency(grandTotals[discipline])}
                 </div>
-                <div className="w-8" /> {/* Spacer for checkbox column */}
+                <div className="w-8" />
               </div>
             ))}
           </div>
@@ -889,13 +833,11 @@ export default function FixedFees({
         </div>
       </>
     );
-  }, [memoizedDisciplineTotals, formatCurrency, DISCIPLINES]);
+  }, [memoizedDisciplineTotals, formatCurrency, DISCIPLINES, constructionCosts]);
 
-  // Memoize the renderTrackedServices function
   const renderTrackedServices = useCallback((structureId: string, phase: 'design' | 'construction') => {
     // First, group all services by name
     const servicesByName = trackedServices.reduce((acc, service) => {
-      // Only include services that match the phase and structure
       if (service.phase === phase && service.structureId === structureId) {
         if (!acc[service.service_name]) {
           acc[service.service_name] = [];
@@ -907,21 +849,14 @@ export default function FixedFees({
 
     // Then filter the groups - a group should be displayed if at least one service in it meets the criteria
     const filteredGroups = Object.entries(servicesByName).filter(([_, services]) => {
-      // A group should be displayed if at least one service in it:
-      // 1. Is included
-      // 2. AND either:
-      //    a. Is a construction admin service
-      //    b. OR has fee values
       return services.some(service => {
         const isIncluded = service.isIncluded;
         const isConstructionAdmin = service.isConstructionAdmin;
         const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
-
         return isIncluded && (isConstructionAdmin || hasFeeValues);
       });
     });
 
-    // If no groups to display, return null
     if (filteredGroups.length === 0) {
       return null;
     }
@@ -930,22 +865,18 @@ export default function FixedFees({
       <div className="mt-4 space-y-2">
         {filteredGroups.map(([serviceName, services]) => (
           <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
-            {/* Description column */}
             <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
               <Home className="w-3.5 h-3.5 text-primary/50" />
               <span className="text-sm">{serviceName}</span>
             </div>
             
-            {/* Discipline columns */}
             {DISCIPLINES.map((discipline: string) => {
-              // Find the service for this discipline
               const service = services.find(s => s.discipline === discipline);
               
               if (!service) {
                 return <div key={discipline} className="h-10" />;
               }
 
-              // Only render the service if it meets the display criteria
               const isIncluded = service.isIncluded;
               const isConstructionAdmin = service.isConstructionAdmin;
               const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
@@ -959,42 +890,139 @@ export default function FixedFees({
               const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
               const hasCustomFee = service.customFee !== undefined && service.customFee !== calculatedFee;
 
+              // Use console.group to keep logs organized and persistent
+              console.group(`Service Fee Update - ${service.service_name} (${discipline})`);
+              console.log('Current State:', {
+                service: service.service_name,
+                discipline,
+                customFee: service.customFee,
+                calculatedFee,
+                displayFee,
+                hasCustomFee,
+                isIncluded: service.isIncluded,
+                isConstructionAdmin: service.isConstructionAdmin,
+                timestamp: new Date().toISOString()
+              });
+              console.groupEnd();
+
+              const handleFeeChange = (value: string, service: TrackedService, discipline: string) => {
+                const cleanValue = value.replace(/[$,]/g, '');
+                
+                console.group(`Fee Change - ${service.service_name} (${discipline})`);
+                console.log('Input:', {
+                  rawValue: value,
+                  cleanValue,
+                  timestamp: new Date().toISOString()
+                });
+                
+                if (cleanValue === '') {
+                  console.log('Clearing fee');
+                  onServiceFeeUpdate?.(service.id, discipline, 0, service.phase);
+                  setInputValues(prev => ({ ...prev, [service.id]: '' }));
+                  console.groupEnd();
+                  return;
+                }
+
+                const numericValue = parseFloat(cleanValue);
+                if (!isNaN(numericValue)) {
+                  console.log('Updating fee:', {
+                    numericValue,
+                    timestamp: new Date().toISOString()
+                  });
+                  onServiceFeeUpdate?.(service.id, discipline, numericValue, service.phase);
+                  setInputValues(prev => ({ ...prev, [service.id]: formatCurrency(numericValue) }));
+                } else {
+                  console.warn('Invalid numeric value:', cleanValue);
+                }
+                console.groupEnd();
+              };
+
+              const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>, service: TrackedService) => {
+                const value = e.target.value;
+                if (value === '' || /^[$]?\d*\.?\d*$/.test(value)) {
+                  console.group(`Input Change - ${service.service_name}`);
+                  console.log('Updating input value:', {
+                    value,
+                    timestamp: new Date().toISOString()
+                  });
+                  setInputValues(prev => ({ ...prev, [service.id]: value }));
+                  console.groupEnd();
+                }
+              };
+
+              const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, service: TrackedService, discipline: string) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  console.group(`Enter Key Press - ${service.service_name} (${discipline})`);
+                  console.log('Triggering fee update on Enter');
+                  handleFeeChange(e.currentTarget.value, service, discipline);
+                  console.groupEnd();
+                }
+              };
+
+              const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>, service: TrackedService, discipline: string) => {
+                console.group(`Input Blur - ${service.service_name} (${discipline})`);
+                console.log('Triggering fee update on blur');
+                handleFeeChange(e.target.value, service, discipline);
+                console.groupEnd();
+              };
+
+              const handleClick = (e: React.MouseEvent<HTMLButtonElement>, service: TrackedService, discipline: string) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.group(`Revert Click - ${service.service_name} (${discipline})`);
+                console.log('Reverting to calculated fee');
+                
+                // Calculate the default fee
+                const calculatedFee = calculateServiceFee(service, discipline, structureId);
+                console.log('Calculated fee:', calculatedFee);
+                
+                // Update the service fee to the calculated value
+                onServiceFeeUpdate?.(service.id, discipline, calculatedFee, service.phase);
+                
+                // Clear the input value to show the calculated fee
+                setInputValues(prev => ({ ...prev, [service.id]: '' }));
+                console.groupEnd();
+              };
+
               return (
-                <div key={`${service.id}-${discipline}`} className="flex items-center gap-2">
-                  <div className="flex-1 flex items-center gap-2">
-                    {hasCustomFee && service.isIncluded && (
-                      <button
-                        type="button"
-                        className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
-                        title="Revert to calculated fee"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (onServiceFeeUpdate) {
-                            onServiceFeeUpdate(service.id, discipline, undefined, phase);
-                          }
-                        }}
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                    )}
+                <div key={discipline} className="flex items-center gap-2">
+                  <div className="flex-1">
                     <Input
                       type="text"
-                      value={formatCurrency(displayFee)}
-                      onChange={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (onServiceFeeUpdate && service.isIncluded) {
-                          const value = e.target.value.replace(/[^0-9.-]+/g, '');
-                          const numericValue = parseFloat(value) || 0;
-                          onServiceFeeUpdate(service.id, discipline, numericValue, phase);
-                        }
-                      }}
-                      className={`text-right pr-2 bg-transparent ${!service.isIncluded ? 'text-gray-400' : ''}`}
-                      disabled={!service.isIncluded}
+                      value={inputValues[service.id] ?? formatCurrency(displayFee)}
+                      onChange={(e) => handleInputChange(e, service)}
+                      onKeyDown={(e) => handleInputKeyDown(e, service, discipline)}
+                      onBlur={(e) => handleInputBlur(e, service, discipline)}
+                      className={`w-24 text-right ${!isIncluded ? 'text-gray-400' : hasCustomFee ? 'text-primary' : ''}`}
+                      disabled={!isIncluded}
                     />
                   </div>
-                  <div className="w-8" /> {/* Spacer for alignment with space toggles */}
+                  <div className="w-8 flex items-center justify-center">
+                    {hasCustomFee && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleClick(e, service, discipline)}
+                        className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
+                        title="Revert to calculated fee"
+                      >
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="16" 
+                          height="16" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <path d="M5 12h14" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1002,23 +1030,18 @@ export default function FixedFees({
         ))}
       </div>
     );
-  }, [trackedServices, DISCIPLINES, calculateServiceFee, formatCurrency, onServiceFeeUpdate]);
+  }, [trackedServices, DISCIPLINES, calculateServiceFee, formatCurrency, onServiceFeeUpdate, inputValues]);
 
-  // Add these refs at the top of the component, after the state declarations
   const prevTrackedServices = useRef(trackedServices);
   const prevCalculateServiceFee = useRef(calculateServiceFee);
   const prevFormatCurrency = useRef(formatCurrency);
   const prevOnServiceFeeUpdate = useRef(onServiceFeeUpdate);
 
-  // Add a useEffect to log tracked services changes
   useEffect(() => {
-    // Clear previous logs
     console.clear();
     
-    // Tag for easy filtering
     const TAG = '🔍 FIXED_FEES_DEBUG';
     
-    // Only log services that might be problematic
     const problematicServices = trackedServices.filter(service => {
       const hasNoFeeValues = service.min_fee === null && service.rate === null && service.fee_increment === null;
       const hasNoStructure = !service.structureId;
@@ -1069,7 +1092,6 @@ export default function FixedFees({
       console.log(`${TAG} - No problematic services found`);
     }
 
-    // Log current structure's services
     const currentStructureId = structures[0]?.id;
     if (currentStructureId) {
       const structureServices = trackedServices.filter(s => s.structureId === currentStructureId);
@@ -1102,7 +1124,6 @@ export default function FixedFees({
     }
   }, [trackedServices, structures]);
 
-  // Update renderTotalsRow to use memoized discipline totals
   const renderTotalsRow = useCallback((structure: Structure, phase: 'design' | 'construction') => {
     const totals = DISCIPLINES.reduce((acc, discipline) => {
       const disciplineTotals = memoizedDisciplineTotals[structure.id]?.[discipline]?.[phase];
@@ -1121,7 +1142,7 @@ export default function FixedFees({
               <div className="flex-1 text-right font-medium">
                 {formatCurrency(totals[discipline])}
               </div>
-              <div className="w-8" /> {/* Spacer for checkbox column */}
+              <div className="w-8" />
             </div>
           ))}
         </div>
@@ -1129,7 +1150,6 @@ export default function FixedFees({
     );
   }, [memoizedDisciplineTotals, formatCurrency, DISCIPLINES]);
 
-  // Memoize the renderSummaryPanel function
   const renderSummaryPanel = useCallback(() => {
     const summary = calculateProjectSummary();
     const designTotal = Object.values(summary.designTotals).reduce((sum, val) => sum + val, 0);
@@ -1165,7 +1185,6 @@ export default function FixedFees({
           <div className="mt-4">
             <Card className="p-4">
               <div className="space-y-6">
-                {/* Design Phase Summary */}
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 mb-3">Project Design Phase Totals</h3>
                   <div className="space-y-2">
@@ -1184,7 +1203,6 @@ export default function FixedFees({
                   </div>
                 </div>
 
-                {/* Construction Phase Summary */}
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 mb-3">Project Construction Phase Totals</h3>
                   <div className="space-y-2">
@@ -1203,7 +1221,6 @@ export default function FixedFees({
                   </div>
                 </div>
 
-                {/* Project Grand Total */}
                 <div className="border-t-2 border-gray-300 pt-4">
                   <div className="flex justify-between items-center">
                     <span className="font-medium">Project Grand Total</span>
@@ -1211,7 +1228,6 @@ export default function FixedFees({
                   </div>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="flex justify-end gap-2 pt-2">
                   <Button
                     variant="outline"
@@ -1288,7 +1304,6 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     );
   };
 
-  // Update getServiceFeesForDiscipline to use isIncluded
   const getServiceFeesForDiscipline = (structureId: string, discipline: string): number => {
     const fees = trackedServices
       .filter((service): service is TrackedService & { min_fee: number } => 
@@ -1301,25 +1316,20 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     return fees;
   };
 
-  // Add helper function to determine if spaces should be shown for a discipline
   const shouldShowSpacesForDiscipline = (discipline: string): boolean => {
-    if (phase === 'design') return true; // Always show spaces in design phase
+    if (phase === 'design') return true;
     
-    // In construction phase, only show spaces if there are construction admin services
     return hasConstructionAdminServices;
   };
 
-  // Update the renderSpacesForDiscipline function to properly handle return type
   const renderSpacesForDiscipline = (structure: Structure, discipline: string): JSX.Element[] => {
     if (!shouldShowSpacesForDiscipline(discipline)) return [];
 
     return structure.levels.flatMap(level => 
       level.spaces.map((space: Space): JSX.Element | null => {
-        // Find the fee regardless of active state
         const fee = space.totalConstructionCosts.find((f: Fee) => f.discipline === discipline);
         if (!fee) return null;
 
-        // Calculate the current fee value regardless of active state
         const tempStructure: Structure = {
           ...structure,
           levels: [{
@@ -1328,11 +1338,9 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
           }]
         };
         const { fee: calculatedFee } = memoizedCalculateFee(tempStructure, discipline, phase);
-        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
         const displayFee = fee?.isActive && fee.designFee !== undefined 
           ? fee.designFee 
           : calculatedFee;
-        // Only show revert icon if this specific fee has been manually edited and is active
         const hasCustomFee = fee?.designFee !== undefined && 
                             fee.designFee !== calculatedFee && 
                             fee.isActive;
@@ -1351,7 +1359,6 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     );
   };
 
-  // Update handleFeeToggle to only recalculate affected discipline
   const handleFeeToggle = useCallback((
     structureId: string,
     levelId: string,
@@ -1360,7 +1367,6 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     isActive: boolean,
     feePhase: 'design' | 'construction'
   ) => {
-    // Find the fee to get its discipline
     const structure = structures.find(s => s.id === structureId);
     if (!structure) return;
 
@@ -1385,17 +1391,14 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
       discipline: fee.discipline
     });
 
-    // Use the dedicated toggle handler if available
     if (onDisciplineFeeToggle) {
       console.log('FixedFees: Calling onDisciplineFeeToggle');
       onDisciplineFeeToggle(structureId, levelId, spaceId, feeId, isActive);
     } else {
-      // Fallback to onFeeUpdate but only update isActive
       console.log('FixedFees: Falling back to onFeeUpdate');
       onFeeUpdate(structureId, levelId, spaceId, feeId, { isActive }, feePhase);
     }
 
-    // Log in development
     if (process.env.NODE_ENV === 'development') {
       console.log('FixedFees: Toggled fee:', {
         structureId,
@@ -1410,7 +1413,6 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     }
   }, [structures, onDisciplineFeeToggle, onFeeUpdate]);
 
-  // Add effect to log when structures prop changes
   useEffect(() => {
     console.log('FixedFees: structures prop changed:', {
       structures: structures.map(s => ({
@@ -1433,23 +1435,8 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     });
   }, [structures]);
 
-  // Helper function to get manual fee override for a given structure, discipline, and optional space
-  // Usage: getManualOverride(structureId, discipline, spaceId)
-  const getManualOverride = (
-    structureId: string,
-    discipline: string,
-    spaceId?: string
-  ): ManualFeeOverride | undefined => {
-    return manualFeeOverrides.find(o =>
-      o.structureId === structureId &&
-      o.discipline === discipline &&
-      (!spaceId || o.spaceId === spaceId)
-    );
-  };
-
   return (
     <div className="space-y-8">
-      {/* Project Summary Panel */}
       {renderSummaryPanel()}
 
       {structures.map(structure => (
@@ -1459,11 +1446,9 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
             {renderPhasePercentages(structure)}
           </div>
 
-          {/* Design Phase Section */}
           <div className="mb-8">
             <h3 className="text-md font-medium text-gray-700 mb-4">Design Phase</h3>
             
-            {/* Design Phase Headers */}
             <div className="grid grid-cols-6 gap-2 mb-4 px-4 border-b border-gray-200 pb-2">
               <div className="text-sm font-medium">Description</div>
               {DISCIPLINES.map(discipline => (
@@ -1501,11 +1486,9 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                           }]
                         };
                         const { fee: calculatedDesignFee } = memoizedCalculateFee(tempStructure, discipline, 'design');
-                        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
                         const displayFee = fee?.isActive && fee.designFee !== undefined 
                           ? fee.designFee 
                           : calculatedDesignFee;
-                        // Only show revert icon if this specific fee has been manually edited and is active
                         const hasCustomFee = fee?.designFee !== undefined && 
                                             fee.designFee !== calculatedDesignFee && 
                                             fee.isActive;
@@ -1598,21 +1581,17 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
               ))}
             </div>
 
-            {/* Design Phase Services */}
             <div className="mt-8 border-t border-gray-200 pt-4">
               <h4 className="text-sm font-medium text-gray-700 mb-4">Design Phase Services</h4>
               {renderTrackedServices(structure.id, 'design')}
             </div>
 
-            {/* Design Phase Totals */}
             {renderTotalsRow(structure, 'design')}
           </div>
 
-          {/* Construction Phase Section */}
           <div className="mb-8">
             <h3 className="text-md font-medium text-gray-700 mb-4">Construction Phase</h3>
             
-            {/* Construction Phase Headers */}
             <div className="grid grid-cols-6 gap-2 mb-4 px-4 border-b border-gray-200 pb-2">
               <div className="text-sm font-medium">Description</div>
               {DISCIPLINES.map(discipline => (
@@ -1650,11 +1629,9 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
                           }]
                         };
                         const { fee: calculatedConstructionFee } = memoizedCalculateFee(tempStructure, discipline, 'construction');
-                        // For display, use manual override if it exists and fee is active, otherwise use calculated fee
                         const displayFee = fee?.isActive && fee?.constructionFee !== undefined 
                           ? fee.constructionFee 
                           : calculatedConstructionFee;
-                        // Only show revert icon if this specific fee has been manually edited and is active
                         const hasCustomFee = fee?.constructionFee !== undefined && 
                                             fee?.constructionFee !== calculatedConstructionFee && 
                                             fee?.isActive;
@@ -1747,17 +1724,14 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
               ))}
             </div>
 
-            {/* Construction Phase Services */}
             <div className="mt-8 border-t border-gray-200 pt-4">
               <h4 className="text-sm font-medium text-gray-700 mb-4">Construction Phase Services</h4>
               {renderTrackedServices(structure.id, 'construction')}
             </div>
 
-            {/* Construction Phase Totals */}
             {renderTotalsRow(structure, 'construction')}
           </div>
 
-          {/* Structure Grand Totals */}
           {renderGrandTotals(structure)}
         </Card>
       ))}

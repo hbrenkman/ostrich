@@ -19,7 +19,6 @@ export interface Space {
     isActive: boolean;
     costPerSqft: number;
   }>;
-  splitFees: boolean;
   totalCost: number;
   totalCostPerSqft: number;
   engineeringServices?: Array<{
@@ -136,4 +135,14 @@ export interface TrackedService {
   levelId: string;  // Foreign key referencing Level.id
   spaceId: string;  // Foreign key referencing Space.id
   isIncluded: boolean;
+}
+
+export interface FeeScale {
+  id: number;
+  construction_cost: number;
+  prime_consultant_rate: number;
+  fraction_of_prime_rate_mechanical: number;
+  fraction_of_prime_rate_plumbing: number;
+  fraction_of_prime_rate_electrical: number;
+  fraction_of_prime_rate_structural: number;
 } 

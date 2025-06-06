@@ -136,11 +136,14 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
         discipline => !existingDisciplines.includes(discipline)
       );
       return [
-        ...allDisciplines, // These already have IDs from the initial space
+        ...allDisciplines.map(cost => ({
+          ...cost,
+          isActive: cost.discipline === 'Civil' || cost.discipline === 'Structural' ? false : cost.isActive
+        })),
         ...missingDisciplines.map(discipline => ({
-          id: crypto.randomUUID(), // Only generate new IDs for missing disciplines
+          id: crypto.randomUUID(),
           discipline,
-          isActive: true,
+          isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
           costPerSqft: 0,
           totalConstructionCost: 0
         }))
@@ -151,7 +154,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return allDisciplines.map(discipline => ({
       id: crypto.randomUUID(),
       discipline,
-      isActive: true,
+      isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
       costPerSqft: 0,
       totalConstructionCost: 0
     }));
@@ -465,7 +468,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           return {
             id: crypto.randomUUID(),
             discipline,
-            isActive: true,
+            isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
             costPerSqft,
             totalConstructionCost
           };
@@ -516,7 +519,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       return {
         id: crypto.randomUUID(),
         discipline,
-        isActive: true,
+        isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
         costPerSqft,
         totalConstructionCost
       };
@@ -526,14 +529,17 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return calculatedCosts;
   };
 
-  // Update the useEffect that handles initial space to remove total cost calculation
+  // Update the useEffect that handles initial space to preserve inactive state for Civil and Structural
   useEffect(() => {
     if (open && initialSpace) {
       console.log('Dialog opened with initial space:', initialSpace);
       // Update the space state with the latest data from initialSpace
       setSpace({
         ...initialSpace,
-        totalConstructionCosts: initialSpace.totalConstructionCosts || disciplineConstructionCosts
+        totalConstructionCosts: initialSpace.totalConstructionCosts.map(cost => ({
+          ...cost,
+          isActive: cost.discipline === 'Civil' || cost.discipline === 'Structural' ? false : cost.isActive
+        }))
       });
 
       // Find and set the selected building type
@@ -545,7 +551,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
         // Recalculate construction costs immediately after setting building type
         if (initialSpace.floorArea) {
           const calculatedCosts = calculateDisciplineConstructionCosts(matchingBuildingType.id, initialSpace.floorArea);
-          // Preserve both the ID and isActive state from the initial space
+          // Preserve both the ID and isActive state from the initial space, but force Civil and Structural to be inactive
           const updatedCosts = calculatedCosts.map(calculatedCost => {
             const existingCost = initialSpace.totalConstructionCosts.find(
               cost => cost.discipline === calculatedCost.discipline
@@ -553,7 +559,9 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
             return {
               ...calculatedCost,
               id: existingCost?.id || crypto.randomUUID(), // Preserve original ID
-              isActive: existingCost?.isActive ?? true
+              isActive: calculatedCost.discipline === 'Civil' || calculatedCost.discipline === 'Structural' 
+                ? false 
+                : (existingCost?.isActive ?? true)
             };
           });
           setDisciplineConstructionCosts(updatedCosts);
@@ -636,8 +644,13 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     console.log('space.floorArea changed:', space.floorArea);
   }, [space.floorArea]);
 
-  // Update the handleDisciplineToggle function
+  // Update the handleDisciplineToggle function to prevent toggling Civil and Structural
   const handleDisciplineToggle = (discipline: string) => {
+    // Prevent toggling Civil and Structural disciplines
+    if (discipline === 'Civil' || discipline === 'Structural') {
+      return;
+    }
+
     const constructionCost = disciplineConstructionCosts.find(f => f.discipline === discipline);
     if (!constructionCost) return;
 
@@ -697,8 +710,11 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       const calculatedFees = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
       const updatedFees = calculatedFees.map(calculatedFee => {
         const existingFee = disciplineConstructionCosts.find(f => f.discipline === calculatedFee.discipline);
-        const fee = { ...calculatedFee, isActive: existingFee?.isActive ?? true };
-        return fee;
+        // Civil and Structural should be inactive by default, unless explicitly active
+        const isActive = calculatedFee.discipline === 'Civil' || calculatedFee.discipline === 'Structural'
+          ? existingFee?.isActive ?? false
+          : existingFee?.isActive ?? true;
+        return { ...calculatedFee, isActive };
       });
       console.log("handleSave: updatedFees (after mapping calculatedFees):", updatedFees);
       console.log('SpaceDialog: Final totalConstructionCosts state being saved:', updatedFees);
