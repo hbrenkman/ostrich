@@ -41,22 +41,6 @@ export function EngineeringServicesManager({
   const [isDragging, setIsDragging] = useState(false);
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>('all');
 
-  // Debug state for tracking drag and drop operations
-  const [debugState, setDebugState] = useState<{
-    lastAction: string;
-    serviceId: string | null;
-    oldIncluded: boolean | null;
-    newIncluded: boolean | null;
-    timestamp: number | null;
-    error?: string;
-  }>({
-    lastAction: 'initialized',
-    serviceId: null,
-    oldIncluded: null,
-    newIncluded: null,
-    timestamp: null
-  });
-
   // Refs for drop zones
   const includedDropRef = useRef<HTMLDivElement>(null);
   const excludedDropRef = useRef<HTMLDivElement>(null);
@@ -132,66 +116,35 @@ export function EngineeringServicesManager({
   const includedServices = filteredServices.filter(service => service.isIncluded);
   const excludedServices = filteredServices.filter(service => !service.isIncluded);
 
-  // Debug state update helper
-  const updateDebugState = (action: string, service: TrackedService | null, oldIncluded: boolean | null, newIncluded: boolean | null, error?: string) => {
-    console.log('Debug State Update:', { action, serviceId: service?.id, oldIncluded, newIncluded, error });
-    setDebugState({
-      lastAction: action,
-      serviceId: service?.id || null,
-      oldIncluded,
-      newIncluded,
-      timestamp: Date.now(),
-      error
-    });
-  };
-
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: TrackedService) => {
     console.log('Drag Start:', service);
-    updateDebugState('drag_start', service, service.isIncluded, null);
     setIsDragging(true);
     setDraggedService(service);
-    
-    const dragData = {
-      type: 'engineering_service',
-      service: {
-        ...service,
-        isIncluded: service.isIncluded
-      }
-    };
-    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', service.id);
   };
 
   const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
     console.log('Drag End:', draggedService);
-    if (draggedService) {
-      updateDebugState('drag_end', draggedService, draggedService.isIncluded, null);
-    }
     setIsDragging(false);
     setDraggedService(null);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, isIncluded: boolean) => {
     e.preventDefault();
-    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     console.log('Drag Over:', { isIncluded, draggedService });
-    updateDebugState('drag_over', draggedService, draggedService?.isIncluded || null, isIncluded);
   };
 
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
-    console.log('=== DROP EVENT START ===');
-    console.log('Target Included:', targetIncluded);
-    
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean, structureId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
     if (!draggedService) {
       console.error('No dragged service in state');
-      updateDebugState('drop_error', null, null, null, 'No dragged service in state');
       return;
     }
 
-    updateDebugState('drop_start', draggedService, draggedService.isIncluded, targetIncluded);
-    
     try {
       const data = e.dataTransfer.getData('application/json');
       console.log('Drop Data:', data);
@@ -222,8 +175,6 @@ export function EngineeringServicesManager({
         willBeIncluded: targetIncluded,
         structureId
       });
-
-      updateDebugState('drop_processing', draggedService, oldIncluded, targetIncluded);
 
       const updatedServices = trackedServices.map(s => {
         if (s.id === draggedService.id) {
@@ -257,14 +208,12 @@ export function EngineeringServicesManager({
       await onServicesChange(updatedServices);
       
       console.log('=== DROP EVENT COMPLETE ===');
-      updateDebugState('drop_complete', draggedService, oldIncluded, targetIncluded);
       
       setIsDragging(false);
       setDraggedService(null);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error during drop';
       console.error('Drop Error:', error);
-      updateDebugState('drop_error', draggedService, draggedService?.isIncluded || null, null, errorMessage);
     }
   };
 
@@ -318,7 +267,7 @@ export function EngineeringServicesManager({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Engineering Services</h2>
         <Select
@@ -341,24 +290,6 @@ export function EngineeringServicesManager({
         </Select>
       </div>
 
-      {/* Debug Display */}
-      <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg shadow-lg z-50 text-xs font-mono">
-        <div>Last Action: {debugState.lastAction}</div>
-        {debugState.serviceId && (
-          <>
-            <div>Service ID: {debugState.serviceId}</div>
-            <div>Old Included: {String(debugState.oldIncluded)}</div>
-            <div>New Included: {String(debugState.newIncluded)}</div>
-          </>
-        )}
-        {debugState.error && (
-          <div className="text-red-400">Error: {debugState.error}</div>
-        )}
-        {debugState.timestamp && (
-          <div>Time: {new Date(debugState.timestamp).toLocaleTimeString()}</div>
-        )}
-      </div>
-
       {/* Main Content */}
       <div className="grid grid-cols-2 gap-4">
         {/* Included Services */}
@@ -378,7 +309,7 @@ export function EngineeringServicesManager({
             e.stopPropagation();
             console.log('Drag Leave Included');
           }}
-          onDrop={(e) => handleDrop(e, true)}
+          onDrop={(e) => handleDrop(e, true, structureId)}
         >
           <h3 className="text-lg font-semibold mb-4">Included Services</h3>
           {includedServices.length === 0 ? (
@@ -414,7 +345,7 @@ export function EngineeringServicesManager({
             e.stopPropagation();
             console.log('Drag Leave Excluded');
           }}
-          onDrop={(e) => handleDrop(e, false)}
+          onDrop={(e) => handleDrop(e, false, structureId)}
         >
           <h3 className="text-lg font-semibold mb-4">Excluded Services</h3>
           {excludedServices.length === 0 ? (

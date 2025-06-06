@@ -1,15 +1,7 @@
-// --- IMPORTANT: Construction Cost vs. Fee Calculation ---
-// A structure represents a building or a portion of a building or similar.
-// A level represents a floor of a structure.
-// A space represents a room or area within a level.
-// A fee represents a fee for a discipline for a space to perform engineering services.
-// In this file (page.tsx), we ONLY calculate construction costs (costPerSqft * floorArea).  For each discipline asscociated with each space.
-// We then sum all the construction costs for each discipline and spaces asscociated with a structure to get the total construction cost for the structure.
-// All fee calculations are handled in FixedFees.tsx, using the totalConstructionCosts prop.
+"use client";
+
 // When adding/updating/deleting a space or fee, calculate the construction cost, and trigger a caclculation in FixedFees.tsx.
 // --------------------------------------------------------
-
-"use client";
 
 import React, { useState, useEffect, DragEvent, useRef, useCallback, useMemo } from 'react';
 import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical, ChevronDown, Copy } from 'lucide-react';
@@ -2527,8 +2519,42 @@ export default function EditProposalPage() {
 
   // Add handler for service fee updates
   const handleServiceFeeUpdate = (serviceId: string, discipline: string, fee: number, phase: 'design' | 'construction' | null) => {
-    // Remove manual override update logic
-    console.log('Updating service fee:', { serviceId, discipline, fee, phase });
+    console.group('Service Fee Update');
+    console.log('Updating service:', { serviceId, discipline, fee, phase });
+    
+    setProposal(prev => {
+      const updatedServices = prev.trackedServices.map(service => {
+        if (service.id === serviceId) {
+          // Calculate the default fee for comparison
+          const calculatedFee = service.min_fee ?? 0;
+          const hasCustomFee = fee !== calculatedFee;
+          
+          console.log('Service update:', {
+            service: service.service_name,
+            discipline,
+            oldFee: service.customFee,
+            newFee: fee,
+            calculatedFee,
+            hasCustomFee
+          });
+          
+          return {
+            ...service,
+            customFee: hasCustomFee ? fee : undefined,
+            isIncluded: true
+          };
+        }
+        return service;
+      });
+      
+      console.log('Updated services:', updatedServices);
+      console.groupEnd();
+      
+      return {
+        ...prev,
+        trackedServices: updatedServices
+      };
+    });
   };
 
   // Add handleDeleteSpace function before the return statement
