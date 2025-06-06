@@ -1,4 +1,3 @@
 {
-  "/api/project-construction-types/route": "app/api/project-construction-types/route.js",
   "/projects/[id]/proposals/[proposalId]/page": "app/projects/[id]/proposals/[proposalId]/page.js"
 }

@@ -569,7 +569,8 @@ export default function FixedFees({
   ): Record<string, number> => {
     const spaceFeesTotal = structure.levels.length > 0 ? structure.levels.reduce((levelTotal, level) => {
       return levelTotal + level.spaces.reduce((spaceTotal, space) => {
-        const constructionCost = constructionCosts[structure.id]?.[discipline] ?? 0;
+        const fee = space.totalConstructionCosts.find(f => f.discipline === discipline);
+        if (!fee || !fee.isActive) return spaceTotal;
         
         if (phase === 'construction' && !hasConstructionAdminServices) return spaceTotal;
         
@@ -577,22 +578,19 @@ export default function FixedFees({
           ...structure,
           levels: [{
             ...level,
-            spaces: [{
-              ...space,
-              totalConstructionCosts: [{
-                id: crypto.randomUUID(),
-                discipline,
-                totalConstructionCost: constructionCost,
-                isActive: true,
-                costPerSqft: space.floorArea ? constructionCost / space.floorArea : 0
-              }]
-            }]
+            spaces: [space]
           }]
         };
 
+        // Calculate the base fee
         const { fee: calculatedFee } = calculateDisciplineFee(tempStructure, discipline, phase);
         
-        return spaceTotal + calculatedFee;
+        // Use manual override if it exists, otherwise use calculated fee
+        const displayFee = phase === 'design' 
+          ? (fee.designFee !== undefined ? fee.designFee : calculatedFee)
+          : (fee.constructionFee !== undefined ? fee.constructionFee : calculatedFee);
+        
+        return spaceTotal + displayFee;
       }, 0);
     }, 0) : 0;
 
@@ -607,7 +605,7 @@ export default function FixedFees({
         service.structureId === structure.id
       )
       .reduce((total, service) => {
-        const { displayFee } = calculateServiceFee(service, discipline, structure.id);  // Use displayFee to include manual overrides
+        const { displayFee } = calculateServiceFee(service, discipline, structure.id);
         return total + displayFee;
       }, 0);
 
@@ -618,7 +616,7 @@ export default function FixedFees({
       serviceFees: serviceFeesTotal,
       total: total
     };
-  }, [hasConstructionAdminServices, trackedServices, calculateServiceFee, calculateDisciplineFee, constructionCosts]);
+  }, [hasConstructionAdminServices, trackedServices, calculateServiceFee, calculateDisciplineFee]);
 
   const memoizedDisciplineTotals = useMemo(() => {
     const totals: Record<string, Record<string, Record<string, Record<string, number>>>> = {};

@@ -2150,96 +2150,49 @@ export default function EditProposalPage() {
   const handleFeeUpdate = (structureId: string, levelId: string, spaceId: string, feeId: string, updates: Partial<Fee>, feePhase: 'design' | 'construction') => {
     console.log('handleFeeUpdate called with:', { structureId, levelId, spaceId, feeId, updates, feePhase });
     
-    // If we're only updating isActive, we can do a simpler update
-    if (Object.keys(updates).length === 1 && 'isActive' in updates) {
-      setProposal((prev: ProposalFormData) => {
-        const structure = prev.structures.find(s => s.id === structureId);
-        if (!structure) return prev;
-
-        const level = structure.levels.find(l => l.id === levelId);
-        if (!level) return prev;
-
-        const space = level.spaces.find(s => s.id === spaceId);
-        if (!space) return prev;
-
-        const feeIndex = space.totalConstructionCosts.findIndex(f => f.id === feeId);
-        if (feeIndex === -1) return prev;
-
-        // Create a new array with just the updated fee
-        const updatedFees = [...space.totalConstructionCosts];
-        updatedFees[feeIndex] = { ...updatedFees[feeIndex], isActive: updates.isActive! };
-
-        // Create new arrays with minimal updates
-        const updatedSpaces = [...level.spaces];
-        updatedSpaces[level.spaces.findIndex(s => s.id === spaceId)] = {
-          ...space,
-          totalConstructionCosts: updatedFees
-        };
-
-        const updatedLevels = [...structure.levels];
-        updatedLevels[structure.levels.findIndex(l => l.id === levelId)] = {
-          ...level,
-          spaces: updatedSpaces
-        };
-
-        const updatedStructures = [...prev.structures];
-        updatedStructures[prev.structures.findIndex(s => s.id === structureId)] = {
-          ...structure,
-          levels: updatedLevels
-        };
-
-        return {
-          ...prev,
-          structures: updatedStructures
-        };
-      });
-      return;
-    }
-
-    // For other updates (like fee values), use the existing complex update logic
     setProposal((prev: ProposalFormData) => {
-      const updatedStructures = prev.structures.map(s =>
-        s.id === structureId
-          ? {
-              ...s,
-              levels: s.levels.map(l =>
-                l.id === levelId
-                  ? {
-                      ...l,
-                      spaces: l.spaces.map(sp =>
-                        sp.id === spaceId
-                          ? {
-                              ...sp,
-                              totalConstructionCosts: sp.totalConstructionCosts.map(f => {
-                                if (f.id === feeId) {
-                                  // When toggling active state, only update isActive
-                                  if ('isActive' in updates) {
-                                    return { ...f, isActive: updates.isActive ?? f.isActive };
-                                  }
-                                }
-                                return f;
-                              })
-                            }
-                          : sp
-                      )
-                    }
-                  : l
-              )
-            }
-          : s
-      );
+      const structure = prev.structures.find(s => s.id === structureId);
+      if (!structure) return prev;
 
-      const newState = {
+      const level = structure.levels.find(l => l.id === levelId);
+      if (!level) return prev;
+
+      const space = level.spaces.find(s => s.id === spaceId);
+      if (!space) return prev;
+
+      const feeIndex = space.totalConstructionCosts.findIndex(f => f.id === feeId);
+      if (feeIndex === -1) return prev;
+
+      // Create a new array with the updated fee
+      const updatedFees = [...space.totalConstructionCosts];
+      updatedFees[feeIndex] = { 
+        ...updatedFees[feeIndex],
+        ...updates  // This will update any fee properties (isActive, designFee, constructionFee)
+      };
+
+      // Create new arrays with minimal updates
+      const updatedSpaces = [...level.spaces];
+      updatedSpaces[level.spaces.findIndex(s => s.id === spaceId)] = {
+        ...space,
+        totalConstructionCosts: updatedFees
+      };
+
+      const updatedLevels = [...structure.levels];
+      updatedLevels[structure.levels.findIndex(l => l.id === levelId)] = {
+        ...level,
+        spaces: updatedSpaces
+      };
+
+      const updatedStructures = [...prev.structures];
+      updatedStructures[prev.structures.findIndex(s => s.id === structureId)] = {
+        ...structure,
+        levels: updatedLevels
+      };
+
+      return {
         ...prev,
         structures: updatedStructures
       };
-      
-      console.log('handleFeeUpdate new state:', {
-        feeId,
-        isActive: updates.isActive,
-      });
-      
-      return newState;
     });
   };
 
