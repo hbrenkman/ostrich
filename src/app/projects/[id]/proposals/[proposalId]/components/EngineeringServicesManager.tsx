@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { GripVertical } from 'lucide-react';
 import { TrackedService } from '../types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Define the interface based on the API route
 interface EngineeringService {
@@ -38,6 +39,7 @@ export function EngineeringServicesManager({
   const [error, setError] = useState<string | null>(null);
   const [draggedService, setDraggedService] = useState<TrackedService | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('all');
 
   // Debug state for tracking drag and drop operations
   const [debugState, setDebugState] = useState<{
@@ -86,7 +88,7 @@ export function EngineeringServicesManager({
     const result = standardServices.map(service => {
       const existingService = initialTrackedServices.find(ts => 
         ts.serviceId === service.id && 
-        ts.phase === service.phase &&
+        (ts.phase === service.phase || (ts.phase === null && service.phase === 'design')) &&
         ts.structureId === structureId
       );
 
@@ -100,7 +102,7 @@ export function EngineeringServicesManager({
         min_fee: service.min_fee,
         rate: service.rate,
         fee_increment: service.fee_increment,
-        phase: service.phase || 'design',
+        phase: service.phase,
         isConstructionAdmin: service.isConstructionAdmin,
         fee: service.min_fee || 0,
         structureId: structureId,
@@ -113,9 +115,22 @@ export function EngineeringServicesManager({
     return result;
   }, [standardServices, initialTrackedServices, structureId]);
 
+  // Get unique disciplines from tracked services
+  const disciplines = useMemo(() => {
+    const uniqueDisciplines = new Set(trackedServices.map(service => service.discipline));
+    return ['all', ...Array.from(uniqueDisciplines).sort()];
+  }, [trackedServices]);
+
+  // Filter services based on selected discipline only
+  const filteredServices = useMemo(() => {
+    return trackedServices.filter(service => 
+      selectedDiscipline === 'all' || service.discipline === selectedDiscipline
+    );
+  }, [trackedServices, selectedDiscipline]);
+
   // Filter services into included and excluded
-  const includedServices = trackedServices.filter(service => service.isIncluded);
-  const excludedServices = trackedServices.filter(service => !service.isIncluded);
+  const includedServices = filteredServices.filter(service => service.isIncluded);
+  const excludedServices = filteredServices.filter(service => !service.isIncluded);
 
   // Debug state update helper
   const updateDebugState = (action: string, service: TrackedService | null, oldIncluded: boolean | null, newIncluded: boolean | null, error?: string) => {
@@ -304,6 +319,28 @@ export function EngineeringServicesManager({
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Engineering Services</h2>
+        <Select
+          value={selectedDiscipline}
+          onValueChange={setSelectedDiscipline}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by discipline" />
+          </SelectTrigger>
+          <SelectContent>
+            {disciplines.map(discipline => (
+              <SelectItem 
+                key={discipline} 
+                value={discipline}
+              >
+                {discipline === 'all' ? 'All Disciplines' : discipline}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Debug Display */}
       <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg shadow-lg z-50 text-xs font-mono">
         <div>Last Action: {debugState.lastAction}</div>

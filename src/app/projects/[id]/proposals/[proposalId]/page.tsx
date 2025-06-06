@@ -210,361 +210,22 @@ interface TrackedService {
   isIncluded: boolean;  // Renamed from isActive
 }
 
-// Update EngineeringServicesDisplay props
-interface EngineeringServicesDisplayProps {
-  services: TrackedService[];
-  isLoading: boolean;
-  onServiceUpdate: (serviceId: string, updates: Partial<TrackedService>) => void;
-  proposal: ProposalFormData;
-  setProposal: (proposal: ProposalFormData) => void;
-  onServicesChange: (services: TrackedService[]) => void;
+// Add DebugState type
+interface DebugState {
+  lastAction: string | null;
+  serviceId: string | null;
+  oldIncluded: boolean | null;
+  newIncluded: boolean | null;
+  timestamp: number;
+  error: string | null;
 }
 
-function EngineeringServicesDisplay({ 
-  services, 
-  isLoading, 
-  onServiceUpdate,
-  proposal,
-  setProposal,
-  onServicesChange 
-}: EngineeringServicesDisplayProps) {
-  const [draggedService, setDraggedService] = useState<TrackedService | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [debugState, setDebugState] = useState<{
-    lastAction: string;
-    serviceId: string | null;
-    oldIncluded: boolean | null;
-    newIncluded: boolean | null;
-    timestamp: number | null;
-    error?: string;
-  }>({
-    lastAction: 'initialized',
-    serviceId: null,
-    oldIncluded: null,
-    newIncluded: null,
-    timestamp: null
-  });
-
-  // Add refs for drop zones
-  const includedDropRef = useRef<HTMLDivElement>(null);
-  const excludedDropRef = useRef<HTMLDivElement>(null);
-
-  // Convert services to TrackedServices with isIncluded initialized from isDefaultIncluded
-  const trackedServices = useMemo(() => {
-    const result = services.map(service => {
-      const existingService = proposal.trackedServices.find(ts => 
-        ts.serviceId === service.id && 
-        ts.phase === service.phase
-      );
-
-      return {
-        id: existingService?.id || crypto.randomUUID(),
-        serviceId: service.id,
-        service_name: service.service_name,
-        name: service.service_name,
-        discipline: service.discipline,
-        isDefaultIncluded: service.isDefaultIncluded,
-        min_fee: service.min_fee,
-        rate: service.rate,
-        fee_increment: service.fee_increment,
-        phase: service.phase,
-        isConstructionAdmin: service.isConstructionAdmin,
-        fee: service.min_fee || 0,
-        structureId: existingService?.structureId || '',
-        levelId: existingService?.levelId || '',
-        spaceId: existingService?.spaceId || '',
-        isIncluded: existingService ? existingService.isIncluded : service.isDefaultIncluded,
-        customFee: existingService?.customFee
-      };
-    });
-    return result;
-  }, [services, proposal.trackedServices]);
-
-  // Use isIncluded for filtering services into columns
-  const includedServices = trackedServices.filter(service => service.isIncluded);
-  const excludedServices = trackedServices.filter(service => !service.isIncluded);
-
-  const updateDebugState = (action: string, service: TrackedService | null, oldIncluded: boolean | null, newIncluded: boolean | null, error?: string) => {
-    console.log('Debug State Update:', { action, serviceId: service?.id, oldIncluded, newIncluded, error });
-    setDebugState({
-      lastAction: action,
-      serviceId: service?.id || null,
-      oldIncluded,
-      newIncluded,
-      timestamp: Date.now(),
-      error
-    });
-  };
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: TrackedService) => {
-    console.log('Drag Start:', service);
-    updateDebugState('drag_start', service, service.isIncluded, null);
-    setIsDragging(true);
-    setDraggedService(service);
-    
-    // Store the service data in both the state and the drag event
-    const dragData = {
-      type: 'engineering_service',
-      service: {
-        ...service,
-        isIncluded: service.isIncluded
-      }
-    };
-    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
-    console.log('Drag End:', draggedService);
-    if (draggedService) {
-      updateDebugState('drag_end', draggedService, draggedService.isIncluded, null);
-    }
-    setIsDragging(false);
-    setDraggedService(null);
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, isIncluded: boolean) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'move';
-    console.log('Drag Over:', { isIncluded, draggedService });
-    updateDebugState('drag_over', draggedService, draggedService?.isIncluded || null, isIncluded);
-  };
-
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
-    console.log('=== DROP EVENT START ===');
-    console.log('Target Included:', targetIncluded);
-    
-    if (!draggedService) {
-      console.error('No dragged service in state');
-      updateDebugState('drop_error', null, null, null, 'No dragged service in state');
-      return;
-    }
-
-    // Get the current structure ID from the first structure
-    const currentStructureId = proposal.structures[0]?.id;
-    if (!currentStructureId) {
-      console.error('No structure found in proposal');
-      updateDebugState('drop_error', null, null, null, 'No structure found in proposal');
-      return;
-    }
-
-    console.log('Dragged Service State:', {
-      id: draggedService.id,
-      name: draggedService.service_name,
-      oldIsIncluded: draggedService.isIncluded,
-      newIsIncluded: targetIncluded,
-      phase: draggedService.phase,
-      isConstructionAdmin: draggedService.isConstructionAdmin,
-      currentStructureId
-    });
-
-    updateDebugState('drop_start', draggedService, draggedService.isIncluded, targetIncluded);
-    
-    try {
-      const data = e.dataTransfer.getData('application/json');
-      console.log('Drop Data:', data);
-      
-      if (!data) {
-        throw new Error('No data received in drop event');
-      }
-
-      const dragData = JSON.parse(data);
-      console.log('Parsed Drag Data:', dragData);
-      
-      if (dragData.type !== 'engineering_service' || !dragData.service) {
-        throw new Error('Invalid drag data format');
-      }
-
-      const draggedService = dragData.service as TrackedService;
-      const oldIncluded = draggedService.isIncluded;
-
-      const existingService = trackedServices.find(s => s.id === draggedService.id);
-      if (!existingService) {
-        throw new Error('Service not found in tracked services');
-      }
-
-      console.log('Existing Service Found:', {
-        id: existingService.id,
-        name: existingService.service_name,
-        currentIsIncluded: existingService.isIncluded,
-        willBeIncluded: targetIncluded,
-        currentStructureId
-      });
-
-      updateDebugState('drop_processing', draggedService, oldIncluded, targetIncluded);
-
-      const updatedServices = trackedServices.map(s => {
-        if (s.id === draggedService.id) {
-          console.log('Updating service:', { 
-            id: s.id, 
-            name: s.service_name,
-            oldIncluded: s.isIncluded, 
-            newIncluded: targetIncluded,
-            phase: s.phase,
-            isConstructionAdmin: s.isConstructionAdmin,
-            structureId: currentStructureId
-          });
-          return { 
-            ...s, 
-            isIncluded: targetIncluded,
-            structureId: currentStructureId  // Set the structure ID to the current structure
-          };
-        }
-        return s;
-      });
-
-      console.log('Updated Services Array:', updatedServices.map(s => ({
-        id: s.id,
-        name: s.service_name,
-        isIncluded: s.isIncluded,
-        phase: s.phase,
-        isConstructionAdmin: s.isConstructionAdmin,
-        structureId: s.structureId
-      })));
-
-      await onServicesChange(updatedServices);
-      
-      console.log('=== DROP EVENT COMPLETE ===');
-      updateDebugState('drop_complete', draggedService, oldIncluded, targetIncluded);
-      
-      setIsDragging(false);
-      setDraggedService(null);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error during drop';
-      console.error('Drop Error:', error);
-      updateDebugState('drop_error', draggedService, draggedService?.isIncluded || null, null, errorMessage);
-    }
-  };
-
-  const groupServicesByDiscipline = (services: TrackedService[]): Record<string, TrackedService[]> => {
-    return services.reduce((acc, service) => {
-      const discipline = service.discipline;
-      if (!acc[discipline]) {
-        acc[discipline] = [];
-      }
-      acc[discipline].push(service);
-      return acc;
-    }, {} as Record<string, TrackedService[]>);
-  };
-
-  const renderServiceItem = (service: TrackedService) => (
-    <div
-      key={service.id}
-      draggable
-      onDragStart={(e) => handleDragStart(e, service)}
-      onDragEnd={handleDragEnd}
-      className={`flex items-center justify-between p-2 rounded-md cursor-move hover:bg-gray-100 dark:hover:bg-gray-800 ${
-        isDragging && draggedService?.id === service.id ? 'opacity-50' : ''
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <GripVertical className="w-4 h-4 text-gray-400" />
-        <div>
-          <div className="text-sm font-medium">{service.service_name}</div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="space-y-4">
-      {/* Debug Display */}
-      <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg shadow-lg z-50 text-xs font-mono">
-        <div>Last Action: {debugState.lastAction}</div>
-        {debugState.serviceId && (
-          <>
-            <div>Service ID: {debugState.serviceId}</div>
-            <div>Old Included: {String(debugState.oldIncluded)}</div>
-            <div>New Included: {String(debugState.newIncluded)}</div>
-          </>
-        )}
-        {debugState.error && (
-          <div className="text-red-400">Error: {debugState.error}</div>
-        )}
-        {debugState.timestamp && (
-          <div>Time: {new Date(debugState.timestamp).toLocaleTimeString()}</div>
-        )}
-      </div>
-
-      {/* Main Content */}
-      <div className="grid grid-cols-2 gap-4">
-        <div
-          ref={includedDropRef}
-          className={`p-4 rounded-lg border ${
-            isDragging ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700'
-          }`}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Drag Enter Included');
-          }}
-          onDragOver={(e) => handleDragOver(e, true)}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Drag Leave Included');
-          }}
-          onDrop={(e) => handleDrop(e, true)}
-        >
-          <h3 className="text-lg font-semibold mb-4">Included Services</h3>
-          {isLoading ? (
-            <div>Loading...</div>
-          ) : includedServices.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-400">No services included</div>
-          ) : (
-            <div className="p-1 space-y-1">
-              {Object.entries(groupServicesByDiscipline(includedServices)).map(([discipline, services]) => (
-                <div key={discipline} className="border-b border-green-500/10 last:border-0">
-                  <div className="px-2 py-1 bg-green-500/5">
-                    <h4 className="text-xs font-medium text-green-600 dark:text-green-400">{discipline}</h4>
-                  </div>
-                  {services.map(renderServiceItem)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div
-          ref={excludedDropRef}
-          className={`p-4 rounded-lg border ${
-            isDragging ? 'border-red-500 bg-red-50 dark:bg-red-900/10' : 'border-gray-200 dark:border-gray-700'
-          }`}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Drag Enter Excluded');
-          }}
-          onDragOver={(e) => handleDragOver(e, false)}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Drag Leave Excluded');
-          }}
-          onDrop={(e) => handleDrop(e, false)}
-        >
-          <h3 className="text-lg font-semibold mb-4">Excluded Services</h3>
-          {isLoading ? (
-            <div>Loading...</div>
-          ) : excludedServices.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-400">No services excluded</div>
-          ) : (
-            <div className="p-1 space-y-1">
-              {Object.entries(groupServicesByDiscipline(excludedServices)).map(([discipline, services]) => (
-                <div key={discipline} className="border-b border-red-500/10 last:border-0">
-                  <div className="px-2 py-1 bg-red-500/5">
-                    <h4 className="text-xs font-medium text-red-600 dark:text-red-400">{discipline}</h4>
-                  </div>
-                  {services.map(renderServiceItem)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+interface Fee {
+  id: string;
+  discipline: string;
+  totalConstructionCost: number;
+  isActive: boolean;
+  costPerSqft: number;
 }
 
 const contacts: Contact[] = [
@@ -590,14 +251,6 @@ const contacts: Contact[] = [
     direct_phone: '+1 (555) 345-6789',
   },
 ];
-
-interface Fee {
-  id: string;
-  discipline: string;
-  totalConstructionCost: number;
-  isActive: boolean;
-  costPerSqft: number;
-}
 
 export default function EditProposalPage() {
   const router = useRouter();
@@ -921,8 +574,12 @@ export default function EditProposalPage() {
         const data = await response.json();
         console.log('Engineering standard services data:', data);
         if (data.services) {
-          setEngineeringStandardServices(data.services);
-          console.log("fetchEngineeringStandardServices: loaded services:", data.services);
+          const servicesWithValidPhase = data.services.map((service: any) => ({
+            ...service,
+            phase: service.phase === 'design' || service.phase === 'construction' ? service.phase : 'design'
+          }));
+          setEngineeringStandardServices(servicesWithValidPhase);
+          console.log("fetchEngineeringStandardServices: loaded services:", servicesWithValidPhase);
         } else {
           console.error('No services array in response:', data);
           setEngineeringStandardServices([]);
@@ -3067,75 +2724,16 @@ export default function EditProposalPage() {
   }, [trackedServices]);
 
   // Add handler for services change
-  const handleServicesChange = (services: TrackedService[]) => {
-    console.log('=== HANDLE SERVICES CHANGE START ===');
-    console.log('Incoming Services:', services.map(s => ({
-      id: s.id,
-      name: s.service_name,
-      isIncluded: s.isIncluded,
-      phase: s.phase,
-      isConstructionAdmin: s.isConstructionAdmin
-    })));
-
-    try {
-      setProposal(prev => {
-        console.log('Previous Proposal State:', {
-          trackedServicesCount: prev.trackedServices.length,
-          trackedServices: prev.trackedServices.map(s => ({
-            id: s.id,
-            name: s.service_name,
-            isIncluded: s.isIncluded,
-            phase: s.phase,
-            isConstructionAdmin: s.isConstructionAdmin
-          }))
-        });
-
-        const updatedServices = services.map(service => {
-          const existingService = prev.trackedServices.find(s => s.id === service.id);
-          if (existingService) {
-            console.log('Updating Existing Service:', {
-              id: service.id,
-              name: service.service_name,
-              oldIsIncluded: existingService.isIncluded,
-              newIsIncluded: service.isIncluded,
-              phase: service.phase,
-              isConstructionAdmin: service.isConstructionAdmin
-            });
-            return {
-              ...service,
-              structureId: existingService.structureId,
-              levelId: existingService.levelId,
-              spaceId: existingService.spaceId
-            };
-          }
-          console.log('New Service:', {
-            id: service.id,
-            name: service.service_name,
-            isIncluded: service.isIncluded,
-            phase: service.phase,
-            isConstructionAdmin: service.isConstructionAdmin
-          });
-          return service;
-        });
-
-        console.log('Final Updated Services:', updatedServices.map(s => ({
-          id: s.id,
-          name: s.service_name,
-          isIncluded: s.isIncluded,
-          phase: s.phase,
-          isConstructionAdmin: s.isConstructionAdmin
-        })));
-
-        console.log('=== HANDLE SERVICES CHANGE COMPLETE ===');
-
-        return {
-          ...prev,
-          trackedServices: updatedServices
-        };
-      });
-    } catch (error) {
-      console.error('Error updating services:', error);
-    }
+  const handleServicesChange = async (updatedServices: TrackedService[]) => {
+    const servicesWithValidPhase = updatedServices.map(service => ({
+      ...service,
+      phase: service.phase === 'design' || service.phase === 'construction' ? service.phase : 'design'
+    }));
+    
+    setProposal(prev => ({
+      ...prev,
+      trackedServices: servicesWithValidPhase
+    }));
   };
 
   // Add handler for service fee updates

@@ -87,7 +87,7 @@ export interface EngineeringService {
   description: string;
   isIncludedInFee: boolean;
   isDefaultIncluded: boolean;
-  phase: 'design' | 'construction';
+  phase: 'design' | 'construction' | null;
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
@@ -128,7 +128,7 @@ export interface TrackedService {
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
-  phase: 'design' | 'construction';
+  phase: 'design' | 'construction' | null;
   customFee?: number;
   isConstructionAdmin: boolean;
   fee: number;
