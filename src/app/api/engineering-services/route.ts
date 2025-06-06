@@ -6,13 +6,13 @@ interface EngineeringService {
   discipline: string;
   service_name: string;
   description: string;
-  included_in_fee: boolean;
-  default_included: boolean;
+  isIncludedInFee: boolean;
+  isDefaultIncluded: boolean;
   phase: 'design' | 'construction';
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
-  construction_admin: boolean;
+  isConstructionAdmin: boolean;
 }
 
 interface RawServiceData {
@@ -87,13 +87,13 @@ export async function POST(request: NextRequest) {
         discipline: body.discipline,
         service_name: body.service_name,
         description: body.description,
-        included_in_fee: body.included_in_fee ?? false,
-        default_included: body.default_included ?? false,
+        isIncludedInFee: body.isIncludedInFee ?? false,
+        isDefaultIncluded: body.isDefaultIncluded ?? false,
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
         rate: body.rate || null,
         fee_increment: body.fee_increment || null,
-        construction_admin: body.construction_admin ?? false
+        isConstructionAdmin: body.isConstructionAdmin ?? false
       })
       .select()
       .single();
@@ -191,13 +191,13 @@ export async function PUT(request: NextRequest) {
         discipline: body.discipline,
         service_name: body.service_name,
         description: body.description,
-        included_in_fee: body.included_in_fee ?? false,
-        default_included: body.default_included ?? false,
+        isIncludedInFee: body.isIncludedInFee ?? false,
+        isDefaultIncluded: body.isDefaultIncluded ?? false,
         phase: body.phase || 'design',
         min_fee: body.min_fee || null,
         rate: body.rate || null,
         fee_increment: body.fee_increment || null,
-        construction_admin: body.construction_admin ?? false
+        isConstructionAdmin: body.isConstructionAdmin ?? false
       })
       .eq('id', serviceId)
       .select()

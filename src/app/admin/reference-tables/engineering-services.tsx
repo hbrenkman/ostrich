@@ -20,13 +20,13 @@ interface EngineeringStandardService {
   discipline: string;
   service_name: string;
   description: string;
-  included_in_fee: boolean;
-  default_included: boolean;
+  isIncludedInFee: boolean;
+  isDefaultIncluded: boolean;
   phase: 'design' | 'construction' | null;
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
-  construction_admin: boolean;
+  isConstructionAdmin: boolean;
 }
 
 interface EngineeringAdditionalService {
@@ -151,7 +151,7 @@ export function EngineeringServicesTable() {
       discipline: service.discipline,
       service_name: service.service_name,
       description: service.description,
-      included_in_fee: service.included_in_fee,
+      isIncludedInFee: service.isIncludedInFee,
       phase: service.phase,
       min_fee: service.min_fee,
       rate: service.rate
@@ -164,13 +164,13 @@ export function EngineeringServicesTable() {
     discipline: string;
     service_name: string;
     description: string;
-    included_in_fee?: boolean;
-    default_included?: boolean;
+    isIncludedInFee?: boolean;
+    isDefaultIncluded?: boolean;
     phase?: 'design' | 'construction';
     min_fee?: number | null;
     rate?: number | null;
     fee_increment?: number | null;
-    construction_admin?: boolean;
+    isConstructionAdmin?: boolean;
   }) => {
     try {
       console.log('Updating standard service:', { serviceId, serviceData });
@@ -182,13 +182,13 @@ export function EngineeringServicesTable() {
         },
         body: JSON.stringify({
           ...serviceData,
-          included_in_fee: serviceData.included_in_fee ?? false,
-          default_included: serviceData.default_included ?? false,
+          isIncludedInFee: serviceData.isIncludedInFee ?? false,
+          isDefaultIncluded: serviceData.isDefaultIncluded ?? false,
           phase: serviceData.phase || 'design',
           min_fee: serviceData.min_fee || null,
           rate: serviceData.rate || null,
           fee_increment: serviceData.fee_increment || null,
-          construction_admin: serviceData.construction_admin ?? false
+          isConstructionAdmin: serviceData.isConstructionAdmin ?? false
         }),
       });
 
@@ -268,8 +268,8 @@ export function EngineeringServicesTable() {
         discipline: service.discipline,
         service_name: service.service_name,
         description: service.description,
-        included_in_fee: service.included_in_fee,
-        default_included: !currentValue,
+        isIncludedInFee: service.isIncludedInFee,
+        isDefaultIncluded: !currentValue,
         phase: service.phase || 'design',
         min_fee: service.min_fee,
         rate: service.rate
@@ -289,13 +289,13 @@ export function EngineeringServicesTable() {
         discipline: service.discipline,
         service_name: service.service_name,
         description: service.description,
-        included_in_fee: service.included_in_fee,
-        default_included: service.default_included,
+        isIncludedInFee: service.isIncludedInFee,
+        isDefaultIncluded: service.isDefaultIncluded,
         phase: service.phase || 'design',
         min_fee: service.min_fee,
         rate: service.rate,
         fee_increment: service.fee_increment,
-        construction_admin: !currentValue
+        isConstructionAdmin: !currentValue
       });
     } catch (error) {
       console.error('Error toggling construction admin:', error);
@@ -424,21 +424,21 @@ export function EngineeringServicesTable() {
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger>
-                                  <Badge variant={service.included_in_fee ? "default" : "secondary"}>
+                                  <Badge variant={service.isIncludedInFee ? "default" : "secondary"}>
                                     {service.phase || 'No phase'}
                                   </Badge>
                                 </TooltipTrigger>
                                 <TooltipContent>
                                   <p>Phase: {service.phase || 'Not set'}</p>
                                   <p className="text-xs text-muted-foreground mt-1">
-                                    {service.included_in_fee 
+                                    {service.isIncludedInFee 
                                       ? "Blue badge indicates this service is included in project scope"
                                       : "Gray badge indicates this service is an additional service"}
                                   </p>
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
-                            {service.construction_admin && (
+                            {service.isConstructionAdmin && (
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger>
@@ -463,9 +463,9 @@ export function EngineeringServicesTable() {
                             </div>
                             <div className="space-y-1">
                               <p className="text-xs text-muted-foreground">Fee Type</p>
-                              <p>{service.included_in_fee ? 'Included in Project Scope' : 'Additional Service'}</p>
+                              <p>{service.isIncludedInFee ? 'Included in Project Scope' : 'Additional Service'}</p>
                             </div>
-                            {!service.included_in_fee && (
+                            {!service.isIncludedInFee && (
                               <>
                                 <div className="space-y-1">
                                   <p className="text-xs text-muted-foreground">Minimum Fee</p>
@@ -490,8 +490,8 @@ export function EngineeringServicesTable() {
                                 <TooltipTrigger asChild>
                                   <div className="flex items-center gap-2">
                                     <Switch
-                                      checked={service.construction_admin}
-                                      onCheckedChange={() => handleToggleConstructionAdmin(service.id, service.construction_admin)}
+                                      checked={service.isConstructionAdmin}
+                                      onCheckedChange={() => handleToggleConstructionAdmin(service.id, service.isConstructionAdmin)}
                                       className="data-[state=checked]:bg-yellow-500"
                                     />
                                     <span className="text-xs text-muted-foreground">Construction Admin</span>
@@ -500,12 +500,12 @@ export function EngineeringServicesTable() {
                                 <TooltipContent side="left">
                                   <p className="font-medium">Construction Administration</p>
                                   <p className="text-sm text-muted-foreground mt-1">
-                                    {service.construction_admin 
+                                    {service.isConstructionAdmin 
                                       ? "This service will affect construction administration fee calculations"
                                       : "This service will not affect construction administration fee calculations"}
                                   </p>
                                   <p className="text-xs text-muted-foreground mt-2">
-                                    Click to {service.construction_admin ? "disable" : "enable"} construction admin fee calculation
+                                    Click to {service.isConstructionAdmin ? "disable" : "enable"} construction admin fee calculation
                                   </p>
                                 </TooltipContent>
                               </Tooltip>
@@ -515,8 +515,8 @@ export function EngineeringServicesTable() {
                                 <TooltipTrigger asChild>
                                   <div className="flex items-center gap-2">
                                     <Switch
-                                      checked={service.default_included}
-                                      onCheckedChange={() => handleToggleDefaultIncluded(service.id, service.default_included)}
+                                      checked={service.isDefaultIncluded}
+                                      onCheckedChange={() => handleToggleDefaultIncluded(service.id, service.isDefaultIncluded)}
                                       className="data-[state=checked]:bg-primary"
                                     />
                                     <span className="text-xs text-muted-foreground">Default</span>
@@ -525,12 +525,12 @@ export function EngineeringServicesTable() {
                                 <TooltipContent side="left">
                                   <p className="font-medium">Default Service Setting</p>
                                   <p className="text-sm text-muted-foreground mt-1">
-                                    {service.default_included 
+                                    {service.isDefaultIncluded 
                                       ? "This service will be automatically included in new proposals"
                                       : "This service will not be included by default in new proposals"}
                                   </p>
                                   <p className="text-xs text-muted-foreground mt-2">
-                                    Click to {service.default_included ? "disable" : "enable"} automatic inclusion
+                                    Click to {service.isDefaultIncluded ? "disable" : "enable"} automatic inclusion
                                   </p>
                                 </TooltipContent>
                               </Tooltip>

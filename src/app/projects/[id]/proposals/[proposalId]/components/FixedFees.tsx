@@ -103,7 +103,7 @@ interface EngineeringStandardService {
   discipline: string;
   service_name: string;
   description: string;
-  included_in_fee: boolean;
+  isIncludedInFee: boolean;
   phase: 'design' | 'construction';
   min_fee: number | null;
   rate: number | null;
@@ -115,18 +115,18 @@ interface TrackedService {
   service_name: string;
   name: string;
   discipline: string;
-  default_included: boolean;
+  isDefaultIncluded: boolean;
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
   phase: 'design' | 'construction';
   customFee?: number;
-  construction_admin: boolean;
+  isConstructionAdmin: boolean;
   fee: number;
   structureId: string;
   levelId: string;
   spaceId: string;
-  isActive: boolean;
+  isIncluded: boolean;
 }
 
 interface FeeScale {
@@ -189,7 +189,14 @@ export default function FixedFees({
       id: s.id,
       name: s.service_name,
       structureId: s.structureId,
-      phase: s.phase
+      phase: s.phase,
+      discipline: s.discipline,
+      isConstructionAdmin: s.isConstructionAdmin,
+      isIncluded: s.isIncluded,
+      min_fee: s.min_fee,
+      rate: s.rate,
+      fee_increment: s.fee_increment,
+      customFee: s.customFee,
     })),
     phase
   });
@@ -221,9 +228,9 @@ export default function FixedFees({
     'Structural'
   ], []);
 
-  // Memoize the construction admin services check
+  // Update hasConstructionAdminServices to use isIncluded
   const hasConstructionAdminServices = useMemo(() => 
-    trackedServices.some(service => service.construction_admin && service.default_included),
+    trackedServices.some(service => service.isConstructionAdmin && service.isIncluded),
     [trackedServices]
   );
 
@@ -609,7 +616,7 @@ export default function FixedFees({
       hasCustomFee: service.customFee !== undefined,
       minFee: service.min_fee,
       rate: service.rate,
-      defaultIncluded: service.default_included,
+      defaultIncluded: service.isIncluded,
       phase: service.phase
     });
 
@@ -746,9 +753,9 @@ export default function FixedFees({
       .filter(service => 
         service.discipline === discipline && 
         service.phase === phase && 
-        service.default_included && 
+        service.isIncluded && 
         service.min_fee !== null &&
-        !service.construction_admin
+        !service.isConstructionAdmin
       )
       .reduce((total, service) => {
         const calculatedFee = calculateServiceFee(service, discipline, structure.id);
@@ -886,51 +893,42 @@ export default function FixedFees({
 
   // Memoize the renderTrackedServices function
   const renderTrackedServices = useCallback((structureId: string, phase: 'design' | 'construction') => {
-    console.log('=== renderTrackedServices ===');
-    console.log('Input:', { structureId, phase });
-    console.log('Structure ID comparison:', {
-      targetStructureId: structureId,
-      targetStructureIdType: typeof structureId,
-      trackedServices: trackedServices.map(s => ({
-        id: s.id,
-        name: s.service_name,
-        structureId: s.structureId,
-        structureIdType: typeof s.structureId,
-        matches: s.structureId === structureId,
-        exactComparison: `${s.structureId} === ${structureId}`,
-        length: s.structureId?.length,
-        targetLength: structureId?.length
-      }))
-    });
-
-    // Filter services based on phase, structure, and construction admin status
-    const filteredServices = trackedServices.filter(service => {
-      const matchesPhase = service.phase === phase;
-      const matchesStructure = service.structureId === structureId;
-      const notConstructionAdmin = !service.construction_admin;
-      const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
-
-      return matchesPhase && matchesStructure && notConstructionAdmin && hasFeeValues;
-    });
-
-    // If no services to display, return null
-    if (filteredServices.length === 0) {
-      console.log('No services to display after filtering');
-      return null;
-    }
-
-    // Group services by name
-    const servicesByName = filteredServices.reduce((acc, service) => {
-      if (!acc[service.service_name]) {
-        acc[service.service_name] = [];
+    // First, group all services by name
+    const servicesByName = trackedServices.reduce((acc, service) => {
+      // Only include services that match the phase and structure
+      if (service.phase === phase && service.structureId === structureId) {
+        if (!acc[service.service_name]) {
+          acc[service.service_name] = [];
+        }
+        acc[service.service_name].push(service);
       }
-      acc[service.service_name].push(service);
       return acc;
     }, {} as Record<string, TrackedService[]>);
 
+    // Then filter the groups - a group should be displayed if at least one service in it meets the criteria
+    const filteredGroups = Object.entries(servicesByName).filter(([_, services]) => {
+      // A group should be displayed if at least one service in it:
+      // 1. Is included
+      // 2. AND either:
+      //    a. Is a construction admin service
+      //    b. OR has fee values
+      return services.some(service => {
+        const isIncluded = service.isIncluded;
+        const isConstructionAdmin = service.isConstructionAdmin;
+        const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
+
+        return isIncluded && (isConstructionAdmin || hasFeeValues);
+      });
+    });
+
+    // If no groups to display, return null
+    if (filteredGroups.length === 0) {
+      return null;
+    }
+
     return (
       <div className="mt-4 space-y-2">
-        {Object.entries(servicesByName).map(([serviceName, services]) => (
+        {filteredGroups.map(([serviceName, services]) => (
           <div key={serviceName} className="grid grid-cols-6 gap-2 px-4">
             {/* Description column */}
             <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 ml-4">
@@ -947,6 +945,16 @@ export default function FixedFees({
                 return <div key={discipline} className="h-10" />;
               }
 
+              // Only render the service if it meets the display criteria
+              const isIncluded = service.isIncluded;
+              const isConstructionAdmin = service.isConstructionAdmin;
+              const hasFeeValues = service.min_fee !== null || service.rate !== null || service.fee_increment !== null;
+              const shouldDisplay = isIncluded && (isConstructionAdmin || hasFeeValues);
+
+              if (!shouldDisplay) {
+                return <div key={discipline} className="h-10" />;
+              }
+
               const calculatedFee = calculateServiceFee(service, discipline, structureId);
               const displayFee = service.customFee !== undefined ? service.customFee : calculatedFee;
               const hasCustomFee = service.customFee !== undefined && service.customFee !== calculatedFee;
@@ -954,7 +962,7 @@ export default function FixedFees({
               return (
                 <div key={`${service.id}-${discipline}`} className="flex items-center gap-2">
                   <div className="flex-1 flex items-center gap-2">
-                    {hasCustomFee && service.default_included && (
+                    {hasCustomFee && service.isIncluded && (
                       <button
                         type="button"
                         className="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-primary"
@@ -976,14 +984,14 @@ export default function FixedFees({
                       onChange={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        if (onServiceFeeUpdate && service.default_included) {
+                        if (onServiceFeeUpdate && service.isIncluded) {
                           const value = e.target.value.replace(/[^0-9.-]+/g, '');
                           const numericValue = parseFloat(value) || 0;
                           onServiceFeeUpdate(service.id, discipline, numericValue, phase);
                         }
                       }}
-                      className={`text-right pr-2 bg-transparent ${!service.default_included ? 'text-gray-400' : ''}`}
-                      disabled={!service.default_included}
+                      className={`text-right pr-2 bg-transparent ${!service.isIncluded ? 'text-gray-400' : ''}`}
+                      disabled={!service.isIncluded}
                     />
                   </div>
                   <div className="w-8" /> {/* Spacer for alignment with space toggles */}
@@ -995,6 +1003,104 @@ export default function FixedFees({
       </div>
     );
   }, [trackedServices, DISCIPLINES, calculateServiceFee, formatCurrency, onServiceFeeUpdate]);
+
+  // Add these refs at the top of the component, after the state declarations
+  const prevTrackedServices = useRef(trackedServices);
+  const prevCalculateServiceFee = useRef(calculateServiceFee);
+  const prevFormatCurrency = useRef(formatCurrency);
+  const prevOnServiceFeeUpdate = useRef(onServiceFeeUpdate);
+
+  // Add a useEffect to log tracked services changes
+  useEffect(() => {
+    // Clear previous logs
+    console.clear();
+    
+    // Tag for easy filtering
+    const TAG = '🔍 FIXED_FEES_DEBUG';
+    
+    // Only log services that might be problematic
+    const problematicServices = trackedServices.filter(service => {
+      const hasNoFeeValues = service.min_fee === null && service.rate === null && service.fee_increment === null;
+      const hasNoStructure = !service.structureId;
+      const hasNoPhase = !service.phase;
+      const isConstructionAdmin = service.isConstructionAdmin;
+      const isNotIncluded = !service.isIncluded;
+      
+      return hasNoFeeValues || hasNoStructure || hasNoPhase || (isConstructionAdmin && isNotIncluded);
+    });
+
+    if (problematicServices.length > 0) {
+      console.group(`${TAG} - POTENTIAL ISSUES FOUND (${problematicServices.length} services)`);
+      
+      problematicServices.forEach(service => {
+        const issues = [];
+        if (service.min_fee === null && service.rate === null && service.fee_increment === null) {
+          issues.push('NO_FEE_VALUES');
+        }
+        if (!service.structureId) {
+          issues.push('NO_STRUCTURE_ID');
+        }
+        if (!service.phase) {
+          issues.push('NO_PHASE');
+        }
+        if (service.isConstructionAdmin && !service.isIncluded) {
+          issues.push('isConstructionAdmin_NOT_INCLUDED');
+        }
+
+        console.log(
+          `%c${service.service_name} (${service.discipline})`,
+          'color: #ff6b6b; font-weight: bold',
+          {
+            issues,
+            id: service.id,
+            structureId: service.structureId,
+            phase: service.phase,
+            isConstructionAdmin: service.isConstructionAdmin,
+            isIncluded: service.isIncluded,
+            min_fee: service.min_fee,
+            rate: service.rate,
+            fee_increment: service.fee_increment
+          }
+        );
+      });
+      
+      console.groupEnd();
+    } else {
+      console.log(`${TAG} - No problematic services found`);
+    }
+
+    // Log current structure's services
+    const currentStructureId = structures[0]?.id;
+    if (currentStructureId) {
+      const structureServices = trackedServices.filter(s => s.structureId === currentStructureId);
+      console.group(`${TAG} - Current Structure Services (${structureServices.length})`);
+      
+      ['design', 'construction'].forEach(phase => {
+        const phaseServices = structureServices.filter(s => s.phase === phase);
+        console.log(
+          `%c${phase.toUpperCase()} Phase (${phaseServices.length} services)`,
+          'color: #4dabf7; font-weight: bold'
+        );
+        
+        phaseServices.forEach(service => {
+          console.log(
+            `%c${service.service_name}`,
+            'color: #868e96',
+            {
+              discipline: service.discipline,
+              isConstructionAdmin: service.isConstructionAdmin,
+              isIncluded: service.isIncluded,
+              min_fee: service.min_fee,
+              rate: service.rate,
+              fee_increment: service.fee_increment
+            }
+          );
+        });
+      });
+      
+      console.groupEnd();
+    }
+  }, [trackedServices, structures]);
 
   // Update renderTotalsRow to use memoized discipline totals
   const renderTotalsRow = useCallback((structure: Structure, phase: 'design' | 'construction') => {
@@ -1182,11 +1288,11 @@ Project Grand Total: ${formatCurrency(summary.projectTotal)}`;
     );
   };
 
-  // Add helper function to get service fees for a discipline
+  // Update getServiceFeesForDiscipline to use isIncluded
   const getServiceFeesForDiscipline = (structureId: string, discipline: string): number => {
     const fees = trackedServices
       .filter((service): service is TrackedService & { min_fee: number } => 
-        service.default_included &&
+        service.isIncluded &&
         service.min_fee !== null && 
         service.discipline === discipline
       )

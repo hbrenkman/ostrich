@@ -11,7 +11,7 @@
 
 "use client";
 
-import React, { useState, useEffect, DragEvent, useRef, useCallback } from 'react';
+import React, { useState, useEffect, DragEvent, useRef, useCallback, useMemo } from 'react';
 import { ArrowLeft, Save, Trash2, Plus, Search, Building2, Layers, Building, Home, Pencil, SplitSquareVertical, GripVertical, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
@@ -37,6 +37,7 @@ import { createClient } from '@supabase/supabase-js'
 import FixedFees from './components/FixedFees';
 import FlexFees from './components/FlexFees';
 import { Space, Level, Structure, ManualFeeOverride, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
+import { EngineeringServicesManager } from './components/EngineeringServicesManager';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -108,20 +109,20 @@ interface ProposalFormData {
   projectNumber: string;
   projectName: string;
   company: string;
-  clientContact: Contact | null;
+  clientContact: Contact | null;  // Restore Contact type
   overview: string;
   designBudget: string;
   constructionSupportBudget: string;
-  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';
+  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';  // Restore original status types
   structures: Structure[];
-  costIndex: number | null;
+  costIndex: number | null;  // Restore CostIndex type
   resCheckItems: ResCheckItem[];
-  nestedFeeItems: NestedFeeItem[];  // For items like Site Photometry
+  nestedFeeItems: NestedFeeItem[];
   designFeeScale: FeeScale[];
   duplicateStructureRates: FeeDuplicateStructure[];
   trackedServices: TrackedService[];
   manualFeeOverrides: ManualFeeOverride[];
-  engineeringStandardServices: EngineeringStandardService[];
+  dbEngineeringServices: EngineeringService[];
   engineeringAdditionalServices: EngineeringAdditionalServices[];
   phase: 'design' | 'construction';
 }
@@ -168,18 +169,24 @@ interface ManualFeeOverride {
   discipline: string;
 }
 
-interface EngineeringStandardService {
+interface TrackedService {
   id: string;
-  discipline: string;
+  serviceId: string;
   service_name: string;
-  description: string;
-  included_in_fee: boolean;
-  default_included: boolean;
-  phase: 'design' | 'construction';
+  name: string;
+  discipline: string;
+  isDefaultIncluded: boolean;
   min_fee: number | null;
   rate: number | null;
   fee_increment: number | null;
-  construction_admin: boolean;
+  phase: 'design' | 'construction';
+  customFee?: number;
+  isConstructionAdmin: boolean;
+  fee: number;
+  structureId: string;
+  levelId: string;
+  spaceId: string;
+  isIncluded: boolean;  // Renamed from isActive
 }
 
 // Add interface for tracked services
@@ -189,25 +196,25 @@ interface TrackedService {
   service_name: string;
   name: string;
   discipline: string;
-  default_included: boolean;
+  isDefaultIncluded: boolean;
   min_fee: number | null;
-  rate: number | null;  // percentage rate
-  fee_increment: number | null;  // fee increment value
+  rate: number | null;
+  fee_increment: number | null;
   phase: 'design' | 'construction';
   customFee?: number;
-  construction_admin: boolean;
+  isConstructionAdmin: boolean;
   fee: number;
   structureId: string;
   levelId: string;
   spaceId: string;
-  isActive: boolean;
+  isIncluded: boolean;  // Renamed from isActive
 }
 
 // Update EngineeringServicesDisplay props
 interface EngineeringServicesDisplayProps {
-  services: EngineeringStandardService[];
+  services: TrackedService[];
   isLoading: boolean;
-  onServiceUpdate: (serviceId: string, updates: Partial<EngineeringStandardService>) => void;
+  onServiceUpdate: (serviceId: string, updates: Partial<TrackedService>) => void;
   proposal: ProposalFormData;
   setProposal: (proposal: ProposalFormData) => void;
   onServicesChange: (services: TrackedService[]) => void;
@@ -221,112 +228,227 @@ function EngineeringServicesDisplay({
   setProposal,
   onServicesChange 
 }: EngineeringServicesDisplayProps) {
-  const [draggedService, setDraggedService] = useState<EngineeringStandardService | null>(null);
+  const [draggedService, setDraggedService] = useState<TrackedService | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [debugState, setDebugState] = useState<{
+    lastAction: string;
+    serviceId: string | null;
+    oldIncluded: boolean | null;
+    newIncluded: boolean | null;
+    timestamp: number | null;
+    error?: string;
+  }>({
+    lastAction: 'initialized',
+    serviceId: null,
+    oldIncluded: null,
+    newIncluded: null,
+    timestamp: null
+  });
 
-  // Use default_included from services directly
-  const includedServices = services.filter(service => service.default_included);
-  const excludedServices = services.filter(service => !service.default_included);
+  // Add refs for drop zones
+  const includedDropRef = useRef<HTMLDivElement>(null);
+  const excludedDropRef = useRef<HTMLDivElement>(null);
 
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
-    // console.log('Drag start:', service.service_name);
+  // Convert services to TrackedServices with isIncluded initialized from isDefaultIncluded
+  const trackedServices = useMemo(() => {
+    const result = services.map(service => {
+      const existingService = proposal.trackedServices.find(ts => 
+        ts.serviceId === service.id && 
+        ts.phase === service.phase
+      );
+
+      return {
+        id: existingService?.id || crypto.randomUUID(),
+        serviceId: service.id,
+        service_name: service.service_name,
+        name: service.service_name,
+        discipline: service.discipline,
+        isDefaultIncluded: service.isDefaultIncluded,
+        min_fee: service.min_fee,
+        rate: service.rate,
+        fee_increment: service.fee_increment,
+        phase: service.phase,
+        isConstructionAdmin: service.isConstructionAdmin,
+        fee: service.min_fee || 0,
+        structureId: existingService?.structureId || '',
+        levelId: existingService?.levelId || '',
+        spaceId: existingService?.spaceId || '',
+        isIncluded: existingService ? existingService.isIncluded : service.isDefaultIncluded,
+        customFee: existingService?.customFee
+      };
+    });
+    return result;
+  }, [services, proposal.trackedServices]);
+
+  // Use isIncluded for filtering services into columns
+  const includedServices = trackedServices.filter(service => service.isIncluded);
+  const excludedServices = trackedServices.filter(service => !service.isIncluded);
+
+  const updateDebugState = (action: string, service: TrackedService | null, oldIncluded: boolean | null, newIncluded: boolean | null, error?: string) => {
+    console.log('Debug State Update:', { action, serviceId: service?.id, oldIncluded, newIncluded, error });
+    setDebugState({
+      lastAction: action,
+      serviceId: service?.id || null,
+      oldIncluded,
+      newIncluded,
+      timestamp: Date.now(),
+      error
+    });
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, service: TrackedService) => {
+    console.log('Drag Start:', service);
+    updateDebugState('drag_start', service, service.isIncluded, null);
     setIsDragging(true);
     setDraggedService(service);
+    
+    // Store the service data in both the state and the drag event
     const dragData = {
       type: 'engineering_service',
-      serviceId: service.id,
-      serviceName: service.service_name
+      service: {
+        ...service,
+        isIncluded: service.isIncluded
+      }
     };
     e.dataTransfer.setData('application/json', JSON.stringify(dragData));
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragEnd = () => {
-    // console.log('Drag end');
+  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
+    console.log('Drag End:', draggedService);
+    if (draggedService) {
+      updateDebugState('drag_end', draggedService, draggedService.isIncluded, null);
+    }
     setIsDragging(false);
     setDraggedService(null);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, isIncluded: boolean) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
+    console.log('Drag Over:', { isIncluded, draggedService });
+    updateDebugState('drag_over', draggedService, draggedService?.isIncluded || null, isIncluded);
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, targetIncluded: boolean) => {
+    console.log('=== DROP EVENT START ===');
+    console.log('Target Included:', targetIncluded);
     
-    const data = e.dataTransfer.getData('application/json');
-    if (!data) {
-      console.error('No data received in drop event');
+    if (!draggedService) {
+      console.error('No dragged service in state');
+      updateDebugState('drop_error', null, null, null, 'No dragged service in state');
       return;
     }
 
+    // Get the current structure ID from the first structure
+    const currentStructureId = proposal.structures[0]?.id;
+    if (!currentStructureId) {
+      console.error('No structure found in proposal');
+      updateDebugState('drop_error', null, null, null, 'No structure found in proposal');
+      return;
+    }
+
+    console.log('Dragged Service State:', {
+      id: draggedService.id,
+      name: draggedService.service_name,
+      oldIsIncluded: draggedService.isIncluded,
+      newIsIncluded: targetIncluded,
+      phase: draggedService.phase,
+      isConstructionAdmin: draggedService.isConstructionAdmin,
+      currentStructureId
+    });
+
+    updateDebugState('drop_start', draggedService, draggedService.isIncluded, targetIncluded);
+    
     try {
-      const { serviceId, serviceName } = JSON.parse(data);
-      // console.log('Drop event data:', { serviceId, serviceName, targetIncluded });
+      const data = e.dataTransfer.getData('application/json');
+      console.log('Drop Data:', data);
       
-      // Find the service in the services array
-      const serviceIndex = services.findIndex(s => s.id === serviceId);
-      if (serviceIndex === -1) {
-        console.error('Service not found:', serviceId);
-        return;
+      if (!data) {
+        throw new Error('No data received in drop event');
       }
 
-      const service = services[serviceIndex];
-      console.log('Service being updated:', {
-        id: service.id,
-        name: service.service_name,
-        default_included: service.default_included,
-        min_fee: service.min_fee,
-        phase: service.phase,
-        discipline: service.discipline
+      const dragData = JSON.parse(data);
+      console.log('Parsed Drag Data:', dragData);
+      
+      if (dragData.type !== 'engineering_service' || !dragData.service) {
+        throw new Error('Invalid drag data format');
+      }
+
+      const draggedService = dragData.service as TrackedService;
+      const oldIncluded = draggedService.isIncluded;
+
+      const existingService = trackedServices.find(s => s.id === draggedService.id);
+      if (!existingService) {
+        throw new Error('Service not found in tracked services');
+      }
+
+      console.log('Existing Service Found:', {
+        id: existingService.id,
+        name: existingService.service_name,
+        currentIsIncluded: existingService.isIncluded,
+        willBeIncluded: targetIncluded,
+        currentStructureId
       });
 
-      // Only update if the inclusion status is actually changing
-      if (service.default_included !== targetIncluded) {
-        onServiceUpdate(serviceId, { default_included: targetIncluded });
-        
-        // Convert EngineeringStandardService to TrackedService
-        const updatedServices = services.map(s => ({
-          id: s.id,
-          service_name: s.service_name,
-          discipline: s.discipline,
-          default_included: s.id === serviceId ? targetIncluded : s.default_included,
-          min_fee: s.min_fee,
-          rate: s.rate,
-          fee_increment: s.fee_increment,
-          phase: s.phase,
-          construction_admin: s.construction_admin
-        }));
-        
-        console.log('Services being passed to onServicesChange:', updatedServices.map(s => ({
-          id: s.id,
-          name: s.service_name,
-          default_included: s.default_included,
-          min_fee: s.min_fee,
-          phase: s.phase
-        })));
-        
-        onServicesChange(updatedServices);
-      }
+      updateDebugState('drop_processing', draggedService, oldIncluded, targetIncluded);
+
+      const updatedServices = trackedServices.map(s => {
+        if (s.id === draggedService.id) {
+          console.log('Updating service:', { 
+            id: s.id, 
+            name: s.service_name,
+            oldIncluded: s.isIncluded, 
+            newIncluded: targetIncluded,
+            phase: s.phase,
+            isConstructionAdmin: s.isConstructionAdmin,
+            structureId: currentStructureId
+          });
+          return { 
+            ...s, 
+            isIncluded: targetIncluded,
+            structureId: currentStructureId  // Set the structure ID to the current structure
+          };
+        }
+        return s;
+      });
+
+      console.log('Updated Services Array:', updatedServices.map(s => ({
+        id: s.id,
+        name: s.service_name,
+        isIncluded: s.isIncluded,
+        phase: s.phase,
+        isConstructionAdmin: s.isConstructionAdmin,
+        structureId: s.structureId
+      })));
+
+      await onServicesChange(updatedServices);
+      
+      console.log('=== DROP EVENT COMPLETE ===');
+      updateDebugState('drop_complete', draggedService, oldIncluded, targetIncluded);
+      
+      setIsDragging(false);
+      setDraggedService(null);
     } catch (error) {
-      console.error('Error handling drop:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error during drop';
+      console.error('Drop Error:', error);
+      updateDebugState('drop_error', draggedService, draggedService?.isIncluded || null, null, errorMessage);
     }
   };
 
-  const groupServicesByDiscipline = (services: EngineeringStandardService[]): Record<string, EngineeringStandardService[]> => {
+  const groupServicesByDiscipline = (services: TrackedService[]): Record<string, TrackedService[]> => {
     return services.reduce((acc, service) => {
       const discipline = service.discipline;
       if (!acc[discipline]) {
         acc[discipline] = [];
       }
-        acc[discipline].push(service);
-        return acc;
-    }, {} as Record<string, EngineeringStandardService[]>);
+      acc[discipline].push(service);
+      return acc;
+    }, {} as Record<string, TrackedService[]>);
   };
 
-  const renderServiceItem = (service: EngineeringStandardService) => (
+  const renderServiceItem = (service: TrackedService) => (
     <div
       key={service.id}
       draggable
@@ -346,83 +468,100 @@ function EngineeringServicesDisplay({
   );
 
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2">
-      {/* Included Services */}
-      <div
-        className={`border border-green-500/20 rounded-md overflow-hidden ${
-          isDragging && draggedService && !draggedService.default_included ? 'border-green-500/50 bg-green-500/5' : ''
-        }`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // console.log('Drag over included');
-          e.dataTransfer.dropEffect = 'move';
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // console.log('Drop on included');
-          handleDrop(e, true);
-        }}
-      >
-        <div className="bg-green-500/10 px-2 py-1">
-          <h3 className="text-sm font-medium text-green-700 dark:text-green-400">Included Services</h3>
-        </div>
-        {includedServices.length === 0 ? (
-          <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No included services</div>
-        ) : (
-          <div className="p-1 space-y-1">
-            {Object.entries(groupServicesByDiscipline(includedServices)).map(([discipline, services]) => (
-              <div key={discipline} className="border-b border-green-500/10 last:border-0">
-                <div className="px-2 py-1 bg-green-500/5">
-                  <h4 className="text-xs font-medium text-green-600 dark:text-green-400">{discipline}</h4>
-                </div>
-                <div className="px-2 py-1">
-                  {services.map(service => renderServiceItem(service))}
-                </div>
-              </div>
-            ))}
-          </div>
+    <div className="space-y-4">
+      {/* Debug Display */}
+      <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg shadow-lg z-50 text-xs font-mono">
+        <div>Last Action: {debugState.lastAction}</div>
+        {debugState.serviceId && (
+          <>
+            <div>Service ID: {debugState.serviceId}</div>
+            <div>Old Included: {String(debugState.oldIncluded)}</div>
+            <div>New Included: {String(debugState.newIncluded)}</div>
+          </>
+        )}
+        {debugState.error && (
+          <div className="text-red-400">Error: {debugState.error}</div>
+        )}
+        {debugState.timestamp && (
+          <div>Time: {new Date(debugState.timestamp).toLocaleTimeString()}</div>
         )}
       </div>
 
-      {/* Excluded Services */}
-      <div
-        className={`border border-red-500/20 rounded-md overflow-hidden ${
-          isDragging && draggedService && draggedService.default_included ? 'border-red-500/50 bg-red-500/5' : ''
-        }`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // console.log('Drag over excluded');
-          e.dataTransfer.dropEffect = 'move';
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // console.log('Drop on excluded');
-          handleDrop(e, false);
-        }}
-      >
-        <div className="bg-red-500/10 px-2 py-1">
-          <h3 className="text-sm font-medium text-red-700 dark:text-red-400">Excluded Services</h3>
+      {/* Main Content */}
+      <div className="grid grid-cols-2 gap-4">
+        <div
+          ref={includedDropRef}
+          className={`p-4 rounded-lg border ${
+            isDragging ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'border-gray-200 dark:border-gray-700'
+          }`}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Drag Enter Included');
+          }}
+          onDragOver={(e) => handleDragOver(e, true)}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Drag Leave Included');
+          }}
+          onDrop={(e) => handleDrop(e, true)}
+        >
+          <h3 className="text-lg font-semibold mb-4">Included Services</h3>
+          {isLoading ? (
+            <div>Loading...</div>
+          ) : includedServices.length === 0 ? (
+            <div className="text-gray-500 dark:text-gray-400">No services included</div>
+          ) : (
+            <div className="p-1 space-y-1">
+              {Object.entries(groupServicesByDiscipline(includedServices)).map(([discipline, services]) => (
+                <div key={discipline} className="border-b border-green-500/10 last:border-0">
+                  <div className="px-2 py-1 bg-green-500/5">
+                    <h4 className="text-xs font-medium text-green-600 dark:text-green-400">{discipline}</h4>
+                  </div>
+                  {services.map(renderServiceItem)}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {excludedServices.length === 0 ? (
-          <div className="text-xs text-gray-500 dark:text-[#9CA3AF] p-2">No excluded services</div>
-        ) : (
-          <div className="p-1 space-y-1">
-            {Object.entries(groupServicesByDiscipline(excludedServices)).map(([discipline, services]) => (
-              <div key={discipline} className="border-b border-red-500/10 last:border-0">
-                <div className="px-2 py-1 bg-red-500/5">
-                  <h4 className="text-xs font-medium text-red-600 dark:text-red-400">{discipline}</h4>
+
+        <div
+          ref={excludedDropRef}
+          className={`p-4 rounded-lg border ${
+            isDragging ? 'border-red-500 bg-red-50 dark:bg-red-900/10' : 'border-gray-200 dark:border-gray-700'
+          }`}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Drag Enter Excluded');
+          }}
+          onDragOver={(e) => handleDragOver(e, false)}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Drag Leave Excluded');
+          }}
+          onDrop={(e) => handleDrop(e, false)}
+        >
+          <h3 className="text-lg font-semibold mb-4">Excluded Services</h3>
+          {isLoading ? (
+            <div>Loading...</div>
+          ) : excludedServices.length === 0 ? (
+            <div className="text-gray-500 dark:text-gray-400">No services excluded</div>
+          ) : (
+            <div className="p-1 space-y-1">
+              {Object.entries(groupServicesByDiscipline(excludedServices)).map(([discipline, services]) => (
+                <div key={discipline} className="border-b border-red-500/10 last:border-0">
+                  <div className="px-2 py-1 bg-red-500/5">
+                    <h4 className="text-xs font-medium text-red-600 dark:text-red-400">{discipline}</h4>
+                  </div>
+                  {services.map(renderServiceItem)}
                 </div>
-                <div className="px-2 py-1">
-                  {services.map(service => renderServiceItem(service))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -488,7 +627,7 @@ export default function EditProposalPage() {
   const [duplicateStructureRates, setDuplicateStructureRates] = useState<FeeDuplicateStructure[]>([]);
   const [collapsedDuplicates, setCollapsedDuplicates] = useState<Set<string>>(new Set());
   const [manualFeeOverrides, setManualFeeOverrides] = useState<ManualFeeOverride[]>([]);
-  const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringStandardService[]>([]);
+  const [engineeringStandardServices, setEngineeringStandardServices] = useState<EngineeringService[]>([]);
   const [isLoadingStandardServices, setIsLoadingStandardServices] = useState(true);
   const [isLoadingAdditionalServices, setIsLoadingAdditionalServices] = useState(true);
   const [phase, setPhase] = useState<'design' | 'construction'>('design');
@@ -515,7 +654,7 @@ export default function EditProposalPage() {
     duplicateStructureRates: [],
     trackedServices: [],
     manualFeeOverrides: [],
-    engineeringStandardServices: [],
+    dbEngineeringServices: [],
     engineeringAdditionalServices: [],
     phase: 'design'
   });
@@ -881,8 +1020,8 @@ export default function EditProposalPage() {
     if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
       // Find services that are included and have non-null min_fee, including construction admin services
       const servicesWithFees = engineeringStandardServices.filter(service => 
-        service.default_included && 
-        (service.min_fee !== null || service.construction_admin)
+        service.isIncludedInFee &&  // Changed from isDefaultIncluded to isIncludedInFee
+        (service.min_fee !== null || service.isConstructionAdmin)
       );
 
       if (servicesWithFees.length > 0) {
@@ -892,17 +1031,17 @@ export default function EditProposalPage() {
           service_name: service.service_name,
           name: service.service_name,
           discipline: service.discipline,
-          default_included: service.default_included,
+          isDefaultIncluded: service.isDefaultIncluded,
           min_fee: service.min_fee,
           rate: service.rate,
           fee_increment: service.fee_increment,
           phase: service.phase,
-          construction_admin: service.construction_admin,
+          isConstructionAdmin: service.isConstructionAdmin,
           fee: service.min_fee || 0,
           structureId: '',  // Will be set when service is associated with a structure
           levelId: '',      // Will be set when service is associated with a level
           spaceId: '',      // Will be set when service is associated with a space
-          isActive: service.default_included,
+          isIncluded: service.isIncludedInFee,  // Changed from isDefaultIncluded to isIncludedInFee
           customFee: undefined
         }));
         
@@ -911,280 +1050,226 @@ export default function EditProposalPage() {
     }
   }, [isLoadingStandardServices, engineeringStandardServices]);
 
-  const handleAddStructure = async (structure: Omit<Structure, 'id'>) => {
-    // First ensure we have engineering standard services loaded
-    if (!proposal.engineeringStandardServices.length) {
-      try {
-        const { data: services, error } = await supabase
-          .from('engineering_standard_services')
-          .select('*')
-          .order('discipline', { ascending: true });
 
-        if (error) throw error;
-        if (services) {
-          setProposal(prev => ({
-            ...prev,
-            engineeringStandardServices: services
-          }));
-        }
-      } catch (error) {
-        console.error('Error fetching engineering standard services:', error);
-        return;
-      }
-    }
 
-    // Add default Level 0
-    const newLevel: Level = {
-      id: crypto.randomUUID(),
-      name: "Level 0",
-      floorArea: "0",
-      description: "New Level",
-      spaceType: "Office",
-      discipline: "Mechanical",
-      hvacSystem: "VAV System",
-      spaces: []
-    };
-
-    const newStructure: Structure = {
-      id: crypto.randomUUID(),
-      name: structure.name || "New Structure",
-      constructionType: structure.constructionType,
-      floorArea: structure.floorArea,
-      description: structure.description,
-      spaceType: structure.spaceType,
-      discipline: structure.discipline,
-      hvacSystem: structure.hvacSystem,
-      levels: [newLevel], // <-- Add Level 0 by default
-      designFeeRate: 0,
-      constructionSupportEnabled: false,
-      designPercentage: 80,
-      constructionCosts: []
-    };
-
-    // Get default design phase services
-    const defaultServices = proposal.engineeringStandardServices.filter(service => 
-      service.phase === 'design' && 
-      service.default_included &&
-      (service.min_fee !== null || service.rate !== null || service.fee_increment !== null)
-    );
-
-    // Create tracked services for the new structure
-    const newTrackedServices = defaultServices.map(service => ({
-      id: crypto.randomUUID(),
-      serviceId: service.id,
-      service_name: service.service_name,
-      name: service.service_name,
-      discipline: service.discipline,
-      default_included: true,
-      min_fee: service.min_fee,
-      rate: service.rate,
-      fee_increment: service.fee_increment,
-      phase: 'design' as const,
-      construction_admin: service.construction_admin,
-      fee: 0,
-      structureId: newStructure.id,
-      levelId: '',
-      spaceId: '',
-      isActive: true
-    }));
-
-    // Update proposal with new structure and tracked services
-    setProposal(prev => {
-      const updated = {
-        ...prev,
-        structures: [...prev.structures, newStructure],
-        trackedServices: [...prev.trackedServices, ...newTrackedServices]
-      };
-      console.log('setProposal: trackedServices after update:', updated.trackedServices);
-      return updated;
-    });
-
-    // Log the addition of new services
-    console.log('Added new structure with services:', {
-      structureId: newStructure.id,
-      structureName: newStructure.name,
-      services: newTrackedServices.map(s => ({
-        service_name: s.service_name,
-        discipline: s.discipline,
-        min_fee: s.min_fee,
-        rate: s.rate,
-        fee_increment: s.fee_increment,
-        structureId: s.structureId
-      }))
-    });
-
-    // In handleAddStructure, after filtering defaultServices:
-    console.log('handleAddStructure: defaultServices (filtered from engineeringStandardServices):', defaultServices);
-    // In handleAddStructure, before filtering defaultServices:
-    console.log('handleAddStructure: engineeringStandardServices (raw) before filtering:', proposal.engineeringStandardServices);
-  };
-
+  // handleDrop: Handles dropping services onto a structure
+  // Uses structure.id to identify the target structure and updates tracked services' structureId
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>, targetStructureId?: string) => {
     e.preventDefault();
-    const data = JSON.parse(e.dataTransfer.getData('application/json'));
-    
-    if (data.type === 'structure') {
-      // First ensure we have engineering standard services loaded
-      let engineeringServices = proposal.engineeringStandardServices;
-      if (!engineeringServices.length) {
-        try {
-          console.log('handleDrop: Fetching engineering standard services...');
-          const { data: services, error } = await supabase
-            .from('engineering_standard_services')
-            .select('*')
-            .order('discipline', { ascending: true });
+    e.stopPropagation();
 
-          if (error) throw error;
-          if (services) {
-            engineeringServices = services;
-            console.log('handleDrop: Successfully loaded engineering standard services:', services.length);
-          }
-        } catch (error) {
-          console.error('Error fetching engineering standard services:', error);
-          return;
-        }
+    try {
+      const data = e.dataTransfer.getData('application/json');
+      if (!data) {
+        throw new Error('No data received in drop event');
       }
 
-      // Generate a new UUID for the structure
-      const newStructureId = crypto.randomUUID();
-      console.log('handleDrop: Creating new structure with ID:', newStructureId);
+      const dragData = JSON.parse(data);
+      console.log('Parsed drag data:', dragData);
 
-      // Create new structure with all required properties
-      const defaultLevel: Level = {
-        id: crypto.randomUUID(),
-        name: "Level 0",
-        floorArea: "0",
-        description: "New Level",
-        spaceType: "Office",
-        discipline: "Mechanical",
-        hvacSystem: "VAV System",
-        spaces: []
-      };
-      const newStructure: Structure = {
-        id: newStructureId,
-        name: 'New Structure',
-        constructionType: 'Type I',
-        floorArea: '0',
-        description: 'New Structure',
-        spaceType: 'Office',
-        discipline: 'Mechanical',
-        hvacSystem: 'VAV System',
-        levels: [defaultLevel], // <-- Add Level 0 by default
-        isDuplicate: false,
-        duplicateNumber: 0,
-        duplicateParentId: null,
-        isDuplicateCollapsed: false,
-        constructionSupportEnabled: false
-      };
+      // Handle structure creation
+      if (dragData.type === 'structure') {
+        console.log('=== CREATING NEW STRUCTURE ===');
+        console.log('Current dbEngineeringServices:', proposal.dbEngineeringServices.map(s => ({
+          id: s.id,
+          name: s.service_name,
+          phase: s.phase,
+          isDefaultIncluded: s.isDefaultIncluded
+        })));
+        
+        // Create new structure with required properties and a default level
+        const newStructure: Structure = {
+          id: dragData.id,
+          name: `Structure ${proposal.structures.length + 1}`,
+          constructionType: 'Office',
+          floorArea: "0",
+          description: "New Structure",
+          spaceType: "Office",
+          discipline: "Mechanical",
+          hvacSystem: "VAV System",
+          levels: [{
+            id: crypto.randomUUID(),
+            name: "Level 0",
+            floorArea: "0",
+            description: "Default Level",
+            spaceType: "Office",
+            discipline: "Mechanical",
+            hvacSystem: "VAV System",
+            spaces: []
+          }],
+          designFeeRate: 0,
+          constructionSupportEnabled: false,
+          designPercentage: 80
+        };
 
-      // Create services for both design and construction phases
-      const createServicesForPhase = (phase: 'design' | 'construction') => {
-        return engineeringServices
-          .filter(service => 
-            service.phase === phase && 
-            !service.construction_admin
-          )
-          .map(service => ({
+        // Create tracked services for the new structure
+        const newTrackedServices: TrackedService[] = [];
+        
+        // Get services from dbEngineeringServices that are included in fee
+        const designServices = proposal.dbEngineeringServices.filter(service => 
+          service.phase === 'design' && 
+          service.isDefaultIncluded
+        );
+        
+        const constructionServices = proposal.dbEngineeringServices.filter(service => 
+          service.phase === 'construction' && 
+          service.isDefaultIncluded
+        );
+
+        console.log('Filtered services for new structure:', {
+          designServices: designServices.map(s => ({
+            id: s.id,
+            name: s.service_name,
+            phase: s.phase,
+            isDefaultIncluded: s.isDefaultIncluded
+          })),
+          constructionServices: constructionServices.map(s => ({
+            id: s.id,
+            name: s.service_name,
+            phase: s.phase,
+            isDefaultIncluded: s.isDefaultIncluded
+          }))
+        });
+
+        // Create tracked services for both phases
+        for (const service of [...designServices, ...constructionServices]) {
+          const newService = {
             id: crypto.randomUUID(),
             serviceId: service.id,
             service_name: service.service_name,
             name: service.service_name,
             discipline: service.discipline,
-            default_included: service.default_included,
+            isDefaultIncluded: service.isDefaultIncluded,
             min_fee: service.min_fee,
             rate: service.rate,
             fee_increment: service.fee_increment,
-            phase: phase,
-            customFee: undefined,
-            construction_admin: service.construction_admin,
+            phase: service.phase,
+            isConstructionAdmin: service.isConstructionAdmin,
             fee: service.min_fee || 0,
-            structureId: newStructureId,
-            levelId: '',
+            structureId: newStructure.id,
+            levelId: newStructure.levels[0].id,
             spaceId: '',
-            isActive: true
-          }));
-      };
+            isIncluded: service.isDefaultIncluded,
+            customFee: undefined
+          };
+          newTrackedServices.push(newService);
+          console.log('Created tracked service:', {
+            id: newService.id,
+            serviceId: newService.serviceId,
+            name: newService.service_name,
+            phase: newService.phase,
+            isDefaultIncluded: newService.isDefaultIncluded,
+            isIncluded: newService.isIncluded,
+            structureId: newService.structureId,
+            levelId: newService.levelId
+          });
+        }
 
-      // Create services for both phases
-      const designServices = createServicesForPhase('design');
-      const constructionServices = createServicesForPhase('construction');
-      const newTrackedServices = [...designServices, ...constructionServices];
-
-      console.log('handleDrop: Creating new services for structure:', {
-        structureId: newStructureId,
-        designServicesCount: designServices.length,
-        constructionServicesCount: constructionServices.length,
-        totalServicesCount: newTrackedServices.length,
-        engineeringServicesCount: engineeringServices.length
-      });
-
-      // Update the proposal state with both the new structure and services
-      setProposal(prev => {
-        // First update the engineering services if they were just loaded
-        const updatedEngineeringServices = engineeringServices.length > 0 ? engineeringServices : prev.engineeringStandardServices;
-        
-        // Then create the new state with the updated services
-        const updated = {
-          ...prev,
-          engineeringStandardServices: updatedEngineeringServices,
-          structures: [...prev.structures, newStructure],
-          trackedServices: [...prev.trackedServices, ...newTrackedServices]
-        };
-
-        console.log('handleDrop: Updated proposal state:', {
-          newStructureId,
+        console.log('Created new structure with services:', {
+          structureId: newStructure.id,
           structureName: newStructure.name,
+          defaultLevelId: newStructure.levels[0].id,
+          servicesCount: newTrackedServices.length,
           designServicesCount: designServices.length,
           constructionServicesCount: constructionServices.length,
-          totalServicesCount: updated.trackedServices.length,
-          servicesWithNewStructureId: updated.trackedServices.filter(s => s.structureId === newStructureId).length,
-          servicesByPhase: {
-            design: updated.trackedServices.filter(s => s.structureId === newStructureId && s.phase === 'design').length,
-            construction: updated.trackedServices.filter(s => s.structureId === newStructureId && s.phase === 'construction').length
-          },
-          engineeringServicesCount: updated.engineeringStandardServices.length
+          allServices: newTrackedServices.map(s => ({
+            id: s.id,
+            name: s.service_name,
+            phase: s.phase,
+            isDefaultIncluded: s.isDefaultIncluded,
+            isIncluded: s.isIncluded
+          }))
         });
 
-        return updated;
-      });
-    } else if (data.type === 'level' && targetStructureId) {
-      const structure = proposal.structures.find(s => s.id === targetStructureId);
-      if (!structure) return;
+        // Update the proposal state with both the new structure and its tracked services
+        setProposal(prev => {
+          const updatedProposal = {
+            ...prev,
+            structures: [...prev.structures, newStructure],
+            trackedServices: [...prev.trackedServices, ...newTrackedServices]
+          };
+          console.log('Updated proposal state:', {
+            structuresCount: updatedProposal.structures.length,
+            trackedServicesCount: updatedProposal.trackedServices.length,
+            newTrackedServices: newTrackedServices.map(s => ({
+              id: s.id,
+              name: s.service_name,
+              phase: s.phase,
+              isDefaultIncluded: s.isDefaultIncluded,
+              isIncluded: s.isIncluded
+            }))
+          });
+          return updatedProposal;
+        });
+      }
+      // Handle engineering service updates
+      else if (dragData.type === 'engineering_service' && dragData.service && targetStructureId) {
+        console.log('Updating engineering service...');
+        const service = dragData.service as TrackedService;
+        
+        // Update the service's structureId and isIncluded status
+        setProposal(prev => {
+          const existingService = prev.trackedServices.find(ts => 
+            ts.serviceId === service.id && 
+            ts.structureId === targetStructureId
+          );
 
-      // Find the highest level number
-      const highestLevel = structure.levels.reduce((highest, level) => {
-        const levelNum = parseInt(level.name.split(' ')[1]);
-        return isNaN(levelNum) ? highest : Math.max(highest, levelNum);
-      }, -1);
+          if (existingService) {
+            // Update existing service
+            return {
+              ...prev,
+              trackedServices: prev.trackedServices.map(ts => 
+                ts.id === existingService.id 
+                  ? { ...ts, isIncluded: true }
+                  : ts
+              )
+            };
+          }
 
-      const newLevel: Level = {
-        id: data.id,
-        name: `Level ${highestLevel + 1}`,
-        floorArea: "0",
-        description: "New Level",
-        spaceType: "Office",
-        discipline: "Mechanical", // Changed from MEP to Mechanical as default
-        hvacSystem: "VAV System",
-        spaces: []
-      };
+          // Create new tracked service
+          const newTrackedService: TrackedService = {
+            id: crypto.randomUUID(),
+            serviceId: service.id,
+            service_name: service.service_name,
+            name: service.service_name,
+            discipline: service.discipline,
+            isDefaultIncluded: service.isDefaultIncluded,
+            min_fee: service.min_fee,
+            rate: service.rate,
+            fee_increment: service.fee_increment,
+            phase: service.phase,
+            isConstructionAdmin: service.isConstructionAdmin,
+            fee: service.min_fee || 0,
+            structureId: targetStructureId,
+            levelId: '',
+            spaceId: '',
+            isIncluded: true,
+            customFee: undefined
+          };
 
-      // Sort levels in reverse order (higher numbers first)
-      const updatedLevels = [...structure.levels, newLevel].sort((a, b) => {
-        const aNum = parseInt(a.name.split(' ')[1]);
-        const bNum = parseInt(b.name.split(' ')[1]);
-        return bNum - aNum; // Reversed order
-      });
-      
-      setProposal({
-        ...proposal,
-        structures: proposal.structures.map(s =>
-          s.id === targetStructureId
-            ? { ...s, levels: updatedLevels }
-            : s
-        )
-      });
+          return {
+            ...prev,
+            trackedServices: [...prev.trackedServices, newTrackedService]
+          };
+        });
+      }
+      else {
+        throw new Error('Invalid drag data format');
+      }
+    } catch (error) {
+      console.error('Error in handleDrop:', error);
     }
   };
+
+  // Update any remaining references to engineeringStandardServices to use dbEngineeringServices
+  useEffect(() => {
+    if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
+      setProposal(prev => ({
+        ...prev,
+        dbEngineeringServices: engineeringStandardServices
+      }));
+    }
+  }, [isLoadingStandardServices, engineeringStandardServices]);
 
   const handleAddFiveLevels = (structureId: string) => {
     const structure = proposal.structures.find(s => s.id === structureId);
@@ -1213,11 +1298,17 @@ export default function EditProposalPage() {
   };
 
   const handleDragStart = (e: DragEvent<HTMLButtonElement>, type: 'structure' | 'level') => {
+    console.log('Starting drag of type:', type);
     setIsDragging(true);
-    e.dataTransfer.setData('application/json', JSON.stringify({
+    
+    // Set the drag data with the correct type
+    const dragData = {
       type,
       id: crypto.randomUUID()
-    }));
+    };
+    
+    console.log('Setting drag data:', dragData);
+    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
     e.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -1381,18 +1472,18 @@ export default function EditProposalPage() {
               service_name: service.service_name,
               name: service.service_name,
               discipline: service.discipline,
-              default_included: true,
+              isDefaultIncluded: true,
               min_fee: originalService?.min_fee ?? null,
               rate: originalService?.rate ?? null,
               fee_increment: originalService?.fee_increment ?? null,
               phase: 'design' as const,
               customFee: undefined,
-              construction_admin: false,
+              isConstructionAdmin: false,
               fee: 0,
               structureId: selectedStructureId,
               levelId: selectedLevelId,
               spaceId: editingSpace.id,
-              isActive: service.isActive
+              isIncluded: service.isActive
             };
           });
 
@@ -1466,18 +1557,18 @@ export default function EditProposalPage() {
               service_name: service.service_name,
               name: service.service_name,
               discipline: service.discipline,
-              default_included: true,
+              isDefaultIncluded: true,
               min_fee: originalService?.min_fee ?? null,
               rate: originalService?.rate ?? null,
               fee_increment: originalService?.fee_increment ?? null,
               phase: 'design' as const,
               customFee: undefined,
-              construction_admin: false,
+              isConstructionAdmin: false,
               fee: 0,
               structureId: selectedStructureId,
               levelId: selectedLevelId,
               spaceId: newSpace.id,
-              isActive: service.isActive
+              isIncluded: service.isActive
             };
           });
 
@@ -2002,7 +2093,7 @@ export default function EditProposalPage() {
 
     const newStructure: Structure = {
       id: crypto.randomUUID(),
-      name: `${structureToDuplicate.name} (Duplicate ${duplicateNumber})`,  // Add "Duplicate" text and correct numbering
+      name: `${structureToDuplicate.name} (Duplicate ${duplicateNumber})`,
       constructionType: structureToDuplicate.constructionType,
       floorArea: structureToDuplicate.floorArea,
       description: structureToDuplicate.description,
@@ -2027,9 +2118,36 @@ export default function EditProposalPage() {
       designPercentage: structureToDuplicate.designPercentage
     };
 
+    // Find all tracked services for the original structure
+    const originalServices = proposal.trackedServices.filter(s => s.structureId === structureId);
+    
+    // Create new tracked services for the duplicate structure
+    const newTrackedServices = originalServices.map(service => ({
+      ...service,
+      id: crypto.randomUUID(),
+      structureId: newStructure.id,
+      levelId: newStructure.levels[0].id, // Set to first level's ID
+      spaceId: '', // Reset space ID as it's not associated with any space yet
+    }));
+
+    console.log('Duplicating structure and services:', {
+      originalStructureId: structureId,
+      newStructureId: newStructure.id,
+      originalServicesCount: originalServices.length,
+      newServicesCount: newTrackedServices.length,
+      services: newTrackedServices.map(s => ({
+        id: s.id,
+        name: s.service_name,
+        phase: s.phase,
+        isIncluded: s.isIncluded,
+        structureId: s.structureId
+      }))
+    });
+
     setProposal(prev => ({
       ...prev,
-      structures: [...prev.structures, newStructure]
+      structures: [...prev.structures, newStructure],
+      trackedServices: [...prev.trackedServices, ...newTrackedServices]
     }));
   };
 
@@ -2441,7 +2559,7 @@ export default function EditProposalPage() {
     structureId: string,
     levelId: string,
     spaceId: string,
-    service: EngineeringStandardService
+    service: TrackedService
   ) => {
     // Only proceed if the service has a non-null min_fee
     if (service.min_fee === null) {
@@ -2506,51 +2624,6 @@ export default function EditProposalPage() {
     }));
 
     console.log('Updated fees for service:', service.service_name);
-  };
-
-  const handleFeeTableDrop = (
-    e: DragEvent<HTMLDivElement> | Event,
-    structureId: string,
-    levelId: string,
-    spaceId: string,
-    discipline: string,
-    phase: 'design' | 'construction',
-    dragDataOverride?: any
-  ) => {
-    // Only call preventDefault if it's a React DragEvent
-    if ('preventDefault' in e) {
-      e.preventDefault();
-    }
-    
-    console.log('=== FEE TABLE DROP ===');
-    console.log('Drop target:', { structureId, levelId, spaceId, discipline, phase });
-    
-    let dragData;
-    if (dragDataOverride) {
-      dragData = dragDataOverride;
-    } else if ('dataTransfer' in e) {
-      try {
-        const jsonData = e.dataTransfer?.getData('application/json');
-        if (jsonData) {
-          dragData = JSON.parse(jsonData);
-        }
-      } catch (error) {
-        console.error('Error parsing drag data:', error);
-        return;
-      }
-    }
-
-    console.log('Retrieved drag data:', dragData);
-
-    if (!dragData) {
-      console.log('No drag data found');
-      return;
-    }
-
-    if (dragData.type === 'engineering_service') {
-      const service = dragData.service as EngineeringStandardService;
-      updateFeesForService(structureId, levelId, spaceId, service);
-    }
   };
 
   // Add a helper function to determine if a drop is allowed
@@ -2886,14 +2959,17 @@ export default function EditProposalPage() {
   };
 
   // Update the handleDragStart for services
-  const handleServiceDragStart = (e: DragEvent<HTMLDivElement>, service: EngineeringStandardService) => {
+  const handleServiceDragStart = (e: DragEvent<HTMLDivElement>, service: EngineeringService) => {
     console.log('Starting service drag:', service.service_name);
     const dragData = {
       type: 'engineering_service',
-      service: service
+      service: {
+        ...service,
+        isIncluded: service.isDefaultIncluded
+      }
     };
     e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-    e.dataTransfer.effectAllowed = 'move'; // Changed from 'copy' to 'move'
+    e.dataTransfer.effectAllowed = 'move';
   };
 
   // Update the handleDragOver for the space container
@@ -2924,7 +3000,7 @@ export default function EditProposalPage() {
   };
 
   // Update the service update handler in the main component
-  const handleServiceUpdate = async (serviceId: string, updates: Partial<EngineeringStandardService>) => {
+  const handleServiceUpdate = async (serviceId: string, updates: Partial<EngineeringService>) => {
     console.log('Updating service state:', serviceId, updates);
     
     try {
@@ -2968,7 +3044,7 @@ export default function EditProposalPage() {
       // Revert the local state if the API call fails
       setEngineeringStandardServices(prevServices => 
         prevServices.map(service => 
-          service.id === serviceId ? { ...service, default_included: !updates.default_included } : service
+          service.id === serviceId ? { ...service, isDefaultIncluded: !updates.isDefaultIncluded } : service
         )
       );
     }
@@ -2982,7 +3058,7 @@ export default function EditProposalPage() {
       id: service.id,
       name: service.service_name,
       discipline: service.discipline,
-      default_included: service.default_included,
+      isDefaultIncluded: service.isDefaultIncluded,
       min_fee: service.min_fee,
       rate: service.rate,
       fee_increment: service.fee_increment,
@@ -2991,75 +3067,72 @@ export default function EditProposalPage() {
   }, [trackedServices]);
 
   // Add handler for services change
-  const handleServicesChange = (services: Array<{
-    id: string;
-    service_name: string;
-    discipline: string;
-    default_included: boolean;
-    min_fee: number | null;
-    rate: number | null;
-    fee_increment: number | null;
-    phase: 'design' | 'construction';
-    construction_admin: boolean;
-  }>) => {
-    try {
-      // Get the current structure ID from the proposal
-      const currentStructureId = proposal.structures[0]?.id;
-      if (!currentStructureId) {
-        console.warn('No structure ID available for services');
-        return;
-      }
+  const handleServicesChange = (services: TrackedService[]) => {
+    console.log('=== HANDLE SERVICES CHANGE START ===');
+    console.log('Incoming Services:', services.map(s => ({
+      id: s.id,
+      name: s.service_name,
+      isIncluded: s.isIncluded,
+      phase: s.phase,
+      isConstructionAdmin: s.isConstructionAdmin
+    })));
 
-      // Map the services to include all required TrackedService properties
-      const updatedServices: TrackedService[] = services.map(service => {
-        // Find existing service to preserve structure ID
-        const existingService = proposal.trackedServices.find(ts => ts.serviceId === service.id);
-        
-        // If we have an existing service, use its structure ID
-        // Otherwise, use the current structure ID
-        const structureId = existingService?.structureId || currentStructureId;
-        
-        console.log('Service update:', {
-          serviceId: service.id,
-          serviceName: service.service_name,
-          existingStructureId: existingService?.structureId,
-          newStructureId: structureId
+    try {
+      setProposal(prev => {
+        console.log('Previous Proposal State:', {
+          trackedServicesCount: prev.trackedServices.length,
+          trackedServices: prev.trackedServices.map(s => ({
+            id: s.id,
+            name: s.service_name,
+            isIncluded: s.isIncluded,
+            phase: s.phase,
+            isConstructionAdmin: s.isConstructionAdmin
+          }))
         });
 
+        const updatedServices = services.map(service => {
+          const existingService = prev.trackedServices.find(s => s.id === service.id);
+          if (existingService) {
+            console.log('Updating Existing Service:', {
+              id: service.id,
+              name: service.service_name,
+              oldIsIncluded: existingService.isIncluded,
+              newIsIncluded: service.isIncluded,
+              phase: service.phase,
+              isConstructionAdmin: service.isConstructionAdmin
+            });
+            return {
+              ...service,
+              structureId: existingService.structureId,
+              levelId: existingService.levelId,
+              spaceId: existingService.spaceId
+            };
+          }
+          console.log('New Service:', {
+            id: service.id,
+            name: service.service_name,
+            isIncluded: service.isIncluded,
+            phase: service.phase,
+            isConstructionAdmin: service.isConstructionAdmin
+          });
+          return service;
+        });
+
+        console.log('Final Updated Services:', updatedServices.map(s => ({
+          id: s.id,
+          name: s.service_name,
+          isIncluded: s.isIncluded,
+          phase: s.phase,
+          isConstructionAdmin: s.isConstructionAdmin
+        })));
+
+        console.log('=== HANDLE SERVICES CHANGE COMPLETE ===');
+
         return {
-          id: existingService?.id || crypto.randomUUID(),
-          serviceId: service.id,
-          service_name: service.service_name,
-          name: service.service_name,
-          discipline: service.discipline,
-          default_included: service.default_included,
-          min_fee: service.min_fee,
-          rate: service.rate,
-          fee_increment: service.fee_increment,
-          phase: service.phase,
-          construction_admin: service.construction_admin,
-          fee: existingService?.fee || 0,
-          structureId: structureId, // Use the determined structure ID
-          levelId: existingService?.levelId || '',
-          spaceId: existingService?.spaceId || '',
-          isActive: existingService?.isActive || service.default_included,
-          customFee: existingService?.customFee
+          ...prev,
+          trackedServices: updatedServices
         };
       });
-      
-      setProposal(prev => ({
-        ...prev,
-        trackedServices: updatedServices
-      }));
-
-      // Log the updated services
-      console.log('Updated tracked services:', updatedServices.map(s => ({
-        id: s.id,
-        name: s.service_name,
-        structureId: s.structureId,
-        default_included: s.default_included,
-        isActive: s.isActive
-      })));
     } catch (error) {
       console.error('Error updating services:', error);
     }
@@ -3072,14 +3145,13 @@ export default function EditProposalPage() {
     setTrackedServices(prevServices => 
       prevServices.map(prevService => {
         if (prevService.id === serviceId) {
-          const isDisabling = fee === undefined && prevService.default_included;
-          const isEnabling = fee !== undefined && !prevService.default_included;
+          const isDisabling = fee === undefined;
+          const isEnabling = fee !== undefined;
           
           return {
             ...prevService,
-            default_included: isEnabling ? true : (isDisabling ? false : prevService.default_included),
             fee: fee !== undefined ? fee : prevService.fee,
-            isActive: isEnabling ? true : (isDisabling ? false : prevService.isActive)
+            isIncluded: isEnabling ? true : (isDisabling ? false : prevService.isIncluded)
           };
         }
         return prevService;
@@ -3343,114 +3415,168 @@ export default function EditProposalPage() {
     }));
   };
 
+  // Update the useEffect that initializes tracked services
   useEffect(() => {
     // Only run if services have just loaded and there are structures but no tracked services
-    if (
-      engineeringStandardServices.length > 0 &&
-      proposal.structures.length > 0 &&
-      proposal.trackedServices.length === 0
-    ) {
+    if (!isLoadingStandardServices && 
+        engineeringStandardServices.length > 0 && 
+        proposal.structures.length > 0 && 
+        proposal.trackedServices.length === 0) {  // Only run if there are no tracked services
+      
+      console.log('Initializing tracked services for structures:', {
+        structuresCount: proposal.structures.length,
+        existingTrackedServices: proposal.trackedServices.length
+      });
+
       // For each structure, create tracked services for both phases
       let newTrackedServices: TrackedService[] = [];
       for (const structure of proposal.structures) {
         for (const phase of ['design', 'construction'] as const) {
-          const defaultServices = engineeringStandardServices.filter((service: EngineeringStandardService) =>
+          const defaultServices = engineeringStandardServices.filter((service: EngineeringService) =>
             service.phase === phase &&
-            service.default_included &&
-            (service.min_fee !== null || service.rate !== null || service.fee_increment !== null)
+            service.isDefaultIncluded
           );
-          const servicesForPhase: TrackedService[] = defaultServices.map((service: EngineeringStandardService): TrackedService => ({
+          const servicesForPhase: TrackedService[] = defaultServices.map((service: EngineeringService): TrackedService => ({
             id: crypto.randomUUID(),
             serviceId: service.id,
             service_name: service.service_name,
             name: service.service_name,
             discipline: service.discipline,
-            default_included: true,
+            isDefaultIncluded: service.isDefaultIncluded,
             min_fee: service.min_fee,
             rate: service.rate,
             fee_increment: service.fee_increment,
-            phase,
-            construction_admin: service.construction_admin,
-            fee: 0,
+            phase: service.phase || 'design',
+            isConstructionAdmin: service.isConstructionAdmin,
+            fee: service.min_fee || 0,
             structureId: structure.id,
             levelId: '',
             spaceId: '',
-            isActive: true
+            isIncluded: service.isDefaultIncluded, // Use isDefaultIncluded instead of isIncludedInFee
+            customFee: undefined
           }));
           newTrackedServices = newTrackedServices.concat(servicesForPhase);
         }
       }
-      setProposal((prev: ProposalFormData): ProposalFormData => ({
+
+      console.log('Created new tracked services:', {
+        structuresCount: proposal.structures.length,
+        servicesCount: newTrackedServices.length,
+        services: newTrackedServices.map(s => ({
+          id: s.id,
+          name: s.service_name,
+          phase: s.phase,
+          isDefaultIncluded: s.isDefaultIncluded,
+          structureId: s.structureId,
+          levelId: s.levelId
+        }))
+      });
+
+      setProposal(prev => ({
         ...prev,
-        trackedServices: [...prev.trackedServices, ...newTrackedServices]
+        trackedServices: newTrackedServices  // Replace instead of append
       }));
     }
-  }, [engineeringStandardServices, proposal.structures.length]);
+  }, [isLoadingStandardServices, engineeringStandardServices, proposal.structures, proposal.trackedServices.length]);
 
+  // Update handleDeleteStructure to properly clean up state
   const handleDeleteStructure = (structureId: string) => {
     const structureToDelete = proposal.structures.find(s => s.id === structureId);
     if (!structureToDelete) return;
 
-    // If this is a duplicate, we need to renumber the remaining duplicates
-    if (structureToDelete.parentId) {
-      setProposal(prev => {
-        // First remove the structure
-        const updatedStructures = renumberDuplicates(
-          prev.structures.filter(s => s.id !== structureId),
-          structureToDelete.parentId!
-        );
+    console.log('Starting structure deletion:', {
+      structureId,
+      isDuplicate: !!structureToDelete.parentId,
+      parentId: structureToDelete.parentId
+    });
 
-        // Then clean up tracked services and manual fee overrides
-        const updatedTrackedServices = prev.trackedServices.filter(
-          service => service.structureId !== structureId
-        );
+    setProposal(prev => {
+      // Get all structure IDs to delete (parent and duplicates)
+      const structureIdsToDelete = [
+        structureId,
+        ...prev.structures
+          .filter(s => s.parentId === structureId)
+          .map(s => s.id)
+      ];
 
-        const updatedManualFeeOverrides = prev.manualFeeOverrides.filter(
-          override => override.structureId !== structureId
-        );
+      console.log('Structure IDs to delete:', structureIdsToDelete);
 
-        return {
-          ...prev,
-          structures: updatedStructures,
-          trackedServices: updatedTrackedServices,
-          manualFeeOverrides: updatedManualFeeOverrides
-        };
+      // Remove structures
+      let updatedStructures = prev.structures.filter(
+        s => !structureIdsToDelete.includes(s.id)
+      );
+
+      // If this was a duplicate structure, renumber the remaining duplicates
+      if (structureToDelete.parentId) {
+        updatedStructures = renumberDuplicates(
+          updatedStructures,
+          structureToDelete.parentId
+        );
+      }
+
+      // Clean up tracked services for all deleted structures
+      const updatedTrackedServices = prev.trackedServices.filter(
+        service => !structureIdsToDelete.includes(service.structureId)
+      );
+
+      // Clean up manual fee overrides for all deleted structures
+      const updatedManualFeeOverrides = prev.manualFeeOverrides.filter(
+        override => !structureIdsToDelete.includes(override.structureId)
+      );
+
+      console.log('Structure deletion complete:', {
+        structureId,
+        isDuplicate: !!structureToDelete.parentId,
+        deletedStructureIds: structureIdsToDelete,
+        remainingStructures: updatedStructures.length,
+        remainingTrackedServices: updatedTrackedServices.length,
+        remainingManualFeeOverrides: updatedManualFeeOverrides.length,
+        trackedServices: updatedTrackedServices.map(s => ({
+          id: s.id,
+          name: s.service_name,
+          structureId: s.structureId,
+          isIncluded: s.isIncluded
+        }))
       });
-    } else {
-      // If this is a parent structure, delete it and all its duplicates
-      setProposal(prev => {
-        // Get all structure IDs to delete (parent and duplicates)
-        const structureIdsToDelete = [
-          structureId,
-          ...prev.structures
-            .filter(s => s.parentId === structureId)
-            .map(s => s.id)
-        ];
 
-        // Remove structures
-        const updatedStructures = prev.structures.filter(
-          s => !structureIdsToDelete.includes(s.id)
-        );
-
-        // Clean up tracked services
-        const updatedTrackedServices = prev.trackedServices.filter(
-          service => !structureIdsToDelete.includes(service.structureId)
-        );
-
-        // Clean up manual fee overrides
-        const updatedManualFeeOverrides = prev.manualFeeOverrides.filter(
-          override => !structureIdsToDelete.includes(override.structureId)
-        );
-
-        return {
-          ...prev,
-          structures: updatedStructures,
-          trackedServices: updatedTrackedServices,
-          manualFeeOverrides: updatedManualFeeOverrides
-        };
-      });
-    }
+      return {
+        ...prev,
+        structures: updatedStructures,
+        trackedServices: updatedTrackedServices,
+        manualFeeOverrides: updatedManualFeeOverrides
+      };
+    });
   };
+
+  // Add logging before rendering FixedFees
+  console.log('🔍 PAGE_DEBUG - Tracked Services being passed to FixedFees:', {
+    trackedServices: trackedServices.map(s => ({
+      id: s.id,
+      service_name: s.service_name,
+      discipline: s.discipline,
+      phase: s.phase,
+      structureId: s.structureId,
+      isIncluded: s.isIncluded,
+      isConstructionAdmin: s.isConstructionAdmin,
+      min_fee: s.min_fee,
+      rate: s.rate,
+      fee_increment: s.fee_increment,
+      customFee: s.customFee
+    }))
+  });
+
+  // Update the useEffect that loads services to use dbEngineeringServices
+  useEffect(() => {
+    if (!isLoadingStandardServices && engineeringStandardServices.length > 0) {
+      setProposal(prev => ({
+        ...prev,
+        dbEngineeringServices: engineeringStandardServices  // Store in dbEngineeringServices instead of trackedServices
+      }));
+    }
+  }, [isLoadingStandardServices, engineeringStandardServices]);
+
+  // Remove the useEffect that was creating trackedServices on load
+  // (Remove the useEffect that was watching engineeringStandardServices and proposal.structures.length)
 
   return (
     <div className="container mx-auto py-6 pt-24 space-y-6">
@@ -3572,23 +3698,65 @@ export default function EditProposalPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold dark:text-[#E5E7EB]">Structures</h2>
             <div className="flex items-center gap-2">
-            <button
-              type="button"
+              <div
                 draggable
-                onDragStart={(e) => handleDragStart(e, 'structure')}
-                onDragEnd={handleDragEnd}
-                className={`inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors ${isDragging ? 'opacity-50' : ''}`}
+                onDragStart={(e) => {
+                  console.log('Starting structure drag...');
+                  const dragData = {
+                    type: 'structure',
+                    id: crypto.randomUUID()  // Generate a new UUID for the structure
+                  };
+                  console.log('Setting drag data:', dragData);
+                  e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+                  e.dataTransfer.effectAllowed = 'copy';
+                  setIsDragging(true);
+                }}
+                onDragEnd={() => {
+                  console.log('Ending structure drag...');
+                  setIsDragging(false);
+                }}
+                className={`inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-move ${isDragging ? 'opacity-50' : ''}`}
                 title="Drag to add structure"
               >
                 <Building2 className="w-4 h-4" />
                 <span>Add Structure</span>
-            </button>
+              </div>
             </div>
           </div>
           <div 
             className={`space-y-2 min-h-[200px] ${isDragging ? 'border-2 border-dashed border-primary/50 rounded-lg' : ''}`}
-            onDragOver={(e) => handleDragOver(e, true)}
-            onDrop={(e) => handleDrop(e)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const hasJsonData = e.dataTransfer.types.includes('application/json');
+              if (!hasJsonData) {
+                e.dataTransfer.dropEffect = 'none';
+                return;
+              }
+              e.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Drop event triggered on structure container');
+              try {
+                const data = e.dataTransfer.getData('application/json');
+                console.log('Raw drop data:', data);
+                if (!data) {
+                  console.error('No data received in drop event');
+                  return;
+                }
+                const dragData = JSON.parse(data);
+                console.log('Parsed drag data:', dragData);
+                if (dragData.type === 'structure') {
+                  handleDrop(e);
+                } else {
+                  console.error('Invalid drag data type:', dragData.type);
+                }
+              } catch (error) {
+                console.error('Error handling drop:', error);
+              }
+            }}
           >
             {proposal.structures.map((structure) => (
               <div 
@@ -3707,17 +3875,19 @@ export default function EditProposalPage() {
                           >
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
-                              width="16"
-                              height="16"
+                              width="24"
+                              height="24"
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
                               strokeWidth="2"
                               strokeLinecap="round"
                               strokeLinejoin="round"
-                              className={`w-4 h-4 transition-transform ${collapsedServices.has(structure.id) ? '' : 'rotate-90'}`}
+                              className={`w-4 h-4 transition-transform ${
+                                collapsedServices.has(structure.id) ? 'rotate-90' : ''
+                              }`}
                             >
-                              <path d="m9 18 6-6-6-6"/>
+                              <polyline points="9 18 15 12 9 6"></polyline>
                             </svg>
                           </button>
                           <span className="text-sm font-medium text-gray-500">Engineering Services</span>
@@ -3725,13 +3895,11 @@ export default function EditProposalPage() {
                         
                         {!collapsedServices.has(structure.id) && (
                           <div className="mt-2">
-                            <EngineeringServicesDisplay
-                              services={engineeringStandardServices}
-                              isLoading={isLoadingStandardServices}
-                              onServiceUpdate={handleServiceUpdate}
-                              proposal={proposal}
-                              setProposal={setProposal}
+                            <EngineeringServicesManager
+                              proposalId={proposalId}
+                              structureId={structure.id}
                               onServicesChange={handleServicesChange}
+                              initialTrackedServices={proposal.trackedServices.filter(service => service.structureId === structure.id)}
                             />
                           </div>
                         )}
@@ -3939,19 +4107,6 @@ export default function EditProposalPage() {
                               <div 
                                 key={space.id} 
                                 className="p-3 pl-12"
-                                onDragOver={handleSpaceDragOver}
-                                onDrop={(e) => {
-                                  e.preventDefault();
-                                  handleFeeTableDrop(
-                                    e,
-                                    structure.id,
-                                    level.id,
-                                    space.id,
-                                    space.discipline,
-                                    'design',
-                                    dragData
-                                  );
-                                }}
                               >
                                 <div className="flex items-start gap-3">
                                   <div className="p-1.5 bg-primary/5 rounded-md">

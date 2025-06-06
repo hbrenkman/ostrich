@@ -17,25 +17,25 @@ interface AddStandardServiceDialogProps {
     discipline: string;
     service_name: string;
     description: string;
-    included_in_fee: boolean;
-    default_included: boolean;
+    isIncludedInFee: boolean;
+    isDefaultIncluded: boolean;
     phase: 'design' | 'construction';
     min_fee: number | null;
     rate: number | null;
     fee_increment: number | null;
-    construction_admin: boolean;
+    isConstructionAdmin: boolean;
   }) => Promise<void>;
   onEdit?: (serviceId: string, service: {
     discipline: string;
     service_name: string;
     description: string;
-    included_in_fee: boolean;
-    default_included: boolean;
+    isIncludedInFee: boolean;
+    isDefaultIncluded: boolean;
     phase: 'design' | 'construction';
     min_fee: number | null;
     rate: number | null;
     fee_increment: number | null;
-    construction_admin: boolean;
+    isConstructionAdmin: boolean;
   }) => Promise<void>;
   editMode?: boolean;
   serviceData?: {
@@ -43,13 +43,13 @@ interface AddStandardServiceDialogProps {
     discipline: string;
     service_name: string;
     description: string;
-    included_in_fee: boolean;
-    default_included: boolean;
+    isIncludedInFee: boolean;
+    isDefaultIncluded: boolean;
     phase: 'design' | 'construction' | null;
     min_fee: number | null;
     rate: number | null;
     fee_increment: number | null;
-    construction_admin: boolean;
+    isConstructionAdmin: boolean;
   };
 }
 
@@ -100,13 +100,13 @@ export function AddStandardServiceDialog({
     discipline: '',
     service_name: '',
     description: '',
-    included_in_fee: true,
-    default_included: false,
+    isIncludedInFee: true,
+    isDefaultIncluded: false,
     phase: 'design' as 'design' | 'construction',
     min_fee: null as number | null,
     rate: null as number | null,
     fee_increment: null as number | null,
-    construction_admin: false
+    isConstructionAdmin: false
   });
 
   // Reset form when dialog opens/closes or serviceData changes
@@ -116,13 +116,13 @@ export function AddStandardServiceDialog({
         discipline: serviceData.discipline,
         service_name: serviceData.service_name,
         description: serviceData.description,
-        included_in_fee: serviceData.included_in_fee,
-        default_included: serviceData.default_included,
+        isIncludedInFee: serviceData.isIncludedInFee,
+        isDefaultIncluded: serviceData.isDefaultIncluded,
         phase: serviceData.phase || 'design',
         min_fee: serviceData.min_fee,
         rate: serviceData.rate,
         fee_increment: serviceData.fee_increment,
-        construction_admin: serviceData.construction_admin
+        isConstructionAdmin: serviceData.isConstructionAdmin
       });
       // Initialize selectedDisciplines with the service's discipline
       setSelectedDisciplines([serviceData.discipline]);
@@ -131,13 +131,13 @@ export function AddStandardServiceDialog({
         discipline: '',
         service_name: '',
         description: '',
-        included_in_fee: true,
-        default_included: false,
+        isIncludedInFee: true,
+        isDefaultIncluded: false,
         phase: 'design',
         min_fee: null,
         rate: null,
         fee_increment: null,
-        construction_admin: false
+        isConstructionAdmin: false
       });
       setSelectedDisciplines([]);
       setError(null);
@@ -162,7 +162,7 @@ export function AddStandardServiceDialog({
   const handleEstimatedFeeChange = (value: 'included' | 'additional_service') => {
     setFormData(prev => ({
       ...prev,
-      included_in_fee: value === 'included'
+      isIncludedInFee: value === 'included'
     }));
   };
 
@@ -188,13 +188,13 @@ export function AddStandardServiceDialog({
           discipline: formData.discipline,
           service_name: formData.service_name,
           description: formData.description,
-          included_in_fee: formData.included_in_fee,
-          default_included: formData.default_included,
+          isIncludedInFee: formData.isIncludedInFee,
+          isDefaultIncluded: formData.isDefaultIncluded,
           phase: formData.phase,
           min_fee: formData.min_fee,
           rate: formData.rate,
           fee_increment: formData.fee_increment,
-          construction_admin: formData.construction_admin
+          isConstructionAdmin: formData.isConstructionAdmin
         });
       } else {
         // In add mode, create a service for each selected discipline
@@ -203,13 +203,13 @@ export function AddStandardServiceDialog({
             discipline,
             service_name: formData.service_name,
             description: formData.description,
-            included_in_fee: formData.included_in_fee,
-            default_included: formData.default_included,
+            isIncludedInFee: formData.isIncludedInFee,
+            isDefaultIncluded: formData.isDefaultIncluded,
             phase: formData.phase,
             min_fee: formData.min_fee,
             rate: formData.rate,
             fee_increment: formData.fee_increment,
-            construction_admin: formData.construction_admin
+            isConstructionAdmin: formData.isConstructionAdmin
           });
         }
       }
@@ -333,7 +333,7 @@ export function AddStandardServiceDialog({
           <div className="space-y-2">
             <Label htmlFor="estimated_fee">Estimated Fee</Label>
             <Select
-              value={formData.included_in_fee ? 'included' : 'additional_service'}
+              value={formData.isIncludedInFee ? 'included' : 'additional_service'}
               onValueChange={handleEstimatedFeeChange}
             >
               <SelectTrigger>
@@ -348,23 +348,23 @@ export function AddStandardServiceDialog({
 
           <div className="flex items-center space-x-2">
             <Switch
-              id="default_included"
-              checked={formData.default_included}
-              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, default_included: checked }))}
+              id="isDefaultIncluded"
+              checked={formData.isDefaultIncluded}
+              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isDefaultIncluded: checked }))}
             />
-            <Label htmlFor="default_included" className="text-muted-foreground">
+            <Label htmlFor="isDefaultIncluded" className="text-muted-foreground">
               Default Included (Service will be included by default in new proposals)
             </Label>
           </div>
 
           <div className="flex items-center space-x-2">
             <Switch
-              id="construction_admin"
-              checked={formData.construction_admin}
-              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, construction_admin: checked }))}
+              id="isConstructionAdmin"
+              checked={formData.isConstructionAdmin}
+              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isConstructionAdmin: checked }))}
               className="data-[state=checked]:bg-yellow-500"
             />
-            <Label htmlFor="construction_admin" className="text-muted-foreground">
+            <Label htmlFor="isConstructionAdmin" className="text-muted-foreground">
               Construction Administration Fee Calculation
             </Label>
             <TooltipProvider>
@@ -388,7 +388,7 @@ export function AddStandardServiceDialog({
             </TooltipProvider>
           </div>
 
-          {!formData.included_in_fee && (
+          {!formData.isIncludedInFee && (
             <>
               <div className="space-y-2">
                 <Label htmlFor="min_fee">Minimum Fee ($)</Label>

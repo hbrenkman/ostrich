@@ -138,7 +138,7 @@ Based on the code, here are the criteria used to determine which services should
 
 2. **Construction Admin Exclusion**:
    ```typescript
-   !service.construction_admin
+   !service.isConstructionAdmin
    ```
    - Construction admin services are explicitly excluded from display
 
@@ -160,7 +160,7 @@ Based on the code, here are the criteria used to determine which services should
    - Each group can have multiple services for different disciplines
 
 6. **Service State**:
-   - Services have a `default_included` flag that determines if they're enabled by default
+   - Services have a `isDefaultIncluded` flag that determines if they're enabled by default
    - Services can have a `customFee` that overrides the calculated fee
    - Services can be toggled on/off using the UI
 
@@ -191,7 +191,7 @@ The user interface for design phase space fees includes editable fee fields and 
 This logic ensures that design phase space fees and services are always visible and editable, providing a clear and comprehensive view of all design-related fees and services in the proposal.
 Construction Phase Space Fees & Services Logic
 # Visibility of Construction Phase Fees for Spaces:
-Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the construction_admin flag set to true and default_included set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
+Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the isConstructionAdmin flag set to true and isDefaultIncluded set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
 # Fee Calculation:
 When construction phase fees are enabled (i.e., when a construction admin service is present), the system uses the "Construction Percentage" parameter (set at the top of the Fixed Fees component) to determine the portion of the total fee allocated to the construction phase. The calculation for each discipline is based on the construction cost and the selected percentage.
 # Services Handling:
@@ -203,7 +203,7 @@ This logic ensures that construction phase space fees and services are only show
 
 ## Construction Phase Space Fees & Services Logic
 # Visibility of Construction Phase Fees for Spaces:
-Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the construction_admin flag set to true and default_included set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
+Construction phase fees for individual spaces are only displayed if there is at least one engineering service in the proposal with the isConstructionAdmin flag set to true and isDefaultIncluded set to true. This ensures that construction phase calculations are only relevant when construction administration services are included in the project.
 # Fee Calculation:
 When construction phase fees are enabled (i.e., when a construction admin service is present), the system uses the "Construction Percentage" parameter (set at the top of the Fixed Fees component) to determine the portion of the total fee allocated to the construction phase. The calculation for each discipline is based on the construction cost and the selected percentage.
 # Services Handling:

@@ -85,9 +85,13 @@ export interface EngineeringService {
   discipline: string;
   service_name: string;
   description: string;
-  estimated_fee: string | null;
-  default_setting: boolean;
-  phase: 'design' | 'construction' | null;
+  isIncludedInFee: boolean;
+  isDefaultIncluded: boolean;
+  phase: 'design' | 'construction';
+  min_fee: number | null;
+  rate: number | null;
+  fee_increment: number | null;
+  isConstructionAdmin: boolean;
 }
 
 export interface EngineeringServiceLink {
@@ -109,4 +113,27 @@ export interface FeeTableProps {
   onResetFees: (structureId: string, discipline: string, spaceId?: string) => void;
   onServiceToggle: (structureId: string, spaceId: string, serviceId: string, isActive: boolean) => void;
   onServiceFeeUpdate: (structureId: string, spaceId: string, serviceId: string, fee: string | null) => void;
+}
+
+// TrackedService represents an engineering service associated with a structure
+// structureId: Foreign key referencing Structure.id
+// This is used to track which structure a service belongs to
+export interface TrackedService {
+  id: string;  // Primary key for the tracked service
+  serviceId: string;  // References the engineering service template
+  service_name: string;
+  name: string;
+  discipline: string;
+  isDefaultIncluded: boolean;
+  min_fee: number | null;
+  rate: number | null;
+  fee_increment: number | null;
+  phase: 'design' | 'construction';
+  customFee?: number;
+  isConstructionAdmin: boolean;
+  fee: number;
+  structureId: string;  // Foreign key referencing Structure.id
+  levelId: string;  // Foreign key referencing Level.id
+  spaceId: string;  // Foreign key referencing Space.id
+  isIncluded: boolean;
 } 
