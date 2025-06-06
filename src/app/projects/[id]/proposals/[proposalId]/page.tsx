@@ -30,6 +30,7 @@ import FixedFees from './components/FixedFees';
 import FlexFees from './components/FlexFees';
 import { Space, Level, Structure, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
 import { EngineeringServicesManager } from './components/EngineeringServicesManager';
+import { ContactSearch } from './components/ContactSearch';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,10 +39,33 @@ const supabase = createClient(
 
 interface Contact {
   id: string;
-  name: string;
-  email: string;
-  mobile: string;
-  direct_phone: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  mobile: string | null;
+  direct_phone: string | null;
+  role_id: string | null;
+  location_id: string | null;
+  status: string;
+  company_id: string | null;
+  role?: {
+    id: string;
+    name: string;
+  };
+  location?: {
+    id: string;
+    name: string;
+    address_line1: string;
+    address_line2: string | null;
+    city: string;
+    state: string;
+    zip: string;
+    company_id: string;
+    company?: {
+      id: string;
+      name: string;
+    }
+  }
 }
 
 interface Project {
@@ -101,13 +125,13 @@ interface ProposalFormData {
   projectNumber: string;
   projectName: string;
   company: string;
-  clientContact: Contact | null;  // Restore Contact type
+  clientContacts: Contact[];  // Changed from clientContact: Contact | null to clientContacts: Contact[]
   overview: string;
   designBudget: string;
   constructionSupportBudget: string;
-  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';  // Restore original status types
+  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';
   structures: Structure[];
-  costIndex: number | null;  // Restore CostIndex type
+  costIndex: number | null;
   resCheckItems: ResCheckItem[];
   nestedFeeItems: NestedFeeItem[];
   designFeeScale: FeeScale[];
@@ -189,27 +213,43 @@ interface Fee {
   costPerSqft: number;
 }
 
+// Update the contacts array to use the new Contact interface
 const contacts: Contact[] = [
   {
     id: '1',
-    name: 'John Smith',
+    first_name: 'John',
+    last_name: 'Smith',
     email: 'john.smith@example.com',
     mobile: '+1 (555) 123-4567',
     direct_phone: '+1 (555) 123-4567',
+    role_id: null,
+    location_id: null,
+    status: 'Active',
+    company_id: null
   },
   {
     id: '2',
-    name: 'Sarah Johnson',
+    first_name: 'Sarah',
+    last_name: 'Johnson',
     email: 'sarah.johnson@example.com',
     mobile: '+1 (555) 234-5678',
     direct_phone: '+1 (555) 234-5678',
+    role_id: null,
+    location_id: null,
+    status: 'Active',
+    company_id: null
   },
   {
     id: '3',
-    name: 'Michael Brown',
+    first_name: 'Michael',
+    last_name: 'Brown',
     email: 'michael.brown@example.com',
     mobile: '+1 (555) 345-6789',
     direct_phone: '+1 (555) 345-6789',
+    role_id: null,
+    location_id: null,
+    status: 'Active',
+    company_id: null
   },
 ];
 
@@ -267,15 +307,15 @@ export default function EditProposalPage() {
     projectNumber: '',
     projectName: '',
     company: '',
-    clientContact: null,
+    clientContacts: [],  // Initialize as empty array
     overview: '',
     designBudget: '',
     constructionSupportBudget: '',
     status: 'Pending',
     structures: [],
-    dbEngineeringServices: [],  // Initialize as empty array
+    dbEngineeringServices: [],
     trackedServices: [],
-    engineeringAdditionalServices: [],  // Use correct property name
+    engineeringAdditionalServices: [],
     designFeeScale: [],
     duplicateStructureRates: [],  // Add back this required property
     costIndex: null,  // Add back this required property
@@ -2881,30 +2921,23 @@ export default function EditProposalPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#E5E7EB] mb-1">
-                Client Contact
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsContactDialogOpen(true)}
-                  className="flex-1 flex items-center gap-2 px-3 py-2 border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md text-left hover:bg-muted/5 focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                >
-                  <Search className="w-4 h-4 text-gray-400" />
-                  <span className={proposal.clientContact ? "text-gray-900 dark:text-[#E5E7EB]" : "text-gray-400"}>
-                    {proposal.clientContact ? proposal.clientContact.name : "Search contacts..."}
-                  </span>
-                </button>
-                {proposal.clientContact && (
-                  <button
-                    type="button"
-                    onClick={() => setProposal({ ...proposal, clientContact: null })}
-                    className="p-2 text-gray-500 hover:text-destructive"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+              <ContactSearch
+                selectedCompany={proposal.company}
+                onContactSelect={(contact) => {
+                  setProposal(prev => ({
+                    ...prev,
+                    clientContacts: [...prev.clientContacts, contact]
+                  }));
+                }}
+                selectedContacts={proposal.clientContacts}
+                onContactRemove={(contactId) => {
+                  setProposal(prev => ({
+                    ...prev,
+                    clientContacts: prev.clientContacts.filter(c => c.id !== contactId)
+                  }));
+                }}
+                className="mb-4"
+              />
             </div>
 
             <div className="space-y-4">
@@ -3505,13 +3538,13 @@ export default function EditProposalPage() {
                   <CommandItem
                     key={contact.id}
                     onSelect={() => {
-                      setProposal({ ...proposal, clientContact: contact });
+                      setProposal({ ...proposal, clientContacts: [...proposal.clientContacts, contact] });
                       setIsContactDialogOpen(false);
                     }}
                     className="flex flex-col items-start py-2"
                   >
-                    <div className="font-medium">{contact.name}</div>
-                    <div className="text-sm text-gray-500">{contact.email}</div>
+                    <div className="font-medium">{contact.first_name} {contact.last_name}</div>
+                    <div className="text-sm text-gray-500">{contact.email || 'No email'}</div>
                   </CommandItem>
                 ))}
               </CommandGroup>
