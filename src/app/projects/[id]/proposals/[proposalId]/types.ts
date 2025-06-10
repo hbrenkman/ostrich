@@ -21,6 +21,7 @@ export interface Space {
   }>;
   totalCost: number;
   totalCostPerSqft: number;
+  splitConstructionCosts: boolean;
   engineeringServices?: Array<{
     id: string;
     discipline: string;

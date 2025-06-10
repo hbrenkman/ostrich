@@ -24,13 +24,18 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { SpaceDialog } from './space-dialog';
+import { SpaceDialog } from './components/space-dialog';
 import { createClient } from '@supabase/supabase-js'
 import FixedFees from './components/FixedFees';
 import FlexFees from './components/FlexFees';
 import { Space, Level, Structure, EngineeringService, EngineeringServiceLink, FeeTableProps } from './types';
 import { EngineeringServicesManager } from './components/EngineeringServicesManager';
 import { ContactSearch } from './components/ContactSearch';
+import { ProposalActions } from './components/ProposalActions';
+import { toast } from 'sonner';
+import { ProposalLoader } from './components/ProposalLoader';
+import { ProposalStructures } from './components/ProposalStructures';
+import { ProposalData, ProposalDataRef } from './components/ProposalData';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,33 +44,21 @@ const supabase = createClient(
 
 interface Contact {
   id: string;
-  first_name: string;
-  last_name: string;
-  email: string | null;
-  mobile: string | null;
-  direct_phone: string | null;
-  role_id: string | null;
-  location_id: string | null;
-  status: string;
-  company_id: string | null;
-  role?: {
-    id: string;
-    name: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role?: string;
+  company?: string;
+  is_primary: boolean;
+  details: {
+    first_name: string;
+    last_name: string;
+    role_id: string | null;
+    location_id: string | null;
+    company_id: string | null;
+    status: string;
+    [key: string]: string | number | boolean | null;
   };
-  location?: {
-    id: string;
-    name: string;
-    address_line1: string;
-    address_line2: string | null;
-    city: string;
-    state: string;
-    zip: string;
-    company_id: string;
-    company?: {
-      id: string;
-      name: string;
-    }
-  }
 }
 
 interface Project {
@@ -120,16 +113,71 @@ interface FeeItem {
   estimated_fee?: string | null;  // Optional for additional_service type
 }
 
+// Keep the original CompanyContact type for ContactSearch
+interface CompanyContact {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  mobile: string | null;
+  direct_phone: string | null;
+  role_id: string | null;
+  location_id: string | null;
+  status: string;
+  company_id: string | null;
+  role?: {
+    id: string;
+    name: string;
+  };
+  location?: {
+    id: string;
+    name: string;
+    address_line1: string;
+    address_line2: string | null;
+    city: string;
+    state: string;
+    zip: string;
+    company_id: string;
+    company?: {
+      id: string;
+      name: string;
+    }
+  }
+}
+
+// Add ProposalContact type for ProposalData
+interface ProposalContact {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role?: string;
+  company?: string;
+  is_primary: boolean;
+  details: {
+    first_name: string;
+    last_name: string;
+    role_id: string | null;
+    location_id: string | null;
+    company_id: string | null;
+    status: string;
+    [key: string]: string | number | boolean | null;
+  };
+}
+
+// Update ProposalFormData to use ProposalContact
 interface ProposalFormData {
-  number: string;
+  number: number;
+  displayNumber: string;
   projectNumber: string;
   projectName: string;
   company: string;
-  clientContacts: Contact[];  // Changed from clientContact: Contact | null to clientContacts: Contact[]
+  clientContacts: ProposalContact[];  // Changed from Contact to ProposalContact
   overview: string;
   designBudget: string;
   constructionSupportBudget: string;
-  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled';
+  status: 'Pending' | 'Active' | 'On Hold' | 'Cancelled' | 'Review' | 'Approved' | 'Edit';
+  is_temporary_revision: boolean;  // Add this property
   structures: Structure[];
   costIndex: number | null;
   resCheckItems: ResCheckItem[];
@@ -167,7 +215,8 @@ interface SpaceDialogProps {
   onSave: (space: Omit<Space, 'id'>) => void;
   costIndex: number | null;
   initialSpace?: Space | null;
-  onDisciplineFeeToggle: (structureId: string, levelId: string, spaceId: string, feeId: string, isActive: boolean) => void;
+  structureId: string;
+  levelId: string;
 }
 
 interface FeeDuplicateStructure {
@@ -225,7 +274,16 @@ const contacts: Contact[] = [
     role_id: null,
     location_id: null,
     status: 'Active',
-    company_id: null
+    company_id: null,
+    is_primary: true,
+    details: {
+      first_name: 'John',
+      last_name: 'Smith',
+      role_id: null,
+      location_id: null,
+      company_id: null,
+      status: 'Active'
+    }
   },
   {
     id: '2',
@@ -237,7 +295,16 @@ const contacts: Contact[] = [
     role_id: null,
     location_id: null,
     status: 'Active',
-    company_id: null
+    company_id: null,
+    is_primary: true,
+    details: {
+      first_name: 'Sarah',
+      last_name: 'Johnson',
+      role_id: null,
+      location_id: null,
+      company_id: null,
+      status: 'Active'
+    }
   },
   {
     id: '3',
@@ -249,7 +316,16 @@ const contacts: Contact[] = [
     role_id: null,
     location_id: null,
     status: 'Active',
-    company_id: null
+    company_id: null,
+    is_primary: true,
+    details: {
+      first_name: 'Michael',
+      last_name: 'Brown',
+      role_id: null,
+      location_id: null,
+      company_id: null,
+      status: 'Active'
+    }
   },
 ];
 
@@ -264,6 +340,20 @@ const generateUUID = () => {
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+};
+
+// Add this with the other type definitions at the top of the file
+type ProposalStatus = 'Edit' | 'Review' | 'Approved' | 'Published' | 'Active' | 'On Hold' | 'Cancelled';
+
+// Add helper function for number padding
+const padNumber = (num: number): string => {
+  return num.toString().padStart(3, '0');
+};
+
+// Update helper function to only pad proposal number
+const formatProposalDisplay = (proposalNumber: number, revisionNumber: number): string => {
+  const paddedProposalNumber = proposalNumber.toString().padStart(3, '0');
+  return `${paddedProposalNumber} Rev ${revisionNumber}`;
 };
 
 export default function EditProposalPage() {
@@ -301,31 +391,46 @@ export default function EditProposalPage() {
   const [isSpaceDialogOpen, setIsSpaceDialogOpen] = useState(false);  // Restore this state
   const [trackedServices, setTrackedServices] = useState<TrackedService[]>([]);
   const [collapsedServices, setCollapsedServices] = useState<Set<string>>(new Set());
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [userRole, setUserRole] = useState<'PM' | 'Manager' | 'Admin'>('PM'); // This should come from your auth system
+  const [revisionNumber, setRevisionNumber] = useState('1');
+  const [isTemporaryRevision, setIsTemporaryRevision] = useState(false);
+  const [isProposalLoaded, setIsProposalLoaded] = useState(false);
+  const proposalLoadAttempted = useRef(false);
 
   const [proposal, setProposal] = useState<ProposalFormData>({
-    number: '',
+    number: 0,
+    displayNumber: '',
     projectNumber: '',
     projectName: '',
     company: '',
-    clientContacts: [],  // Initialize as empty array
+    clientContacts: [],
     overview: '',
     designBudget: '',
     constructionSupportBudget: '',
     status: 'Pending',
+    is_temporary_revision: false,
     structures: [],
-    dbEngineeringServices: [],
-    trackedServices: [],
-    engineeringAdditionalServices: [],
+    costIndex: null,
+    resCheckItems: [],
+    nestedFeeItems: [],
     designFeeScale: [],
-    duplicateStructureRates: [],  // Add back this required property
-    costIndex: null,  // Add back this required property
-    resCheckItems: [],  // Add back this required property
-    nestedFeeItems: [],  // Add back this required property
-    phase: 'design'  // Add back this required property
+    duplicateStructureRates: [],
+    trackedServices: [],
+    dbEngineeringServices: [],
+    engineeringAdditionalServices: [],
+    phase: 'design'
   });
 
   // Add a ref to track if we're opening the dialog
   const isOpeningDialog = useRef(false);
+
+  // Add ref with proper type
+  const proposalDataRef = useRef<ProposalDataRef>(null);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -369,18 +474,21 @@ export default function EditProposalPage() {
     fetchProject();
   }, [id, router]);
 
+  // Update the fetchNextProposalNumber to use new format
   useEffect(() => {
     const fetchNextProposalNumber = async () => {
-      if (proposalId === 'new' && id) {
+      if (proposalId === 'new' && !isProposalLoaded && !proposalLoadAttempted.current) {
         try {
-          const response = await fetch(`/api/proposal-number?project_id=${id}`);
+          const response = await fetch('/api/proposal-number');
           if (!response.ok) {
             throw new Error('Failed to fetch next proposal number');
           }
           const data = await response.json();
+          
           setProposal(prev => ({
             ...prev,
-            number: data.next_number
+            number: data.next_number,  // Keep original number for calculations
+            displayNumber: formatProposalDisplay(data.next_number, 1) // Use new format for display
           }));
         } catch (error) {
           console.error('Error fetching next proposal number:', error);
@@ -389,12 +497,12 @@ export default function EditProposalPage() {
     };
 
     fetchNextProposalNumber();
-  }, [id, proposalId]);
+  }, [proposalId, isProposalLoaded]);
 
   useEffect(() => {
     // console.log('Project cost index:', project?.costIndex);
     // console.log('Proposal cost index:', proposal.costIndex);
-  }, [project?.costIndex, proposal.costIndex]);
+  }, [project?.costIndex, proposal?.costIndex]);
 
   // Remove or consolidate these logs in fetchEngineeringAdditionalServices
   const fetchEngineeringAdditionalServices = async () => {
@@ -586,9 +694,17 @@ export default function EditProposalPage() {
     }
   }, [isLoadingStandardServices, engineeringStandardServices]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push(`/projects/${id}`);
+    setIsSaving(true);
+    try {
+      router.push(`/projects/${id}`);
+    } catch (error) {
+      console.error('Error saving proposal:', error);
+      toast.error('Failed to save proposal');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDelete = () => {
@@ -708,7 +824,7 @@ export default function EditProposalPage() {
 
     try {
       // Check if engineering services are loaded
-      if (!proposal.dbEngineeringServices || proposal.dbEngineeringServices.length === 0) {
+      if (!proposal?.dbEngineeringServices || proposal.dbEngineeringServices.length === 0) {
         console.error('Engineering services not loaded yet');
         throw new Error('Engineering services not loaded yet. Please try again in a moment.');
       }
@@ -1002,7 +1118,7 @@ export default function EditProposalPage() {
 
 
   const handleAddSpace = async (space: Omit<Space, 'id'>) => {
-    if (!selectedStructureId || !selectedLevelId) {
+    if (!space.structureId || !space.levelId) {
       console.error('No structure or level selected');
       return;
     }
@@ -1027,8 +1143,8 @@ export default function EditProposalPage() {
         totalCost: space.totalCost,
         totalCostPerSqft: space.totalCostPerSqft
       },
-      selectedStructureId,
-      selectedLevelId
+      structureId: space.structureId,
+      levelId: space.levelId
     });
 
     // Log current proposal state before update
@@ -1073,11 +1189,11 @@ export default function EditProposalPage() {
     if (editingSpace) {
       setProposal(prev => {
         const updatedStructures = prev.structures.map(structure => {
-          if (structure.id === selectedStructureId) {
+          if (structure.id === space.structureId) {
             return {
               ...structure,
               levels: structure.levels.map(level => {
-                if (level.id === selectedLevelId) {
+                if (level.id === space.levelId) {
                   return {
                     ...level,
                     spaces: level.spaces.map(sp => {
@@ -1120,8 +1236,8 @@ export default function EditProposalPage() {
         // Log the construction costs calculation
         console.log('Page: Calculated construction costs:', {
           updatedConstructionCosts,
-          structureId: selectedStructureId,
-          levelId: selectedLevelId,
+          structureId: space.structureId,
+          levelId: space.levelId,
           spaceId: editingSpace.id,
           defaultCosts: DEFAULT_COST_PER_SQFT
         });
@@ -1150,8 +1266,8 @@ export default function EditProposalPage() {
               customFee: undefined,
               isConstructionAdmin: false,
               fee: 0,
-              structureId: selectedStructureId,
-              levelId: selectedLevelId,
+              structureId: space.structureId,
+              levelId: space.levelId,
               spaceId: editingSpace.id,
               isIncluded: service.isActive
             };
@@ -1160,8 +1276,8 @@ export default function EditProposalPage() {
           // Add new tracked services to the proposal
           updatedProposal.trackedServices = [
             ...prev.trackedServices.filter(ts => 
-              !(ts.structureId === selectedStructureId && 
-                ts.levelId === selectedLevelId && 
+              !(ts.structureId === space.structureId && 
+                ts.levelId === space.levelId && 
                 ts.spaceId === editingSpace.id)
             ),
             ...newTrackedServices
@@ -1181,11 +1297,11 @@ export default function EditProposalPage() {
       // For new spaces, update the proposal state
       setProposal(prev => {
         const updatedStructures = prev.structures.map(structure => {
-          if (structure.id === selectedStructureId) {
+          if (structure.id === space.structureId) {
             return {
               ...structure,
               levels: structure.levels.map(level => {
-                if (level.id === selectedLevelId) {
+                if (level.id === space.levelId) {
                   return {
                     ...level,
                     spaces: [...level.spaces, newSpace]
@@ -1204,8 +1320,8 @@ export default function EditProposalPage() {
         // Log the construction costs calculation
         console.log('Page: Calculated construction costs:', {
           updatedConstructionCosts,
-          structureId: selectedStructureId,
-          levelId: selectedLevelId,
+          structureId: space.structureId,
+          levelId: space.levelId,
           spaceId: newSpace.id,
           defaultCosts: DEFAULT_COST_PER_SQFT
         });
@@ -1234,8 +1350,8 @@ export default function EditProposalPage() {
               customFee: undefined,
               isConstructionAdmin: false,
               fee: 0,
-              structureId: selectedStructureId,
-              levelId: selectedLevelId,
+              structureId: space.structureId,
+              levelId: space.levelId,
               spaceId: newSpace.id,
               isIncluded: service.isActive
             };
@@ -1249,7 +1365,7 @@ export default function EditProposalPage() {
         }
 
         // Log the updated proposal state
-        console.log('Page: Updated proposal state after adding new space:', {
+        console.log('Page: Updated proposal state after adding space:', {
           structures: updatedProposal.structures,
           constructionCosts: updatedConstructionCosts,
           trackedServices: updatedProposal.trackedServices
@@ -1259,9 +1375,8 @@ export default function EditProposalPage() {
       });
     }
 
-    // Close the dialog after updating
+    // Reset editing state
     setEditingSpace(null);
-    setIsSpaceDialogOpen(false);
   };
 
   const handleAddLowerLevel = (structureId: string) => {
@@ -2503,11 +2618,13 @@ export default function EditProposalPage() {
   }, [trackedServices]);
 
   // Add handler for services change
-  const handleServicesChange = async (updatedServices: TrackedService[]) => {
-    setProposal(prev => ({
-      ...prev,
-      trackedServices: updatedServices
-    }));
+  const handleServicesChange = (structureId: string, services: TrackedService[]) => {
+    // Update the tracked services for this structure
+    const updatedServices = proposal.trackedServices.filter(service => service.structureId !== structureId);
+    updateProposal({
+      ...proposal,
+      trackedServices: [...updatedServices, ...services]
+    });
   };
 
   // Add handler for service fee updates
@@ -2842,725 +2959,652 @@ export default function EditProposalPage() {
   // Remove the useEffect that was creating trackedServices on load
   // (Remove the useEffect that was watching engineeringStandardServices and proposal.structures.length)
 
+  const handlePublish = async () => {
+    setIsPublishing(true);
+    try {
+      // Add your publish logic here
+      // For example:
+      // await supabase.from('proposals').update({ status: 'Active' }).eq('id', proposalId);
+      toast.success('Proposal published successfully');
+    } catch (error) {
+      console.error('Error publishing proposal:', error);
+      toast.error('Failed to publish proposal');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handleReview = async () => {
+    setIsReviewing(true);
+    try {
+      // Update proposal status to Review
+      await fetch(`/api/proposals/${proposalId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'Review' }));
+      toast.success('Proposal submitted for review');
+    } catch (error) {
+      console.error('Error submitting for review:', error);
+      toast.error('Failed to submit proposal for review');
+    } finally {
+      setIsReviewing(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    setIsApproving(true);
+    try {
+      // Update proposal status to Approved
+      await fetch(`/api/proposals/${proposalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'Approved' }));
+      toast.success('Proposal approved');
+    } catch (error) {
+      console.error('Error approving proposal:', error);
+      toast.error('Failed to approve proposal');
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const handleReject = async (feedback: string) => {
+    setIsRejecting(true);
+    try {
+      // Update proposal status to Edit with feedback
+      await fetch(`/api/proposals/${proposalId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback }),
+      });
+      setProposal(prev => ({ ...prev, status: 'Edit' }));
+      toast.success('Proposal rejected');
+    } catch (error) {
+      console.error('Error rejecting proposal:', error);
+      toast.error('Failed to reject proposal');
+    } finally {
+      setIsRejecting(false);
+    }
+  };
+
+  const handleClientApprove = async () => {
+    try {
+      // Update proposal status to Active
+      await fetch(`/api/proposals/${proposalId}/client-approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'Active' }));
+      toast.success('Client approval recorded');
+    } catch (error) {
+      console.error('Error recording client approval:', error);
+      toast.error('Failed to record client approval');
+    }
+  };
+
+  const handleClientReject = async () => {
+    try {
+      // Update proposal status to Edit
+      await fetch(`/api/proposals/${proposalId}/client-reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'Edit' }));
+      toast.success('Client rejection recorded');
+    } catch (error) {
+      console.error('Error recording client rejection:', error);
+      toast.error('Failed to record client rejection');
+    }
+  };
+
+  const handleHold = async () => {
+    try {
+      // Update proposal status to On Hold
+      await fetch(`/api/proposals/${proposalId}/hold`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'On Hold' }));
+      toast.success('Proposal placed on hold');
+    } catch (error) {
+      console.error('Error placing proposal on hold:', error);
+      toast.error('Failed to place proposal on hold');
+    }
+  };
+
+  const handleCancel = async () => {
+    try {
+      // Update proposal status to Cancelled
+      await fetch(`/api/proposals/${proposalId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setProposal(prev => ({ ...prev, status: 'Cancelled' }));
+      toast.success('Proposal cancelled');
+    } catch (error) {
+      console.error('Error cancelling proposal:', error);
+      toast.error('Failed to cancel proposal');
+    }
+  };
+
+  // Add handler for proposal data
+  const handleProposalLoad = (proposalData: any) => {
+    if (proposalLoadAttempted.current) {
+      console.log('Skipping duplicate proposal load');
+      return;
+    }
+
+    console.log('Page received proposal data:', proposalData);
+    proposalLoadAttempted.current = true;
+    
+    // Update ProposalData directly through its ref
+    if (proposalDataRef.current) {
+      proposalDataRef.current.updateData(proposalData);
+    }
+
+    setIsProposalLoaded(true);
+  };
+
+  // Reset the load attempt when proposalId changes
+  useEffect(() => {
+    proposalLoadAttempted.current = false;
+    setIsProposalLoaded(false);
+  }, [proposalId]);
+
+  const handleStructuresChange = (updatedStructures: Structure[]) => {
+    // Update both proposal and displayData states
+    setProposal(prev => ({
+      ...prev,
+      structures: updatedStructures
+    }));
+    setDisplayData(prev => ({
+      ...prev,
+      structures: updatedStructures
+    }));
+  };
+
+  // Add a memoized function to organize tracked services by structure ID
+  const trackedServicesByStructure = useMemo(() => {
+    return proposal.trackedServices.reduce((acc, service) => {
+      const structureId = service.structureId;
+      if (!acc[structureId]) {
+        acc[structureId] = [];
+      }
+      acc[structureId].push(service);
+      return acc;
+    }, {} as Record<string, TrackedService[]>);
+  }, [proposal.trackedServices]);
+
+  // Update state setters to handle the full proposal object
+  const updateProposal = (updates: Partial<ProposalFormData>) => {
+    console.log('Page: updateProposal called with updates:', updates);
+    setProposal(prev => {
+      const updated = { ...prev, ...updates };
+      console.log('Page: Proposal state updated:', {
+        previous: prev,
+        updates,
+        updated
+      });
+      return updated;
+    });
+  };
+
+  // Only update the page's state when we need to display data
+  const [displayData, setDisplayData] = useState<ProposalFormData>({
+    number: 0,
+    displayNumber: '',
+    projectNumber: '',
+    projectName: '',
+    company: '',
+    clientContacts: [],
+    overview: '',
+    designBudget: '',
+    constructionSupportBudget: '',
+    status: 'Pending',
+    is_temporary_revision: false,
+    structures: [],
+    costIndex: null,
+    resCheckItems: [],
+    nestedFeeItems: [],
+    designFeeScale: [],
+    duplicateStructureRates: [],
+    trackedServices: [],
+    dbEngineeringServices: [],
+    engineeringAdditionalServices: [],
+    phase: 'design'
+  });
+
+  // Update display data when ProposalData changes
+  const handleDataChange = useCallback((newData: {
+    id: string;
+    project_id: string;
+    proposal_number: number;
+    revision_number: number;
+    is_temporary_revision: boolean;
+    status_id: string;
+    contacts: Array<{
+      id: string;
+      name: string;
+      email: string;
+      phone?: string;
+      role?: string;
+      company?: string;
+      is_primary: boolean;
+      details: {
+        [key: string]: string | number | boolean;
+      };
+    }>;
+    description: string | null;
+    project_data: {
+      structures: Array<{
+        id: string;
+        name: string;
+        type: string;
+        levels: Array<{
+          id: string;
+          name: string;
+          floorArea: number;
+          spaces: Array<{
+            id: string;
+            name: string;
+            floorArea: number;
+            type: string;
+            parameters: {
+              [key: string]: number | string | boolean | undefined;
+            };
+          }>;
+          parameters: {
+            [key: string]: number | string | boolean;
+          };
+        }>;
+        totalFloorArea: number;
+        constructionType: string;
+        buildingType: string;
+        parameters: {
+          [key: string]: number | string | boolean;
+        };
+      }>;
+      tracked_services: Array<{
+        id: string;
+        serviceId: string;
+        service_name: string;
+        name: string;
+        discipline: string;
+        isDefaultIncluded: boolean;
+        min_fee: number | null;
+        rate: number | null;
+        fee_increment: number | null;
+        phase: 'design' | 'construction' | null;
+        customFee?: number;
+        isConstructionAdmin: boolean;
+        fee: number;
+        structureId: string;
+        levelId: string;
+        spaceId: string;
+        isIncluded: boolean;
+      }>;
+      additional_services: Array<{
+        id: string;
+        name: string;
+        description: string;
+        phase: 'design' | 'construction';
+        default_min_value: number;
+        is_active: boolean;
+        discipline?: string;
+      }>;
+      fee_scale: Array<{
+        id: number;
+        construction_cost: number;
+        prime_consultant_rate: number;
+        fraction_of_prime_rate_mechanical: number;
+        fraction_of_prime_rate_plumbing: number;
+        fraction_of_prime_rate_electrical: number;
+        fraction_of_prime_rate_structural: number;
+      }>;
+      duplicate_rates: Array<{
+        id: number;
+        rate: number;
+      }>;
+      rescheck_items: Array<{
+        id: string;
+        name: string;
+        description: string;
+        default_min_value: number;
+        isActive: boolean;
+      }>;
+      nested_items: Array<{
+        id: string;
+        name: string;
+        description: string;
+        default_min_value: number;
+        isActive: boolean;
+        discipline: string;
+        parentDiscipline?: string;
+      }>;
+      phase: 'design' | 'construction';
+      services: Array<{
+        id: string;
+        discipline_id: string;
+        name: string;
+        type: 'design' | 'construction';
+      }>;
+    };
+  }) => {
+    // Transform the data to match ProposalFormData type
+    const transformedData: ProposalFormData = {
+      number: newData.proposal_number,
+      displayNumber: formatProposalDisplay(newData.proposal_number, newData.revision_number),
+      projectNumber: '',
+      projectName: '',
+      company: '',
+      clientContacts: newData.contacts.map((contact) => ({
+        id: contact.id,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone || '',
+        role: contact.role || '',
+        company: contact.company || '',
+        is_primary: contact.is_primary,
+        details: {
+          first_name: (contact.details.first_name as string) || '',
+          last_name: (contact.details.last_name as string) || '',
+          role_id: (contact.details.role_id as string) || null,
+          location_id: (contact.details.location_id as string) || null,
+          company_id: (contact.details.company_id as string) || null,
+          status: (contact.details.status as string) || 'active'
+        }
+      })),
+      overview: newData.description || '',
+      designBudget: '',
+      constructionSupportBudget: '',
+      status: newData.status_id ? 'Active' : 'Pending',
+      is_temporary_revision: newData.is_temporary_revision,
+      structures: newData.project_data?.structures?.map((structure) => ({
+        id: structure.id,
+        name: structure.name,
+        constructionType: structure.type || '',
+        floorArea: '0',
+        description: '',
+        spaceType: '',
+        discipline: '',
+        hvacSystem: '',
+        levels: structure.levels?.map((level) => ({
+          id: level.id,
+          name: level.name,
+          floorArea: '0',
+          description: '',
+          spaceType: '',
+          discipline: '',
+          hvacSystem: '',
+          spaces: level.spaces?.map((space) => ({
+            id: space.id,
+            name: space.name,
+            description: '',
+            floorArea: space.floorArea || 0,
+            buildingType: space.type || '',
+            buildingTypeId: space.type || '',
+            spaceType: '',
+            discipline: '',
+            hvacSystem: '',
+            projectConstructionType: '',
+            projectConstructionTypeId: 0,
+            structureId: structure.id,
+            levelId: level.id,
+            totalConstructionCosts: [],
+            totalCost: 0,
+            totalCostPerSqft: 0,
+            splitConstructionCosts: false
+          })) || []
+        })) || []
+      })) || [],
+      costIndex: null,
+      resCheckItems: newData.project_data.rescheck_items?.map(item => ({
+        ...item,
+        isActive: true // Default to true for existing items
+      })) || [],
+      nestedFeeItems: newData.project_data.nested_items?.map(item => ({
+        ...item,
+        isActive: true // Default to true for existing items
+      })) || [],
+      designFeeScale: newData.project_data.fee_scale || [],
+      duplicateStructureRates: newData.project_data.duplicate_rates || [],
+      trackedServices: newData.project_data.tracked_services || [],
+      dbEngineeringServices: newData.project_data.services?.map(service => ({
+        id: service.id,
+        discipline: service.discipline_id,
+        service_name: service.name,
+        description: '',
+        isIncludedInFee: false,
+        isDefaultIncluded: false,
+        phase: service.type,
+        min_fee: null,
+        rate: null,
+        fee_increment: null,
+        isConstructionAdmin: false
+      })) || [],
+      engineeringAdditionalServices: newData.project_data.additional_services || [],
+      phase: newData.project_data.phase || 'design'
+    };
+    setDisplayData(transformedData);
+  }, []);
+
   return (
-    <div className="container mx-auto py-6 pt-24 space-y-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <Link
-            href={`/projects/${id}`}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <ArrowLeft className="w-6 h-6" />
-          </Link>
-          <div className="flex flex-col">
-            {isLoading ? (
-              <div className="animate-pulse">
-                <div className="h-8 w-48 bg-gray-200 rounded"></div>
-                <div className="h-4 w-32 bg-gray-200 rounded mt-2"></div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{project?.number}</span>
-                  <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{project?.name}</span>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <form onSubmit={handleSubmit} className="max-w-[1600px] space-y-6">
-        <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-4 border border-[#4DB6AC] dark:border-[#4DB6AC] mb-6">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-primary/10 rounded-md">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-5 h-5 text-primary"
-              >
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-              </svg>
-            </div>
-            <div>
-              <div className="text-sm font-medium text-gray-500 dark:text-[#9CA3AF]">Cost Index</div>
-              <div className="text-lg font-semibold text-primary">
-                {isLoading ? (
-                  <span className="text-gray-400">Loading...</span>
-                ) : (
-                  project?.costIndex != null ? project.costIndex.toFixed(2) : 'Not set'
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{proposal.number}</span>
-                <select
-                  value={proposal.status}
-                  onChange={(e) => setProposal({ ...proposal, status: e.target.value as ProposalFormData['status'] })}
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(proposal.status)}`}
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="Active">Active</option>
-                  <option value="On Hold">On Hold</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <ContactSearch
-                selectedCompany={proposal.company}
-                onContactSelect={(contact) => {
-                  setProposal(prev => ({
-                    ...prev,
-                    clientContacts: [...prev.clientContacts, contact]
-                  }));
-                }}
-                selectedContacts={proposal.clientContacts}
-                onContactRemove={(contactId) => {
-                  setProposal(prev => ({
-                    ...prev,
-                    clientContacts: prev.clientContacts.filter(c => c.id !== contactId)
-                  }));
-                }}
-                className="mb-4"
-              />
-            </div>
-
-            <div className="space-y-4">
-              <RichTextEditor
-                value={proposal.overview}
-                onChange={(e) => setProposal({ ...proposal, overview: e.target.value })}
-                placeholder="Enter proposal overview with formatting..."
-                className="border-[#4DB6AC] dark:border-[#4DB6AC] focus-within:ring-2 focus-within:ring-primary/20"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold dark:text-[#E5E7EB]">Structures</h2>
+    <>
+      <ProposalData
+        ref={proposalDataRef}
+        proposalId={proposalId}
+        projectId={params.id as string}
+        isNewProposal={proposalId === 'new'}
+        onDataChange={handleDataChange}
+      />
+      <div className="container mx-auto py-6 pt-24 space-y-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              {isLoadingStandardServices ? (
-                <div className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-500 bg-gray-100 rounded-md">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
-                  <span>Loading services...</span>
+              {isLoading ? (
+                <div className="animate-pulse">
+                  <div className="h-8 w-48 bg-gray-200 rounded"></div>
+                  <div className="h-4 w-32 bg-gray-200 rounded mt-2"></div>
                 </div>
               ) : (
-                <div
-                  draggable
-                  onDragStart={(e) => {
-                    console.log('Starting structure drag...');
-                    const dragData = {
-                      type: 'structure',
-                      id: crypto.randomUUID()  // Generate a new UUID for the structure
-                    };
-                    console.log('Setting drag data:', dragData);
-                    e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-                    e.dataTransfer.effectAllowed = 'copy';
-                    setIsDragging(true);
-                  }}
-                  onDragEnd={() => {
-                    console.log('Ending structure drag...');
-                    setIsDragging(false);
-                  }}
-                  className={`inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-move ${isDragging ? 'opacity-50' : ''}`}
-                  title="Drag to add structure"
-                >
-                  <Building2 className="w-4 h-4" />
-                  <span>Add Structure</span>
-                </div>
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{project?.number}</span>
+                    <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{project?.name}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
-          <div 
-            className={`space-y-2 min-h-[200px] ${isDragging ? 'border-2 border-dashed border-primary/50 rounded-lg' : ''}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (isLoadingStandardServices) {
-                e.dataTransfer.dropEffect = 'none';
-                return;
-              }
-              const hasJsonData = e.dataTransfer.types.includes('application/json');
-              if (!hasJsonData) {
-                e.dataTransfer.dropEffect = 'none';
-                return;
-              }
-              e.dataTransfer.dropEffect = 'copy';
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (isLoadingStandardServices) {
-                console.error('Cannot drop while services are loading');
-                return;
-              }
-              console.log('Drop event triggered on structure container');
-              try {
-                const data = e.dataTransfer.getData('application/json');
-                console.log('Raw drop data:', data);
-                if (!data) {
-                  console.error('No data received in drop event');
-                  return;
-                }
-                const dragData = JSON.parse(data);
-                if (dragData.type === 'structure') {
-                  handleDrop(e);
-                } else {
-                  console.error('Invalid drag data type:', dragData.type);
-                }
-              } catch (error) {
-                console.error('Error handling drop:', error);
-              }
-            }}
-          >
-            {isLoadingStandardServices ? (
-              <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-400 mx-auto mb-2"></div>
-                  <p>Loading services...</p>
-                </div>
-              </div>
-            ) : proposal.structures.length === 0 ? (
-              <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                <div className="text-center">
-                  <Building2 className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                  <p>Drag and drop a structure here</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {proposal.structures.map((structure) => (
-                  <div 
-                    key={structure.id} 
-                    className={`border border-[#4DB6AC] dark:border-[#4DB6AC] rounded-md overflow-hidden ${
-                      structure.parentId ? 'ml-16 relative' : ''
-                    }`}
-                  >
-                    <div
-                      className={`p-4 bg-muted/5 hover:bg-muted/10 cursor-pointer flex items-start gap-4 ${
-                        structure.parentId ? 'bg-muted/10' : ''
-                      }`}
-                      onDragOver={(e) => handleDragOver(e)}
-                      onDrop={(e) => handleDrop(e, structure.id)}
-                    >
-                      <div className="p-2 bg-primary/10 rounded-md">
-                        <Building2 className="w-6 h-6 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          {structure.parentId && (
-                            <button
-                              type="button"
-                              onClick={() => toggleDuplicateCollapse(structure.id)}
-                              className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title={collapsedDuplicates.has(structure.id) ? "Expand" : "Collapse"}
-                            >
-                              <ChevronDown className={`w-4 h-4 transition-transform ${
-                                collapsedDuplicates.has(structure.id) ? 'rotate-180' : ''
-                              }`} />
-                            </button>
-                          )}
-                          {editingStructureId === structure.id ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={editingStructureName}
-                                onChange={(e) => setEditingStructureName(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    handleStructureNameUpdate(structure.id);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingStructureId(null);
-                                  }
-                                }}
-                                className="flex-1 px-2 py-1 border border-[#4DB6AC] rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background text-foreground dark:bg-[#374151] dark:text-[#E5E7EB]"
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleStructureNameUpdate(structure.id)}
-                                className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              >
-                                <Save className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingStructureId(null)}
-                                className="p-1 text-gray-500 hover:text-destructive"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="font-medium dark:text-[#E5E7EB]">{structure.name}</div>
-                              {!structure.parentId && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingStructureId(structure.id);
-                                    setEditingStructureName(structure.name);
-                                  }}
-                                  className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                  title="Edit Structure Name"
-                                >
-                                  <Pencil className="w-4 h-4" />
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                        <div className="mt-1 font-medium text-primary">
-                          Construction Cost: {formatCurrency(calculateTotalConstructionCost(structure))}
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2 pt-1">
-                        {!structure.parentId && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleDuplicateStructure(structure.id)}
-                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title="Duplicate Structure (Linked)"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="w-4 h-4"
-                              >
-                                <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
-                                <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyStructure(structure.id)}
-                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title="Copy Structure (Independent)"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="w-4 h-4"
-                              >
-                                <rect width="14" height="14" x="8" y="2" rx="2" ry="2" />
-                                <path d="M4 10c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                                <path d="M8 2v14" />
-                                <path d="M2 8h14" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAddLowerLevel(structure.id)}
-                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title="Add Lower Level"
-                            >
-                              <Layers className="w-4 h-4 rotate-180" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAddUpperLevel(structure.id)}
-                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title="Add Upper Level"
-                            >
-                              <Layers className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAddFiveUpperLevels(structure.id)}
-                              className="p-2 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                              title="Add 5 Upper Levels"
-                            >
-                              <Building className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteStructure(structure.id)}
-                          className="p-2 text-gray-500 hover:text-destructive"
-                          title="Delete Structure"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {!structure.isDuplicateCollapsed && (
-                      <>
-                        {/* Engineering Services Section */}
-                        <div className="border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20">
-                          <div className="p-3 flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const newCollapsed = new Set(collapsedServices);
-                                if (collapsedServices.has(structure.id)) {
-                                  newCollapsed.delete(structure.id);
-                                } else {
-                                  newCollapsed.add(structure.id);
-                                }
-                                setCollapsedServices(newCollapsed);
-                              }}
-                              className="p-1 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                            >
-                              <ChevronDown className={`w-4 h-4 transition-transform ${collapsedServices.has(structure.id) ? 'rotate-180' : ''}`} />
-                            </button>
-                            <span className="text-sm font-medium text-gray-500">Engineering Services</span>
-                          </div>
-                          
-                          {!collapsedServices.has(structure.id) && (
-                            <div className="px-3 pb-3">
-                              <EngineeringServicesManager
-                                proposalId={proposalId}
-                                structureId={structure.id}
-                                onServicesChange={handleServicesChange}
-                                initialTrackedServices={proposal.trackedServices.filter(service => service.structureId === structure.id)}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Levels Section */}
-                        <div className="bg-muted/5 divide-y divide-[#4DB6AC]/20 dark:divide-[#4DB6AC]/20">
-                          {structure.levels.map((level) => (
-                            <div
-                              key={level.id}
-                              className="border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20"
-                            >
-                              <div className="p-3 flex items-center gap-3 hover:bg-muted/10 cursor-pointer">
-                                <div className="p-1.5 bg-primary/5 rounded-md">
-                                  <Layers className="w-4 h-4 text-primary/70" />
-                                </div>
-                                <div className="flex-1">
-                                  <div className="font-medium dark:text-[#E5E7EB]">{level.name}</div>
-                                  <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                    {level.spaceType} • {calculateLevelArea(level).toLocaleString()} sq ft
-                                  </div>
-                                </div>
-                                {!structure.parentId && (
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedStructureId(structure.id);
-                                        setSelectedLevelId(level.id);
-                                        setEditingSpace(null);
-                                        setIsSpaceDialogOpen(true);
-                                      }}
-                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                      title="Add space"
-                                    >
-                                      <Home className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDuplicateLevelUp(structure.id, level.id)}
-                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                      title="Duplicate Level Up"
-                                    >
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="w-3.5 h-3.5"
-                                      >
-                                        <path d="M12 5v14" />
-                                        <path d="m5 12 7-7 7 7" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDuplicateLevelDown(structure.id, level.id)}
-                                      className="p-1.5 text-primary hover:text-primary/90 hover:bg-primary/10 rounded-md transition-colors"
-                                      title="Duplicate Level Down"
-                                    >
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="w-3.5 h-3.5"
-                                      >
-                                        <path d="M12 5v14" />
-                                        <path d="m19 12-7 7-7-7" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteLevel(structure.id, level.id)}
-                                      className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
-                                      title="Delete level"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              {level.spaces && level.spaces.length > 0 && (
-                                <div className="bg-muted/5 divide-y divide-[#4DB6AC]/10 dark:divide-[#4DB6AC]/10">
-                                  {level.spaces.map((space) => (
-                                    <div 
-                                      key={space.id} 
-                                      className="p-3 pl-12"
-                                    >
-                                      <div className="flex items-start gap-3">
-                                        <div className="p-1.5 bg-primary/5 rounded-md">
-                                          <Home className="w-4 h-4 text-primary/70" />
-                                        </div>
-                                        <div className="flex-1">
-                                          <div className="flex items-center gap-2">
-                                            <div className="font-medium dark:text-[#E5E7EB]">{space.name}</div>
-                                            {space.floorArea > 0 && (
-                                              <span className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                                ({space.floorArea} sq ft)
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="text-sm text-gray-500 dark:text-[#9CA3AF]">
-                                            {space.description}
-                                          </div>
-                                          <div className="mt-2 text-sm">
-                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                              Building Type: {space.buildingType}
-                                            </div>
-                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                              Space Type: {space.spaceType}
-                                            </div>
-                                            <div className="text-gray-500 dark:text-[#9CA3AF]">
-                                              Project Construction Type: {space.projectConstructionType}
-                                            </div>
-                                            <div className="mt-1">
-                                              <div className="text-gray-500 dark:text-[#9CA3AF] mb-1">Disciplines:</div>
-                                              <div className="flex flex-wrap gap-2">
-                                                {space.totalConstructionCosts.map((fee) => (
-                                                  <button
-                                                    key={fee.id}
-                                                    onClick={(e) => {
-                                                      e.preventDefault();
-                                                      e.stopPropagation();
-                                                      try {
-                                                        handleDisciplineFeeToggle(structure.id, level.id, space.id, fee.id, !fee.isActive);
-                                                      } catch (error) {
-                                                        console.error('Error toggling discipline:', error);
-                                                      }
-                                                    }}
-                                                    className={`px-2 py-1 rounded-md text-sm transition-colors ${
-                                                      fee.isActive
-                                                        ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                                                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                                    }`}
-                                                    title={fee.isActive ? 'Disable discipline' : 'Enable discipline'}
-                                                  >
-                                                    {fee.discipline}
-                                                  </button>
-                                                ))}
-                                              </div>
-                                            </div>
-                                            <div className="mt-1 font-medium text-primary">
-                                              Construction Cost: {formatCurrency(space.totalCost)}
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <button
-                                            type="button"
-                                            onClick={() => handleEditSpace(space)}
-                                            className="p-1.5 text-gray-500 hover:text-primary"
-                                            title="Edit space"
-                                          >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteSpace(structure.id, level.id, space.id)}
-                                            className={`p-1.5 text-gray-500 hover:text-destructive ${structure.parentId ? 'hidden' : ''}`}
-                                            title="Delete space"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                    {(!structure.parentId || !collapsedDuplicates.has(structure.id)) && structure.levels.length === 0 && (
-                      <div 
-                        className="p-4 text-center text-gray-400 border-t border-[#4DB6AC]/20 dark:border-[#4DB6AC]/20 cursor-pointer hover:bg-muted/5"
-                        onDragOver={(e) => handleDragOver(e)}
-                        onDrop={(e) => handleDrop(e, structure.id)}
-                      >
-                        <Layers className="w-5 h-5 mx-auto mb-1 text-gray-400" />
-                        <p className="text-sm">Drop a level here</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
-        <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
-          <div className="flex gap-6">
-            <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-semibold mb-4 dark:text-[#E5E7EB]">Fixed Fees</h2>
-              {/* Before rendering FixedFees in the main render/return block:
-              console.log('Rendering FixedFees with trackedServices:', proposal.trackedServices); */}
-              <FixedFees
-                structures={proposal.structures}
-                phase={proposal.phase}
-                onFeeUpdate={handleFeeUpdate}
-                duplicateStructureRates={proposal.duplicateStructureRates}
-                trackedServices={proposal.trackedServices}
-                onServiceFeeUpdate={handleServiceFeeUpdate}
-                onDisciplineFeeToggle={handleDisciplineFeeToggle}
-                constructionCosts={getConstructionCosts(proposal.structures)}
-              />
+        <ProposalActions />
+
+        <form onSubmit={handleSubmit} className="max-w-[1600px] space-y-6">
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-4 border border-[#4DB6AC] dark:border-[#4DB6AC] mb-6">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-primary/10 rounded-md">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-5 h-5 text-primary"
+                >
+                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-gray-500 dark:text-[#9CA3AF]">Cost Index</div>
+                <div className="text-lg font-semibold text-primary">
+                  {isLoading ? (
+                    <span className="text-gray-400">Loading...</span>
+                  ) : (
+                    project?.costIndex != null ? project.costIndex.toFixed(2) : 'Not set'
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="mt-8">
-          <FlexFees />
-        </div>
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <span className="text-2xl font-semibold text-gray-900 dark:text-[#E5E7EB]">{displayData.displayNumber}</span>
+                </div>
+              </div>
 
-        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete Proposal</DialogTitle>
-              <DialogDescription>
-                Are you sure you want to delete this proposal? This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex justify-end gap-3 mt-4">
-                                              <button
-                                                type="button"
-                onClick={() => setIsDeleteDialogOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
-                                              >
-                Cancel
-                                              </button>
-                                              <button
-                                                type="button"
-                onClick={handleDeleteConfirm}
-                disabled={isDeleting}
-                className="px-4 py-2 text-sm font-medium text-white bg-destructive rounded-md hover:bg-destructive/90 transition-colors disabled:opacity-50"
-              >
-                {isDeleting ? 'Deleting...' : 'Delete'}
-                                              </button>
-                                          </div>
+              <div>
+                <ContactSearch
+                  selectedCompany={displayData.company}
+                  onContactSelect={(contact: CompanyContact) => {
+                    console.log('Page: Contact selected from ContactSearch:', contact);
+                    // Use ProposalData's addContact function
+                    const newContact = {
+                      name: `${contact.first_name} ${contact.last_name}`,
+                      email: contact.email || '',
+                      phone: contact.mobile || contact.direct_phone || '',
+                      role: contact.role?.name || '',
+                      company: contact.location?.company?.name || '',
+                      is_primary: false,
+                      details: {
+                        first_name: contact.first_name,
+                        last_name: contact.last_name,
+                        role_id: contact.role_id || '',
+                        location_id: contact.location_id || '',
+                        company_id: contact.company_id || '',
+                        status: contact.status || 'Active'
+                      }
+                    };
+                    proposalDataRef.current?.addContact(newContact);
+                  }}
+                  selectedContacts={displayData.clientContacts.map((contact: ProposalContact) => ({
+                    id: contact.id,
+                    first_name: contact.details.first_name,
+                    last_name: contact.details.last_name,
+                    email: contact.email,
+                    mobile: contact.phone || null,
+                    direct_phone: contact.phone || null,
+                    role_id: contact.details.role_id,
+                    location_id: contact.details.location_id,
+                    status: contact.details.status,
+                    company_id: contact.details.company_id,
+                    role: contact.role ? { id: '', name: contact.role } : undefined,
+                    location: contact.company ? {
+                      id: '',
+                      name: '',
+                      address_line1: '',
+                      address_line2: null,
+                      city: '',
+                      state: '',
+                      zip: '',
+                      company_id: '',
+                      company: { id: '', name: contact.company }
+                    } : undefined
+                  }))}
+                  onContactRemove={(contactId: string) => {
+                    console.log('Page: Removing contact:', contactId);
+                    // Use ProposalData's removeContact function
+                    proposalDataRef.current?.removeContact(contactId);
+                  }}
+                  className="mb-4"
+                />
+              </div>
+
+              <div className="space-y-4">
+                <RichTextEditor
+                  value={displayData.overview}
+                  onChange={(e) => updateProposal({ ...displayData, overview: e.target.value })}
+                  placeholder="Enter proposal overview with formatting..."
+                  className="border-[#4DB6AC] dark:border-[#4DB6AC] focus-within:ring-2 focus-within:ring-primary/20"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+            <ProposalStructures
+              structures={displayData.structures}
+              costIndex={displayData.costIndex}
+              isLoadingStandardServices={isLoadingStandardServices}
+              dbEngineeringServices={displayData.dbEngineeringServices}
+              onStructuresChange={handleStructuresChange}
+              onConstructionCostUpdate={handleConstructionCostUpdate}
+              onAddSpace={handleAddSpace}
+              proposalId={params.proposalId as string}
+              onServicesChange={handleServicesChange}
+              trackedServices={trackedServicesByStructure}
+            />
+          </div>
+
+          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC]">
+            <div className="flex gap-6">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold mb-4 dark:text-[#E5E7EB]">Fixed Fees</h2>
+                {/* Before rendering FixedFees in the main render/return block:
+                console.log('Rendering FixedFees with trackedServices:', proposal.trackedServices); */}
+                <FixedFees
+                  structures={displayData.structures}
+                  phase={displayData.phase}
+                  onFeeUpdate={handleFeeUpdate}
+                  duplicateStructureRates={displayData.duplicateStructureRates}
+                  trackedServices={displayData.trackedServices}
+                  onServiceFeeUpdate={handleServiceFeeUpdate}
+                  constructionCosts={getConstructionCosts(displayData.structures)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <FlexFees />
+          </div>
+        </form>
+
+        <Dialog open={isContactDialogOpen} onOpenChange={setIsContactDialogOpen}>
+          <DialogContent className="p-0">
+            <Command>
+              <CommandInput placeholder="Search contacts..." />
+              <CommandList>
+                <CommandEmpty>No contacts found.</CommandEmpty>
+                <CommandGroup>
+                  {contacts.map((contact) => (
+                    <CommandItem
+                      key={contact.id}
+                      onSelect={() => {
+                        updateProposal({ ...displayData, clientContacts: [...displayData.clientContacts, contact] });
+                        setIsContactDialogOpen(false);
+                      }}
+                      className="flex flex-col items-start py-2"
+                    >
+                      <div className="font-medium">{contact.first_name} {contact.last_name}</div>
+                      <div className="text-sm text-gray-500">{contact.email || 'No email'}</div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
           </DialogContent>
         </Dialog>
 
-        <div className="flex justify-between">
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 transition-colors disabled:opacity-50"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>Delete Proposal</span>
-          </button>
-          <div className="flex gap-3">
-            <Link
-              href={`/projects/${id}`}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-            >
-              <Save className="w-4 h-4" />
-              <span>Save Proposal</span>
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <Dialog open={isContactDialogOpen} onOpenChange={setIsContactDialogOpen}>
-        <DialogContent className="p-0">
-          <Command>
-            <CommandInput placeholder="Search contacts..." />
-            <CommandList>
-              <CommandEmpty>No contacts found.</CommandEmpty>
-              <CommandGroup>
-                {contacts.map((contact) => (
-                  <CommandItem
-                    key={contact.id}
-                    onSelect={() => {
-                      setProposal({ ...proposal, clientContacts: [...proposal.clientContacts, contact] });
-                      setIsContactDialogOpen(false);
-                    }}
-                    className="flex flex-col items-start py-2"
-                  >
-                    <div className="font-medium">{contact.first_name} {contact.last_name}</div>
-                    <div className="text-sm text-gray-500">{contact.email || 'No email'}</div>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </DialogContent>
-      </Dialog>
-
-      <SpaceDialog
-        open={isSpaceDialogOpen}
-        onOpenChange={handleSpaceDialogClose}
-        onSave={handleAddSpace}
-        costIndex={proposal.costIndex}
-        initialSpace={editingSpace}
-        onDisciplineFeeToggle={handleDisciplineFeeToggle}
-      />
-    </div>
+        <SpaceDialog
+          open={isSpaceDialogOpen}
+          onOpenChange={() => setIsSpaceDialogOpen(false)}
+          onSave={handleAddSpace}
+          initialSpace={editingSpace}
+          structureId={selectedStructureId || ''}
+          levelId={selectedLevelId || ''}
+          costIndex={displayData.costIndex}
+        />
+      </div>
+    </>
   );
 }

@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { EditContactDialog } from '@/components/ui/EditContactDialog';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import debounce from 'lodash/debounce';
+import FeeProposals from './components/FeeProposals';
 
 interface TeamMember {
   id: string;
@@ -48,7 +49,7 @@ interface FeeProposal {
   number: string;
   overview: string | null;
   design_budget: number | null;
-  construction_support_budget: number | null;
+  coion_support_budget: number | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -711,15 +712,6 @@ export default function ProjectDetail() {
     router.push(`/projects/${projectUUID}/proposals/new`);
   };
 
-  const handleAddDemoProposal = async () => {
-    if (!projectUUID) {
-      toast.error('Project not found');
-      return;
-    }
-
-    router.push(`/projects/${projectUUID}/proposals/new-demo`);
-  };
-
   const formatCurrency = (amount: number | null) => {
     if (amount === null) return '$0.00';
     return new Intl.NumberFormat('en-US', {
@@ -774,21 +766,6 @@ export default function ProjectDetail() {
         return 'bg-gray-100 text-gray-600';
       default:
         return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getProposalStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return 'bg-muted text-muted-foreground';
-      case 'active':
-        return 'bg-primary text-primary-foreground';
-      case 'on hold':
-        return 'bg-accent text-accent-foreground';
-      case 'cancelled':
-        return 'bg-destructive text-destructive-foreground';
-      default:
-        return 'bg-gray-200 text-gray-700';
     }
   };
 
@@ -1442,87 +1419,11 @@ export default function ProjectDetail() {
           </div>
 
           {/* Fee Proposals Section - Always show container */}
-          <div className="bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#D1D5DB] dark:border-[#4DB6AC]">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E5E7EB]">Fee Proposals</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleAddDemoProposal}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Demo Proposal
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddProposal}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Proposal
-                </button>
-              </div>
-            </div>
-
-            {loadingProposals ? (
-              <div className="text-sm text-gray-500">Loading proposals...</div>
-            ) : proposals.length > 0 ? (
-              <div className="divide-y divide-gray-200">
-                {proposals.map((proposal) => (
-                  <div
-                    key={proposal.id}
-                    className="py-4 first:pt-0 last:pb-0"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium text-gray-900 dark:text-[#E5E7EB]">{proposal.number}</span>
-                        <span className="text-sm text-gray-500">|</span>
-                        <span className="text-sm text-gray-900 dark:text-[#E5E7EB]">{proposal.overview || 'No overview'}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getProposalStatusColor(proposal.status)}`}>
-                          {proposal.status}
-                        </span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-                              <MoreVertical className="w-4 h-4 text-gray-500" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
-                              <Link href={`/projects/${projectId}/proposals/${proposal.number}`}>
-                                Edit Proposal
-                              </Link>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                    <div className="flex gap-6 text-sm text-gray-500">
-                      <div className="flex items-center gap-2">
-                        <span>Design:</span>
-                        <span>{formatCurrency(proposal.design_budget)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>Construction Support:</span>
-                        <span>{formatCurrency(proposal.construction_support_budget)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>Total:</span>
-                        <span className="font-medium text-gray-900 dark:text-[#E5E7EB]">
-                          {formatCurrency((proposal.design_budget || 0) + (proposal.construction_support_budget || 0))}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-500">No proposals yet. Click "Add Proposal" to create one.</div>
-            )}
-          </div>
+          <FeeProposals
+            projectId={projectId}
+            projectUUID={projectUUID}
+            onAddProposal={handleAddProposal}
+          />
 
           <div className="flex justify-between">
             {projectId !== 'new' && (

@@ -3,21 +3,13 @@ import { createSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const projectId = searchParams.get('project_id');
-    
-    if (!projectId) {
-      return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
-    }
-
     const supabase = createSupabaseClient();
     
-    // Get the latest proposal number for this project
+    // Get the latest proposal number
     const { data: proposals, error } = await supabase
-      .from('fee_proposals')
-      .select('number')
-      .eq('project_id', projectId)
-      .order('number', { ascending: false })
+      .from('proposals')
+      .select('proposal_number')
+      .order('proposal_number', { ascending: false })
       .limit(1);
 
     if (error) {
@@ -25,20 +17,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch latest proposal number' }, { status: 500 });
     }
 
-    // If no proposals exist yet, start with 001
-    let nextNumber = '001';
-    
-    if (proposals && proposals.length > 0) {
-      // Extract the numeric part and increment
-      const lastNumber = parseInt(proposals[0].number);
-      if (!isNaN(lastNumber)) {
-        nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-      }
-    }
+    // Start with 1 if no proposals exist, otherwise increment the last number
+    const nextNumber = proposals && proposals.length > 0 ? proposals[0].proposal_number + 1 : 1;
 
-    return NextResponse.json({ next_number: nextNumber });
+    // Return both the raw number and the padded version for display
+    return NextResponse.json({ 
+      next_number: nextNumber,
+      display_number: nextNumber.toString().padStart(3, '0')
+    });
   } catch (error) {
     console.error('Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to generate proposal number' }, { status: 500 });
   }
 } 

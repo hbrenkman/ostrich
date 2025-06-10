@@ -99,7 +99,8 @@ curl -i -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsIml
       Sum the disciplines togther and pass the total cost on to the structure with levels and spaces component in page.tsx.
    
 # 2 structure/building component/duplicates   
-   In the structure component we use the construction value from construction_costs table with cost_type "totals" for each space to give as a structure construction total.
+   In the structure component we use the construction value from construction_costs table with cost_type "totals"
+    for each space to give as a structure construction total.
    fee_duplicate_structures:  This table adjust the construction costs for duplicate structures/building.  The parent structure has index 1 in this table with a rate of 1.  The second entry in this table with id 2, would represent the second structure/building and first duplicate.  It has a rate of 0.75.  The thrid entry would have id 3 and represent duplicate 2 with rate 0.5625.  so it goes. The 10th structure (duplicate 9) and subsequent duplicates allhave the same rate represented by the rate with id 10.
 
    if we have a total structure construction cost of 10000 for the parent structure then the duplicate 1 total construction cost for the structure would be 10000x0.75 = 75000.  The same applies for the discipline construction costs.
@@ -212,3 +213,99 @@ For each discipline, construction phase services are listed and can be toggled o
 The user interface for construction phase space fees matches the design phase, including editable fee fields and toggle buttons for enabling or disabling fees per discipline and per service.
 # Summary:
 This logic ensures that construction phase space fees and services are only shown and calculated when appropriate, providing clarity and accuracy in project fee proposals.
+
+# Proposal Workflow
+
+## Overview
+The proposal system implements a structured workflow to manage the creation, review, and approval of engineering proposals. This ensures proper oversight and maintains a clear audit trail of proposal revisions.
+
+## Roles and Permissions
+- **Project Manager (PM)**: Creates and manages proposals
+- **Manager**: Reviews and approves/rejects proposals
+- **Admin**: Full system access, including review and approval capabilities
+
+## Proposal Statuses
+1. **Edit** (Initial State)
+   - Created by PM, Manager, or Admin
+   - Assigned temporary revision number
+   - Full editing capabilities
+   - Can be deleted
+   - Can be submitted for review
+
+2. **Review**
+   - Submitted by PM for review
+   - Only Manager and Admin can approve/reject
+   - If rejected: Returns to Edit status
+   - If approved: Moves to Approved status
+
+3. **Approved**
+   - Ready for PM to publish
+   - Revision number becomes permanent upon publishing
+   - PM can publish to send to client
+
+4. **Published**
+   - Sent to client for review
+   - Cannot be deleted
+   - If client rejects: PM can return to Edit status
+   - If client approves: Moves to Active status
+
+5. **Active**
+   - Client has approved the proposal
+   - Cannot be deleted
+   - Can be placed On Hold or Cancelled at client's request
+
+6. **On Hold**
+   - Temporary suspension of the proposal
+   - Can be reactivated or cancelled
+   - Cannot be deleted
+
+7. **Cancelled**
+   - Final state for terminated proposals
+   - Cannot be reactivated or deleted
+   - Maintains historical record
+
+## Workflow Process
+1. **Creation**
+   - PM/Manager/Admin creates new proposal
+   - System assigns temporary revision number
+   - Proposal starts in Edit status
+
+2. **Review Process**
+   - PM submits proposal for review
+   - Manager/Admin reviews proposal
+   - If rejected: Returns to Edit status with feedback
+   - If approved: Moves to Approved status
+
+3. **Client Review**
+   - PM publishes approved proposal
+   - System assigns permanent revision number
+   - Proposal sent to client
+   - Client can approve, reject, or request changes
+
+4. **Client Decision**
+   - If client rejects: PM can return to Edit status
+   - If client approves: Proposal moves to Active status
+   - If client requests hold: Proposal moves to On Hold status
+   - If client cancels: Proposal moves to Cancelled status
+
+## Key Rules
+- Proposals can only be deleted while in Edit status
+- Revision numbers become permanent upon publishing
+- Once published, proposals cannot be deleted
+- Active proposals can be placed On Hold or Cancelled
+- All status changes are logged for audit purposes
+
+## Status Transitions
+```
+Edit → Review → Approved → Published → Active
+   ↑      ↓
+   └──────┘ (if rejected)
+   ↑
+   └──────── (if client rejects)
+```
+
+## Notes
+- All status changes require appropriate role permissions
+- System maintains a complete history of all proposal revisions
+- Each status change is logged with timestamp and user information
+- Client communications are tracked and associated with the proposal

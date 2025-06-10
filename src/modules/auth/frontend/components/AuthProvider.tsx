@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (!mounted) return;
       
       const cookies = typeof document !== 'undefined' 
@@ -108,10 +108,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       console.log('Initial session check:', {
         hasSession: !!session,
+        hasError: !!error,
+        errorMessage: error?.message,
         userId: session?.user?.id,
         cookies
       });
-      processUserData(session);
+
+      if (error?.message?.includes('refresh_token_already_used')) {
+        console.log('Invalid refresh token detected, signing out...');
+        await supabase.auth.signOut();
+        setUser(null);
+        setStoredUser(null);
+        router.push('/auth/login');
+        setLoading(false);
+        return;
+      }
+
+      if (session) {
+        // Try to refresh the session immediately
+        const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError) {
+          console.error('Error refreshing session:', refreshError);
+          if (refreshError.message?.includes('refresh_token_already_used')) {
+            await supabase.auth.signOut();
+            setUser(null);
+            setStoredUser(null);
+            router.push('/auth/login');
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (refreshedSession) {
+          processUserData(refreshedSession);
+        } else {
+          processUserData(session);
+        }
+      } else {
+        setUser(null);
+        setStoredUser(null);
+      }
+      
       setLoading(false);
     });
 
@@ -136,6 +174,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setStoredUser(null);
+        router.push('/auth/login');
+      } else if (event === 'TOKEN_REFRESHED' && session) {
+        // Handle token refresh
+        processUserData(session);
       } else if (session) {
         // For other events, only process if session changed
         processUserData(session);
@@ -146,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [processUserData]);
+  }, [processUserData, router]);
 
   const value = {
     user,
