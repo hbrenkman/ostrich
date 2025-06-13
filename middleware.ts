@@ -2,9 +2,6 @@ import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Define the cookie name to match the frontend client
-const AUTH_COOKIE_NAME = 'ostrich-auth-token';
-
 // Only log once when middleware is loaded
 console.log('Middleware file is loaded (root directory)');
 
@@ -12,77 +9,11 @@ export async function middleware(req: NextRequest) {
   // Create a response object that we can modify
   const res = NextResponse.next();
   
-  // Log all cookies for debugging
-  const allCookies = req.cookies.getAll();
-  const authCookie = req.cookies.get(AUTH_COOKIE_NAME);
-  
-  // Parse the auth cookie if it exists
-  let parsedCookie = null;
-  if (authCookie?.value) {
-    try {
-      parsedCookie = JSON.parse(decodeURIComponent(authCookie.value));
-      console.log('Middleware: Auth cookie details:', {
-        name: AUTH_COOKIE_NAME,
-        value: 'present',
-        parsedValue: {
-          access_token: parsedCookie.access_token ? 'present' : 'missing',
-          refresh_token: parsedCookie.refresh_token ? 'present' : 'missing',
-          user: parsedCookie.user ? {
-            id: parsedCookie.user.id,
-            role: parsedCookie.user.app_metadata?.role || 
-                  parsedCookie.user.app_metadata?.claims?.role ||
-                  parsedCookie.user.user_metadata?.app_metadata?.role ||
-                  parsedCookie.user.user_metadata?.role
-          } : null
-        }
-      });
-    } catch (e) {
-      console.error('Error parsing auth cookie:', e);
-    }
-  } else {
-    console.log('Middleware: Auth cookie details:', {
-      name: AUTH_COOKIE_NAME,
-      value: 'missing'
-    });
-  }
-
   // Create a Supabase client configured to use cookies
-  const supabase = createMiddlewareClient(
-    { req, res },
-    {
-      cookieOptions: {
-        name: AUTH_COOKIE_NAME,
-        path: '/',
-        domain: req.headers.get('host')?.split(':')[0] || undefined,
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production'
-      }
-    }
-  );
+  const supabase = createMiddlewareClient({ req, res });
 
-  // If we have a parsed cookie with session data, set it in the client
-  if (parsedCookie?.access_token && parsedCookie?.refresh_token) {
-    try {
-      const { error: setSessionError } = await supabase.auth.setSession({
-        access_token: parsedCookie.access_token,
-        refresh_token: parsedCookie.refresh_token
-      });
-      
-      if (setSessionError) {
-        console.error('Error setting session from cookie:', setSessionError);
-      } else {
-        console.log('Successfully set session from cookie');
-      }
-    } catch (e) {
-      console.error('Error setting session:', e);
-    }
-  }
-
-  // Refresh the session if it exists
-  const {
-    data: { session },
-    error: sessionError
-  } = await supabase.auth.getSession();
+  // Refresh session if expired - required for Server Components
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
   // Log session state in a concise format
   console.log(`Middleware: Session state for ${req.nextUrl.pathname}:`, {
@@ -92,8 +23,6 @@ export async function middleware(req: NextRequest) {
           session?.user?.app_metadata?.claims?.role ||
           session?.user?.user_metadata?.app_metadata?.role ||
           session?.user?.user_metadata?.role,
-    cookieName: AUTH_COOKIE_NAME,
-    cookieValue: authCookie?.value ? 'present' : 'missing',
     sessionError: sessionError?.message,
     accessToken: session?.access_token ? 'present' : 'missing',
     refreshToken: session?.refresh_token ? 'present' : 'missing',
@@ -102,6 +31,7 @@ export async function middleware(req: NextRequest) {
       origin: req.headers.get('origin'),
       referer: req.headers.get('referer')
     },
+    requestCookies: req.cookies.getAll().map(c => c.name),
     responseCookies: res.cookies.getAll().map(c => c.name)
   });
 
@@ -115,9 +45,18 @@ export async function middleware(req: NextRequest) {
   }
 
   // Handle protected routes
-  if (req.nextUrl.pathname.startsWith('/admin/') || req.nextUrl.pathname.startsWith('/api/admin/')) {
+  if (req.nextUrl.pathname.startsWith('/admin/') || 
+      req.nextUrl.pathname.startsWith('/api/admin/') ||
+      req.nextUrl.pathname.startsWith('/api/proposals/')) {
     if (!session) {
       console.log(`Middleware: No session, redirecting to login from ${req.nextUrl.pathname}`);
+      // For API routes, return 401
+      if (req.nextUrl.pathname.startsWith('/api/')) {
+        return new NextResponse(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       return NextResponse.redirect(new URL('/auth/login', req.url));
     }
 
@@ -130,11 +69,7 @@ export async function middleware(req: NextRequest) {
     console.log(`Middleware: Role check for ${req.nextUrl.pathname}:`, {
       role,
       requiredRole: 'admin',
-      hasAccess: role === 'admin',
-      parsedCookieRole: parsedCookie?.user?.app_metadata?.role || 
-                       parsedCookie?.user?.app_metadata?.claims?.role ||
-                       parsedCookie?.user?.user_metadata?.app_metadata?.role ||
-                       parsedCookie?.user?.user_metadata?.role
+      hasAccess: role === 'admin'
     });
 
     if (req.nextUrl.pathname.startsWith('/admin/') && role !== 'admin') {

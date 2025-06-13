@@ -1,38 +1,96 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import type { Database } from '@/types/supabase';
 
 // GET /api/proposals/[proposalId]
 export async function GET(
   request: NextRequest,
   { params }: { params: { proposalId: string } }
 ) {
+  console.log('API: GET /api/proposals/[proposalId] - Starting request');
+  console.log('API: Request URL:', request.url);
+  console.log('API: Proposal ID:', params.proposalId);
+  
   try {
     const { proposalId } = params;
-    const supabase = createSupabaseClient();
-    
     if (!proposalId) {
+      console.log('API: No proposalId provided');
       return NextResponse.json({ error: 'Proposal ID is required' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    console.log('API: Created Supabase client');
+    
+    // Get the current session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    console.log('API: Session check:', { 
+      hasSession: !!session, 
+      userId: session?.user?.id,
+      role: session?.user?.app_metadata?.role,
+      sessionError: sessionError?.message 
+    });
+
+    if (sessionError) {
+      console.error('API: Session error:', sessionError);
+      return NextResponse.json({ error: 'Authentication error' }, { status: 401 });
+    }
+
+    if (!session) {
+      console.log('API: No session found');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Fetch the proposal with status
+    console.log('API: Fetching proposal from database');
+    const { data: proposal, error } = await supabase
       .from('proposals')
-      .select('*')
+      .select(`
+        *,
+        project_data,
+        status:proposal_statuses (
+          id,
+          code,
+          name,
+          description,
+          icon,
+          color,
+          is_initial,
+          is_final,
+          created_at,
+          updated_at
+        )
+      `)
       .eq('id', proposalId)
       .single();
-    
+
+    console.log('API: Database query result:', { 
+      hasProposal: !!proposal, 
+      error: error?.message,
+      status: proposal?.status,
+      hasProjectData: !!proposal?.project_data,
+      projectDataKeys: proposal?.project_data ? Object.keys(proposal.project_data) : []
+    });
+
     if (error) {
-      console.error('Error fetching proposal:', error);
+      console.error('API: Database error:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    
-    if (!data) {
+
+    if (!proposal) {
+      console.log('API: No proposal found');
       return NextResponse.json({ error: 'Proposal not found' }, { status: 404 });
     }
-    
-    return NextResponse.json(data);
+
+    console.log('API: Successfully returning proposal');
+    return NextResponse.json(proposal);
   } catch (error) {
-    console.error('Error fetching proposal:', error);
-    return NextResponse.json({ error: 'Failed to fetch proposal' }, { status: 500 });
+    console.error('API: Unexpected error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
@@ -43,7 +101,7 @@ export async function PUT(
 ) {
   try {
     const { proposalId } = params;
-    const supabase = createSupabaseClient();
+    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookies() });
     const data = await request.json();
     
     // Add debug logging
@@ -113,7 +171,7 @@ export async function POST(
 ) {
   try {
     const { proposalId } = params;
-    const supabase = createSupabaseClient();
+    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookies() });
     const data = await request.json();
     
     // Add debug logging
@@ -179,10 +237,6 @@ export async function POST(
       updated_by: data.updated_by
     };
 
-    // Log the insert data
-    console.log('POST insert data being sent to database:', insertData);
-
-    // Insert the new proposal
     const { data: result, error } = await supabase
       .from('proposals')
       .insert(insertData)
@@ -193,9 +247,6 @@ export async function POST(
       console.error('Error creating proposal:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    
-    // Log the result
-    console.log('POST insert result:', result);
     
     return NextResponse.json(result);
   } catch (error) {
@@ -211,7 +262,7 @@ export async function DELETE(
 ) {
   try {
     const { proposalId } = params;
-    const supabase = createSupabaseClient();
+    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookies() });
     
     if (!proposalId) {
       return NextResponse.json({ error: 'Proposal ID is required' }, { status: 400 });

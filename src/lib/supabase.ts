@@ -1,9 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import type { Database } from '@/types/supabase';
-
-// Define the cookie name to match the middleware
-const AUTH_COOKIE_NAME = 'ostrich-auth-token';
 
 // Initialize the public Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -14,18 +11,10 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 // Create a single supabase client for the entire app
-export const supabase = createClient<Database>(
+export const supabase = createClientComponentClient<Database>({
   supabaseUrl,
   supabaseKey,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      storageKey: AUTH_COOKIE_NAME,
-      flowType: 'pkce',
-      debug: false
-    },
+  options: {
     db: {
       schema: 'public'
     },
@@ -34,14 +23,13 @@ export const supabase = createClient<Database>(
         'x-application-name': 'ostrich'
       }
     },
-    // Disable query logging
     realtime: {
       params: {
         eventsPerSecond: 10
       }
     }
   }
-);
+});
 
 // Simplified auth state change logging
 if (typeof window !== 'undefined') {

@@ -1,0 +1,72 @@
+{
+  "rules": [
+    {
+      "name": "Protected Engineering Services Manager",
+      "description": "The engineering services manager component contains critical service management and cost calculation logic that should not be modified without careful review",
+      "paths": ["src/app/projects/[id]/proposals/[proposalId]/components/engineering-services-manager.tsx"],
+      "protected_functions": [
+        "EngineeringServicesManager",
+        "handleServiceToggle",
+        "handleServiceUpdate",
+        "handleServiceAdd",
+        "handleServiceRemove",
+        "calculateServiceCosts",
+        "updateServiceCosts"
+      ],
+      "protected_ranges": [
+        {
+          "start": "export function EngineeringServicesManager",
+          "end": "return ("
+        }
+      ],
+      "message": "⚠️ This file is protected. The engineering services manager contains critical business logic for service management and cost calculations. Please contact the team lead if changes are needed."
+    },
+    {
+      "name": "Button Styling Convention",
+      "description": "All buttons should use the centralized button styles from globals.css to maintain consistency across the application",
+      "paths": ["**/*.tsx", "**/*.jsx"],
+      "protected_classes": [
+        "action-button",
+        "action-button-primary",
+        "action-button-secondary",
+        "action-button-outline",
+        "action-button-ghost",
+        "action-button-link",
+        "action-button-destructive",
+        "action-button-sm",
+        "action-button-lg",
+        "action-button-icon"
+      ],
+      "message": "⚠️ Use centralized button styles from globals.css. Instead of custom button styles, use the following classes:\n- Base: 'action-button'\n- Variants: 'action-button-primary', 'action-button-secondary', 'action-button-outline', 'action-button-ghost', 'action-button-link', 'action-button-destructive'\n- Sizes: 'action-button-sm', 'action-button-lg', 'action-button-icon'\n\nExample: <button className=\"action-button action-button-primary\">Click me</button>\n\nThis ensures consistent button styling across the application and proper dark mode support."
+    },
+    {
+      "name": "Search Bar Styling Convention",
+      "description": "All search inputs should use the centralized search styles from globals.css to maintain consistency",
+      "paths": ["**/*.tsx", "**/*.jsx"],
+      "protected_classes": [
+        "search-container",
+        "search-input",
+        "search-input-icon",
+        "search-input-with-icon"
+      ],
+      "message": "⚠️ Use centralized search styles from globals.css. Instead of custom search styles, use the following classes:\n- Container: 'search-container'\n- Input: 'search-input'\n- Icon: 'search-input-icon'\n- With Icon: 'search-input-with-icon'\n\nExample: <div className=\"search-container\"><SearchIcon className=\"search-input-icon\" /><input className=\"search-input search-input-with-icon\" /></div>\n\nThis ensures consistent search styling across the application and proper dark mode support."
+    },
+    {
+      "name": "Dropdown List Styling Convention",
+      "description": "All dropdowns should use the centralized dropdown styles from globals.css to maintain consistency",
+      "paths": ["**/*.tsx", "**/*.jsx"],
+      "protected_classes": [
+        "dropdown-container",
+        "dropdown-trigger",
+        "dropdown-content",
+        "dropdown-item",
+        "dropdown-item-active",
+        "dropdown-item-check",
+        "dropdown-separator",
+        "dropdown-label",
+        "dropdown-group"
+      ],
+      "message": "⚠️ Use centralized dropdown styles from globals.css. Instead of custom dropdown styles, use the following classes:\n- Container: 'dropdown-container'\n- Trigger: 'dropdown-trigger'\n- Content: 'dropdown-content'\n- Items: 'dropdown-item', 'dropdown-item-active'\n- Structure: 'dropdown-separator', 'dropdown-label', 'dropdown-group'\n\nExample: <div className=\"dropdown-container\"><button className=\"dropdown-trigger\">Select</button><div className=\"dropdown-content\"><div className=\"dropdown-item\">Option 1</div></div></div>\n\nThis ensures consistent dropdown styling across the application and proper dark mode support."
+    }
+  ]
+} 

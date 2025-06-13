@@ -1,4 +1,4 @@
-// File: D:\SynologyDrive\Ostrich\Development\ostrich\src\app\layout.tsx
+// File: D:\SynologyDrive\Ostrich Software\Development\ostrich\src\app\layout.tsx
 import * as entry from '../../../src/app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

@@ -220,7 +220,7 @@ input[type="date"],
 input[type="password"],
 select,
 textarea {
-  @apply border-[#D1D5DB] dark:border-[#4DB6AC] bg-background text-foreground placeholder:text-muted-foreground dark:placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-primary/20;
+  @apply border-[#D1D5DB] dark:border-[#4DB6AC] bg-white dark:bg-[#374151] text-foreground placeholder:text-muted-foreground dark:placeholder:text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-primary/20;
 }
 
 @layer base {
@@ -241,6 +241,17 @@ textarea {
   }
   button {
     @apply text-button;
+  }
+  input[type="text"],
+  input[type="number"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="date"],
+  select,
+  textarea {
+    @apply bg-white dark:bg-[#374151];
   }
 }
 
@@ -326,4 +337,332 @@ textarea {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
+}
+
+@layer components {
+  /* Common styles for expand/collapse button */
+  .btn-expand-collapse {
+    @apply flex items-center justify-center w-6 h-6 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
+  }
+
+  /* Common styles for filter and search inputs */
+  .filter-input-base {
+    @apply w-[200px] h-8 text-sm bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors;
+  }
+
+  /* Specific styles for search field */
+  .search-field {
+    @apply relative w-[200px];
+  }
+
+  .search-field-input {
+    @apply w-full h-full border-0 bg-transparent p-0 pl-8 pr-8 focus-visible:ring-0 focus-visible:ring-offset-0;
+  }
+
+  .search-field-icon {
+    @apply absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none;
+  }
+
+  .search-field-clear {
+    @apply absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors;
+  }
+
+  /* Specific styles for filter dropdown */
+  .filter-dropdown {
+    @apply w-[200px] h-8 text-sm bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors;
+  }
+
+  .filter-dropdown-content {
+    @apply max-h-[300px];
+  }
+
+  .filter-dropdown-header {
+    @apply px-2 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800;
+  }
+
+  .filter-dropdown-item {
+    @apply text-sm cursor-pointer data-[highlighted]:bg-[#4DB6AC]/10 data-[highlighted]:text-[#4DB6AC] data-[state=checked]:bg-[#4DB6AC]/10 data-[state=checked]:text-[#4DB6AC];
+  }
+
+  .filter-dropdown-item-content {
+    @apply flex items-center gap-2;
+  }
+
+  .filter-dropdown-item-count {
+    @apply text-xs text-gray-400;
+  }
+
+  /* Common styles for section headers */
+  .section-header {
+    @apply flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700;
+  }
+
+  .section-header-title {
+    @apply text-lg font-semibold text-gray-900 dark:text-gray-100;
+  }
+
+  .section-header-controls {
+    @apply flex items-center gap-2;
+  }
+
+  /* Common styles for expandable sections */
+  .expandable-section {
+    @apply border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden;
+  }
+
+  .expandable-section-content {
+    @apply p-4 bg-white dark:bg-gray-800;
+  }
+
+  /* Common styles for service items */
+  .service-item {
+    @apply flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors;
+  }
+
+  .service-item-content {
+    @apply flex flex-col gap-1;
+  }
+
+  .service-item-name {
+    @apply text-sm font-medium text-gray-900 dark:text-gray-100;
+  }
+
+  .service-item-description {
+    @apply text-xs text-gray-500 dark:text-gray-400;
+  }
+
+  .service-item-controls {
+    @apply flex items-center gap-2;
+  }
+
+  .filter-dropdown-trigger {
+    @apply flex items-center justify-between gap-2 cursor-pointer;
+  }
+
+  .select-trigger {
+    @apply flex h-10 w-full items-center justify-between rounded-md border border-[#D1D5DB] dark:border-[#4DB6AC] bg-background dark:bg-[#374151] text-foreground dark:text-[#E5E7EB] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer hover:bg-accent/10 transition-colors;
+  }
+
+  .search-input {
+    @apply flex h-8 w-[200px] items-center rounded-md border border-gray-200 dark:border-gray-700 bg-[#FFFFFF] dark:bg-[#374151] px-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#4DB6AC] dark:focus:ring-[#4DB6AC] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .search-input-wrapper {
+    @apply flex items-center gap-2 px-2 bg-[#FFFFFF] dark:bg-[#374151] rounded-md;
+  }
+
+  .search-input-icon {
+    @apply h-4 w-4 text-gray-500 dark:text-gray-400;
+  }
+
+  /* Add a new class for pure white backgrounds */
+  .bg-pure-white {
+    @apply bg-white dark:bg-[#374151];
+  }
+
+  /* Add a new class for search containers */
+  .search-container {
+    @apply relative w-[200px] bg-[#FFFFFF] dark:bg-[#374151] rounded-md;
+  }
+
+  /* Collapse/Expand Button Styles */
+  .collapse-button {
+    @apply p-1.5 bg-[#4DB6AC]/10 rounded hover:bg-[#4DB6AC]/20 transition-colors;
+  }
+
+  .collapse-button-icon {
+    @apply w-5 h-5 text-[#4DB6AC];
+  }
+
+  /* Checkbox Styles */
+  .checkbox-button {
+    @apply p-1.5 bg-[#4DB6AC]/10 rounded hover:bg-[#4DB6AC]/20 transition-colors;
+  }
+
+  .checkbox-button-icon {
+    @apply w-5 h-5 text-[#4DB6AC];
+  }
+
+  /* Base checkbox styles */
+  input[type="checkbox"] {
+    @apply h-4 w-4 rounded border-gray-300 text-[#4DB6AC] focus:ring-[#4DB6AC]/20;
+  }
+
+  /* Checkbox container for label + checkbox */
+  .checkbox-container {
+    @apply flex items-center gap-2;
+  }
+
+  .checkbox-label {
+    @apply text-sm font-medium text-gray-700 dark:text-[#E5E7EB];
+  }
+
+  /* Dark mode support */
+  .dark .collapse-button,
+  .dark .checkbox-button {
+    @apply bg-[#4DB6AC]/20 hover:bg-[#4DB6AC]/30;
+  }
+
+  .dark .collapse-button-icon,
+  .dark .checkbox-button-icon {
+    @apply text-[#4DB6AC];
+  }
+
+  .dark input[type="checkbox"] {
+    @apply border-gray-600 text-[#4DB6AC] focus:ring-[#4DB6AC]/20;
+  }
+
+  .dark .checkbox-label {
+    @apply text-[#E5E7EB];
+  }
+
+  /* Action Button Styles */
+  .action-button {
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .action-button-primary {
+    @apply action-button bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2;
+  }
+
+  .action-button-secondary {
+    @apply action-button bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 px-4 py-2;
+  }
+
+  .action-button-outline {
+    @apply action-button border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2;
+  }
+
+  .action-button-ghost {
+    @apply action-button hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2;
+  }
+
+  .action-button-link {
+    @apply action-button text-primary underline-offset-4 hover:underline h-10 px-4 py-2;
+  }
+
+  .action-button-destructive {
+    @apply action-button bg-destructive text-destructive-foreground hover:bg-destructive/90 h-10 px-4 py-2;
+  }
+
+  /* Button Size Variants */
+  .action-button-sm {
+    @apply h-9 rounded-md px-3 text-xs;
+  }
+
+  .action-button-lg {
+    @apply h-11 rounded-md px-8 text-base;
+  }
+
+  .action-button-icon {
+    @apply h-10 w-10;
+  }
+
+  /* Dark Mode Support */
+  .dark .action-button-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+
+  .dark .action-button-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+  }
+
+  .dark .action-button-outline {
+    @apply border-input bg-background hover:bg-accent hover:text-accent-foreground;
+  }
+
+  .dark .action-button-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground;
+  }
+
+  .dark .action-button-link {
+    @apply text-primary hover:underline;
+  }
+
+  .dark .action-button-destructive {
+    @apply bg-destructive text-destructive-foreground hover:bg-destructive/90;
+  }
+
+  /* Search Bar Styles */
+  .search-container {
+    @apply relative w-full;
+  }
+
+  .search-input {
+    @apply flex h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .search-input-icon {
+    @apply absolute left-3 top-2.5 h-5 w-5 text-muted-foreground;
+  }
+
+  .search-input-with-icon {
+    @apply pl-10;
+  }
+
+  /* Dropdown List Styles */
+  .dropdown-container {
+    @apply relative w-full;
+  }
+
+  .dropdown-trigger {
+    @apply flex h-10 w-full items-center justify-between rounded-md border border-input bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .dropdown-content {
+    @apply absolute z-50 min-w-[8rem] overflow-hidden rounded-md border bg-white p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2;
+  }
+
+  .dropdown-item {
+    @apply relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50;
+  }
+
+  .dropdown-item-active {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  .dropdown-item-check {
+    @apply absolute right-2 flex h-3.5 w-3.5 items-center justify-center;
+  }
+
+  .dropdown-separator {
+    @apply -mx-1 my-1 h-px bg-muted;
+  }
+
+  .dropdown-label {
+    @apply px-2 py-1.5 text-sm font-semibold;
+  }
+
+  .dropdown-group {
+    @apply p-1;
+  }
+
+  /* Dark Mode Support */
+  .dark .search-input {
+    @apply bg-[#374151] border-input text-foreground;
+  }
+
+  .dark .search-input-icon {
+    @apply text-muted-foreground;
+  }
+
+  .dark .dropdown-trigger {
+    @apply bg-[#374151] border-input text-foreground;
+  }
+
+  .dark .dropdown-content {
+    @apply bg-[#374151] border-input text-foreground;
+  }
+
+  .dark .dropdown-item {
+    @apply focus:bg-accent focus:text-accent-foreground;
+  }
+
+  .dark .dropdown-item-active {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  .dark .dropdown-separator {
+    @apply bg-muted;
+  }
 }

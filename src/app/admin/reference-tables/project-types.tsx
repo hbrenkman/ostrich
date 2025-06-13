@@ -202,14 +202,15 @@ export function ProjectTypesTable({ showContainer = true }: ProjectTypesTablePro
               />
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="is_active"
-                checked={newProjectType.is_active}
-                onChange={(e) => setNewProjectType((prev: Partial<ProjectType>) => ({ ...prev, is_active: e.target.checked }))}
-                className="rounded border-gray-300"
-              />
-              <label htmlFor="is_active" className="text-sm font-medium">Active</label>
+              <div className="checkbox-container">
+                <input
+                  type="checkbox"
+                  id="is_active"
+                  checked={newProjectType.is_active}
+                  onChange={(e) => setNewProjectType((prev: Partial<ProjectType>) => ({ ...prev, is_active: e.target.checked }))}
+                />
+                <label htmlFor="is_active" className="checkbox-label">Active</label>
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -268,14 +269,15 @@ export function ProjectTypesTable({ showContainer = true }: ProjectTypesTablePro
                 />
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="edit_is_active"
-                  checked={selectedProjectType.is_active}
-                  onChange={(e) => setSelectedProjectType((prev: ProjectType | null) => prev ? { ...prev, is_active: e.target.checked } : null)}
-                  className="rounded border-gray-300"
-                />
-                <label htmlFor="edit_is_active" className="text-sm font-medium">Active</label>
+                <div className="checkbox-container">
+                  <input
+                    type="checkbox"
+                    id="edit_is_active"
+                    checked={selectedProjectType.is_active}
+                    onChange={(e) => setSelectedProjectType((prev: ProjectType | null) => prev ? { ...prev, is_active: e.target.checked } : null)}
+                  />
+                  <label htmlFor="edit_is_active" className="checkbox-label">Active</label>
+                </div>
               </div>
             </div>
           )}

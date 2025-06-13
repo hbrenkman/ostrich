@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+"use client";
+
+import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -16,70 +18,27 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { 
+  Discipline, 
+  Role, 
+  HourlyRate, 
+  FeeSubcomponent, 
+  FeeComponent, 
+  Category 
+} from '@/types/proposal/shared';
 
-interface Discipline {
-  id: number;
-  name: string;
-  description: string | null;
+interface FlexFeesProps {
+  proposalId: string;
+  onFeesChange?: (categories: Category[]) => void;
+  initialCategories?: Category[];
 }
 
-interface Role {
-  id: string;
-  name: string;
-  description: string | null;
-  is_active: boolean;
-}
-
-interface HourlyRate {
-  id: number;
-  discipline_id: number;
-  role_id: string;
-  role_designation: string | null;
-  rate: number;
-  description: string | null;
-}
-
-interface FeeSubcomponent {
-  id: string;
-  name: string;
-  amount: number;
-  type: 'simple' | 'hourly' | undefined;
-  hourlyRate?: number;
-  hours?: number;
-  minFee?: number;
-  maxFee?: number;
-  discipline_id?: number;
-  role_id?: string;
-  role_designation?: string | null;
-  description?: string;
-  quantity?: number;
-}
-
-interface FeeComponent {
-  id: string;
-  name: string;
-  amount: number;
-  type: 'simple' | 'hourly' | undefined;
-  hourlyRate?: number;
-  hours?: number;
-  minFee?: number;
-  maxFee?: number;
-  subcomponents?: FeeSubcomponent[];
-  discipline_id?: number;
-  role_id?: string;
-  role_designation?: string | null;
-  description?: string;
-  quantity?: number;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  fees: FeeComponent[];
-}
-
-const FlexFees: React.FC = () => {
-  const [categories, setCategories] = useState<Category[]>([]);
+export function FlexFees({ 
+  proposalId,
+  onFeesChange,
+  initialCategories = []
+}: FlexFeesProps) {
+  const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [hourlyRates, setHourlyRates] = useState<HourlyRate[]>([]);
@@ -113,6 +72,13 @@ const FlexFees: React.FC = () => {
   const [dragOverSubIndex, setDragOverSubIndex] = useState<{ categoryId: string; feeId: string; index: number } | null>(null);
   const [dragOverFeeId, setDragOverFeeId] = useState<string | null>(null);
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
+
+  // Notify parent of changes
+  useEffect(() => {
+    if (onFeesChange) {
+      onFeesChange(categories);
+    }
+  }, [categories, onFeesChange]);
 
   // Fetch disciplines, roles, and hourly rates on component mount
   useEffect(() => {
@@ -352,11 +318,13 @@ const FlexFees: React.FC = () => {
     setDraggedCategoryId(categoryId);
   };
 
-  const handleDragOver = (index: number) => {
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
     setDragOverIndex(index);
   };
 
-  const handleDrop = (index: number) => {
+  const handleDrop = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
     if (draggedCategoryId) {
       const fromIndex = categories.findIndex(cat => cat.id === draggedCategoryId);
       if (fromIndex !== -1 && fromIndex !== index) {
@@ -463,31 +431,50 @@ const FlexFees: React.FC = () => {
     ));
   };
 
-  // Add subcomponent to a fee component
   const addSubcomponent = (categoryId: string, feeId: string) => {
-    const newSubcomponent: FeeSubcomponent = {
-      id: `sub-${feeSubCounter}`,
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return;
+
+    const fee = category.fees.find(f => f.id === feeId);
+    if (!fee) return;
+
+    const newSub: FeeSubcomponent = {
+      id: `sub_${feeSubCounter}`,
       name: 'New Subcomponent',
       amount: 0,
-      type: undefined, // Start with no type
+      type: 'simple'
     };
+
+    const updatedFee = {
+      ...fee,
+      subcomponents: [...(fee.subcomponents || []), newSub]
+    };
+
+    const updatedFees = category.fees.map(f => f.id === feeId ? updatedFee : f);
+    const updatedCategory = { ...category, fees: updatedFees };
+    const updatedCategories = categories.map(c => c.id === categoryId ? updatedCategory : c);
+
+    setCategories(updatedCategories);
     setFeeSubCounter(prev => prev + 1);
-    setCategories(categories.map(cat =>
-      cat.id === categoryId
-        ? {
-            ...cat,
-            fees: cat.fees.map(f =>
-              f.id === feeId
-                ? {
-                    ...f,
-                    type: undefined, // Reset parent component type
-                    subcomponents: [...(f.subcomponents || []), newSubcomponent]
-                  }
-                : f
-            ),
-          }
-        : cat
-    ));
+  };
+
+  const updateSubcomponent = (categoryId: string, feeId: string, subId: string, updates: Partial<FeeSubcomponent>) => {
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return;
+
+    const fee = category.fees.find(f => f.id === feeId);
+    if (!fee || !fee.subcomponents) return;
+
+    const updatedSubcomponents = fee.subcomponents.map(sub => 
+      sub.id === subId ? { ...sub, ...updates } : sub
+    );
+
+    const updatedFee = { ...fee, subcomponents: updatedSubcomponents };
+    const updatedFees = category.fees.map(f => f.id === feeId ? updatedFee : f);
+    const updatedCategory = { ...category, fees: updatedFees };
+    const updatedCategories = categories.map(c => c.id === categoryId ? updatedCategory : c);
+
+    setCategories(updatedCategories);
   };
 
   // Calculate total for hourly rate
@@ -779,48 +766,33 @@ const FlexFees: React.FC = () => {
 
   const handleFeeDragOver = (e: React.DragEvent, categoryId: string, index: number) => {
     e.preventDefault();
-    if (draggedFeeId) {
+    if (draggedFeeId && draggedFeeId.categoryId === categoryId) {
       setDragOverFeeIndex({ categoryId, index });
     }
   };
 
-  const handleFeeDrop = (categoryId: string, index: number) => {
-    if (draggedFeeId) {
-      const { categoryId: fromCategoryId, feeId } = draggedFeeId;
-      
-      // Find the fee being moved
-      const fromCategory = categories.find(cat => cat.id === fromCategoryId);
-      const fee = fromCategory?.fees.find(f => f.id === feeId);
-      
-      if (fee) {
-        setCategories(categories.map(cat => {
-          if (cat.id === fromCategoryId && cat.id === categoryId) {
-            // Moving within the same category
-            const newFees = [...cat.fees];
-            const fromIndex = newFees.findIndex(f => f.id === feeId);
-            if (fromIndex !== -1) {
-              const [moved] = newFees.splice(fromIndex, 1);
-              newFees.splice(index, 0, moved);
-            }
-            return { ...cat, fees: newFees };
-          } else if (cat.id === fromCategoryId) {
-            // Remove from source category
-            return {
-              ...cat,
-              fees: cat.fees.filter(f => f.id !== feeId)
-            };
-          } else if (cat.id === categoryId) {
-            // Add to target category
-            const newFees = [...cat.fees];
-            newFees.splice(index, 0, fee);
-            return { ...cat, fees: newFees };
-          }
-          return cat;
-        }));
-      }
+  const handleFeeDrop = (e: React.DragEvent, categoryId: string, index: number) => {
+    e.preventDefault();
+    if (draggedFeeId && draggedFeeId.categoryId === categoryId) {
+      const { feeId: draggedFeeIdValue } = draggedFeeId;
+      const category = categories.find(c => c.id === categoryId);
+      if (!category) return;
+
+      const draggedFee = category.fees.find(f => f.id === draggedFeeIdValue);
+      if (!draggedFee) return;
+
+      const newFees = [...category.fees];
+      const draggedIndex = newFees.findIndex(f => f.id === draggedFeeIdValue);
+      newFees.splice(draggedIndex, 1);
+      newFees.splice(index, 0, draggedFee);
+
+      const updatedCategory = { ...category, fees: newFees };
+      const updatedCategories = categories.map(c => c.id === categoryId ? updatedCategory : c);
+
+      setCategories(updatedCategories);
+      setDraggedFeeId(null);
+      setDragOverFeeIndex(null);
     }
-    setDraggedFeeId(null);
-    setDragOverFeeIndex(null);
   };
 
   // Add handlers for subcomponent drag and drop
@@ -830,88 +802,38 @@ const FlexFees: React.FC = () => {
 
   const handleSubDragOver = (e: React.DragEvent, categoryId: string, feeId: string, index: number) => {
     e.preventDefault();
-    e.stopPropagation();
-    if (draggedSubId) {
-      // If dragging over a different component, highlight the entire component
-      if (draggedSubId.feeId !== feeId) {
-        setDragOverFeeId(feeId);
-      } else {
-        // If dragging within same component, show the specific drop position
-        setDragOverSubIndex({ categoryId, feeId, index });
-      }
+    if (draggedSubId && draggedSubId.categoryId === categoryId && draggedSubId.feeId === feeId) {
+      setDragOverSubIndex({ categoryId, feeId, index });
     }
   };
 
   const handleSubDrop = (e: React.DragEvent, categoryId: string, feeId: string, index: number) => {
     e.preventDefault();
-    e.stopPropagation();
-    
-    if (draggedSubId) {
-      const { categoryId: fromCategoryId, feeId: fromFeeId, subId } = draggedSubId;
-      
-      // Find the subcomponent being moved
-      const fromCategory = categories.find(cat => cat.id === fromCategoryId);
-      const fromFee = fromCategory?.fees.find(f => f.id === fromFeeId);
-      const sub = fromFee?.subcomponents?.find(s => s.id === subId);
-      
-      if (sub) {
-        setCategories(categories.map(cat => {
-          if (cat.id === fromCategoryId) {
-            // Handle source category
-            if (cat.id === categoryId && fromFeeId === feeId) {
-              // Moving within the same component
-              return {
-                ...cat,
-                fees: cat.fees.map(f => {
-                  if (f.id === feeId && f.subcomponents) {
-                    const newSubs = [...f.subcomponents];
-                    const fromIndex = newSubs.findIndex(s => s.id === subId);
-                    if (fromIndex !== -1) {
-                      const [moved] = newSubs.splice(fromIndex, 1);
-                      const adjustedIndex = fromIndex < index ? index - 1 : index;
-                      newSubs.splice(adjustedIndex, 0, moved);
-                    }
-                    return { ...f, subcomponents: newSubs };
-                  }
-                  return f;
-                })
-              };
-            } else {
-              // Remove from source component
-              return {
-                ...cat,
-                fees: cat.fees.map(f => {
-                  if (f.id === fromFeeId) {
-                    return {
-                      ...f,
-                      subcomponents: f.subcomponents?.filter(s => s.id !== subId)
-                    };
-                  }
-                  return f;
-                })
-              };
-            }
-          } else if (cat.id === categoryId) {
-            // Handle target category
-            return {
-              ...cat,
-              fees: cat.fees.map(f => {
-                if (f.id === feeId) {
-                  const newSubs = [...(f.subcomponents || [])];
-                  newSubs.splice(index, 0, sub);
-                  return { ...f, subcomponents: newSubs };
-                }
-                return f;
-              })
-            };
-          }
-          return cat;
-        }));
-      }
+    if (draggedSubId && draggedSubId.categoryId === categoryId && draggedSubId.feeId === feeId) {
+      const { subId } = draggedSubId;
+      const category = categories.find(c => c.id === categoryId);
+      if (!category) return;
+
+      const fee = category.fees.find(f => f.id === feeId);
+      if (!fee || !fee.subcomponents) return;
+
+      const draggedSub = fee.subcomponents.find(s => s.id === subId);
+      if (!draggedSub) return;
+
+      const newSubcomponents = [...fee.subcomponents];
+      const draggedIndex = newSubcomponents.findIndex(s => s.id === subId);
+      newSubcomponents.splice(draggedIndex, 1);
+      newSubcomponents.splice(index, 0, draggedSub);
+
+      const updatedFee = { ...fee, subcomponents: newSubcomponents };
+      const updatedFees = category.fees.map(f => f.id === feeId ? updatedFee : f);
+      const updatedCategory = { ...category, fees: updatedFees };
+      const updatedCategories = categories.map(c => c.id === categoryId ? updatedCategory : c);
+
+      setCategories(updatedCategories);
+      setDraggedSubId(null);
+      setDragOverSubIndex(null);
     }
-    setDraggedSubId(null);
-    setDragOverSubIndex(null);
-    setDragOverFeeId(null);
   };
 
   // Add handler for when drag leaves a component
@@ -976,6 +898,131 @@ const FlexFees: React.FC = () => {
             ),
           }
       : cat
+    ));
+  };
+
+  // Helper function to update a fee component's discipline
+  const updateFeeDiscipline = (categoryId: string, feeId: string, disciplineId: number) => {
+    setCategories(categories.map(cat =>
+      cat.id === categoryId
+        ? {
+            ...cat,
+            fees: cat.fees.map(f =>
+              f.id === feeId
+                ? {
+                    ...f,
+                    discipline_id: disciplineId,
+                    role_id: undefined,
+                    role_designation: undefined,
+                    hourlyRate: undefined,
+                    hours: undefined
+                  }
+                : f
+            ),
+          }
+        : cat
+    ));
+  };
+
+  // Helper function to update a fee component's role
+  const updateFeeRole = (categoryId: string, feeId: string, roleId: string, designation: string | null) => {
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return;
+
+    const fee = category.fees.find(f => f.id === feeId);
+    if (!fee || !fee.discipline_id) return;
+
+    const rate = getRateForRole(fee.discipline_id, roleId, designation);
+    if (!rate) return;
+
+    setCategories(categories.map(cat =>
+      cat.id === categoryId
+        ? {
+            ...cat,
+            fees: cat.fees.map(f =>
+              f.id === feeId
+                ? {
+                    ...f,
+                    role_id: roleId,
+                    role_designation: designation,
+                    hourlyRate: rate.rate,
+                    hours: f.hours || 0
+                  }
+                : f
+            ),
+          }
+        : cat
+    ));
+  };
+
+  // Helper function to update a subcomponent's discipline
+  const updateSubDiscipline = (categoryId: string, feeId: string, subId: string, disciplineId: number) => {
+    setCategories(categories.map(cat =>
+      cat.id === categoryId
+        ? {
+            ...cat,
+            fees: cat.fees.map(f =>
+              f.id === feeId && f.subcomponents
+                ? {
+                    ...f,
+                    subcomponents: f.subcomponents.map(s =>
+                      s.id === subId
+                        ? {
+                            ...s,
+                            discipline_id: disciplineId,
+                            role_id: undefined,
+                            role_designation: undefined,
+                            hourlyRate: undefined,
+                            hours: undefined
+                          }
+                        : s
+                    )
+                  }
+                : f
+            ),
+          }
+        : cat
+    ));
+  };
+
+  // Helper function to update a subcomponent's role
+  const updateSubRole = (categoryId: string, feeId: string, subId: string, roleId: string, designation: string | null) => {
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return;
+
+    const fee = category.fees.find(f => f.id === feeId);
+    if (!fee || !fee.subcomponents) return;
+
+    const sub = fee.subcomponents.find(s => s.id === subId);
+    if (!sub || !sub.discipline_id) return;
+
+    const rate = getRateForRole(sub.discipline_id, roleId, designation);
+    if (!rate) return;
+
+    setCategories(categories.map(cat =>
+      cat.id === categoryId
+        ? {
+            ...cat,
+            fees: cat.fees.map(f =>
+              f.id === feeId && f.subcomponents
+                ? {
+                    ...f,
+                    subcomponents: f.subcomponents.map(s =>
+                      s.id === subId
+                        ? {
+                            ...s,
+                            role_id: roleId,
+                            role_designation: designation,
+                            hourlyRate: rate.rate,
+                            hours: s.hours || 0
+                          }
+                        : s
+                    )
+                  }
+                : f
+            ),
+          }
+        : cat
     ));
   };
 
@@ -1095,31 +1142,14 @@ const FlexFees: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {categories.map((category, idx) => (
+            {categories.map((category, categoryIndex) => (
               <div
                 key={category.id}
-                className={`bg-card text-card-foreground dark:bg-[#374151] dark:text-[#E5E7EB] rounded-lg shadow p-6 border border-[#4DB6AC] dark:border-[#4DB6AC] ${
-                  dragOverIndex === idx ? 'border-primary bg-primary/10' : ''
-                } ${
-                  dragAddIndex === idx ? 'border-dashed border-2 border-primary' : ''
-                }`}
                 draggable
-                onDragStart={() => handleDragStart(category.id)}
-                onDragOver={e => {
-                  e.preventDefault();
-                  if (draggedCategoryId) handleDragOver(idx);
-                  if (dragAddIndex !== null) handleAddDragOver(idx);
-                }}
-                onDrop={e => {
-                  e.preventDefault();
-                  if (draggedCategoryId) handleDrop(idx);
-                  if (dragAddIndex !== null) handleAddDrop(idx);
-                }}
-                onDragEnd={() => {
-                  setDraggedCategoryId(null);
-                  setDragOverIndex(null);
-                  setDragAddIndex(null);
-                }}
+                onDragStart={() => setDraggedCategoryId(category.id)}
+                onDragOver={(e) => handleDragOver(e, categoryIndex)}
+                onDrop={(e) => handleDrop(e, categoryIndex)}
+                onDragEnd={() => setDraggedCategoryId(null)}
               >
                 {/* Category header */}
                 <div className="flex items-center gap-4 mb-4">
@@ -1200,22 +1230,19 @@ const FlexFees: React.FC = () => {
 
                 {/* Fee components */}
                 <div className="space-y-2 min-h-[200px] -mx-6">
-                  {category.fees.map((fee, index) => (
+                  {category.fees.map((fee, feeIndex) => (
                     <div 
                       key={fee.id} 
                       draggable
                       onDragStart={() => handleFeeDragStart(category.id, fee.id)}
-                      onDragOver={(e) => handleFeeDragOver(e, category.id, index)}
-                      onDrop={() => handleFeeDrop(category.id, index)}
-                      onDragEnd={() => {
-                        setDraggedFeeId(null);
-                        setDragOverFeeIndex(null);
-                      }}
+                      onDragOver={(e) => handleFeeDragOver(e, category.id, feeIndex)}
+                      onDrop={(e) => handleFeeDrop(e, category.id, feeIndex)}
+                      onDragEnd={() => setDraggedFeeId(null)}
                       className={`border-x-0 border-y-0 border-[#4DB6AC] dark:border-[#4DB6AC] overflow-hidden ${
-                        index !== category.fees.length - 1 ? 'border-b' : ''
+                        feeIndex !== category.fees.length - 1 ? 'border-b' : ''
                       } ${
                         dragOverFeeIndex?.categoryId === category.id && 
-                        dragOverFeeIndex?.index === index ? 
+                        dragOverFeeIndex?.index === feeIndex ? 
                         'border-dashed border-2 border-primary' : ''
                       }`}
                     >
@@ -1492,55 +1519,29 @@ const FlexFees: React.FC = () => {
                                         {fee.discipline_id ? disciplines.find(d => d.id === fee.discipline_id)?.name : 'Select discipline'}
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent>
-                                        {disciplines.map(discipline => (
+                                        {disciplines.map(d => (
                                           <DropdownMenuItem
-                                            key={discipline.id}
-                                            onClick={() => {
-                                              setCategories(categories.map(cat =>
-                                                cat.id === category.id
-                                                  ? {
-                                                      ...cat,
-                                                      fees: cat.fees.map(f =>
-                                                        f.id === fee.id
-                                                          ? {
-                                                              ...f,
-                                                              subcomponents: f.subcomponents?.map(s =>
-                                                                s.id === subcomponent.id
-                                                                  ? {
-                                                                      ...s,
-                                                                      discipline_id: discipline.id,
-                                                                      role_id: undefined,
-                                                                      role_designation: undefined,
-                                                                      hourlyRate: undefined,
-                                                                      hours: undefined
-                                                                    }
-                                                                  : s
-                                                              )
-                                                            }
-                                                          : f
-                                                      ),
-                                                    }
-                                                  : cat
-                                              ));
-                                            }}
+                                            key={d.id}
+                                            onClick={() => updateFeeDiscipline(category.id, fee.id, d.id)}
                                           >
-                                            {discipline.name}
+                                            {d.name}
                                           </DropdownMenuItem>
                                         ))}
                                       </DropdownMenuContent>
                                     </DropdownMenu>
                                     <span>•</span>
                                     <DropdownMenu>
-                                      <DropdownMenuTrigger className="text-sm text-gray-500 dark:text-[#9CA3AF] focus:outline-none" disabled={!fee.discipline_id}>
+                                      <DropdownMenuTrigger 
+                                        className="text-sm text-gray-500 dark:text-[#9CA3AF] focus:outline-none" 
+                                        disabled={!fee.discipline_id}
+                                      >
                                         {fee.role_id ? roles.find(r => r.id === fee.role_id)?.name + (fee.role_designation ? ` (${fee.role_designation})` : '') : 'Select role'}
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent>
                                         {fee.discipline_id && getAvailableRoles(fee.discipline_id).map(({ role, designation }) => (
                                           <DropdownMenuItem
                                             key={`${role.id}-${designation}`}
-                                            onClick={() => {
-                                              updateSubWithRole(category.id, fee.id, subcomponent.id, role.id, designation);
-                                            }}
+                                            onClick={() => updateFeeRole(category.id, fee.id, role.id, designation)}
                                           >
                                             {role.name}
                                             {designation ? ` (${designation})` : ''}
@@ -1918,39 +1919,12 @@ const FlexFees: React.FC = () => {
                                               {subcomponent.discipline_id ? disciplines.find(d => d.id === subcomponent.discipline_id)?.name : 'Select discipline'}
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent>
-                                              {disciplines.map(discipline => (
+                                              {disciplines.map(d => (
                                                 <DropdownMenuItem
-                                                  key={discipline.id}
-                                                  onClick={() => {
-                                                    setCategories(categories.map(cat =>
-                                                      cat.id === category.id
-                                                        ? {
-                                                            ...cat,
-                                                            fees: cat.fees.map(f =>
-                                                              f.id === fee.id
-                                                                ? {
-                                                                    ...f,
-                                                                    subcomponents: f.subcomponents?.map(s =>
-                                                                      s.id === subcomponent.id
-                                                                        ? {
-                                                                            ...s,
-                                                                            discipline_id: discipline.id,
-                                                                            role_id: undefined,
-                                                                            role_designation: undefined,
-                                                                            hourlyRate: undefined,
-                                                                            hours: undefined
-                                                                          }
-                                                                        : s
-                                                                    )
-                                                                  }
-                                                                : f
-                                                            ),
-                                                          }
-                                                        : cat
-                                                    ));
-                                                  }}
+                                                  key={d.id}
+                                                  onClick={() => updateSubDiscipline(category.id, fee.id, subcomponent.id, d.id)}
                                                 >
-                                                  {discipline.name}
+                                                  {d.name}
                                                 </DropdownMenuItem>
                                               ))}
                                             </DropdownMenuContent>
@@ -1964,9 +1938,7 @@ const FlexFees: React.FC = () => {
                                               {subcomponent.discipline_id && getAvailableRoles(subcomponent.discipline_id).map(({ role, designation }) => (
                                                 <DropdownMenuItem
                                                   key={`${role.id}-${designation}`}
-                                                  onClick={() => {
-                                                    updateSubWithRole(category.id, fee.id, subcomponent.id, role.id, designation);
-                                                  }}
+                                                  onClick={() => updateSubRole(category.id, fee.id, subcomponent.id, role.id, designation)}
                                                 >
                                                   {role.name}
                                                   {designation ? ` (${designation})` : ''}
@@ -2058,6 +2030,4 @@ const FlexFees: React.FC = () => {
       </div>
     </div>
   );
-};
-
-export default FlexFees; 
+} 

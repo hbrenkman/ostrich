@@ -1420,7 +1420,7 @@ export default function ProjectDetail() {
 
           {/* Fee Proposals Section - Always show container */}
           <FeeProposals
-            projectId={projectId}
+            projectId={projectUUID || ''}
             projectUUID={projectUUID}
             onAddProposal={handleAddProposal}
           />

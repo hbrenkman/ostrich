@@ -309,3 +309,289 @@ Edit → Review → Approved → Published → Active
 - System maintains a complete history of all proposal revisions
 - Each status change is logged with timestamp and user information
 - Client communications are tracked and associated with the proposal
+
+I'll create a comprehensive README.md that explains the complete data flow across all components:
+
+```markdown
+# Proposal Page Architecture
+
+## Overview
+The proposal page implements a complex data management system for handling architectural proposals, including structures, spaces, services, and fees. This document outlines the complete data flow and component interactions.
+
+## Core Components
+
+### 1. Page Component (`page.tsx`)
+- **Primary Role**: Root component and data orchestrator
+- **Key Responsibilities**:
+  - Manages overall proposal state
+  - Handles data transformations
+  - Coordinates component interactions
+  - Manages proposal lifecycle
+- **State Management**:
+  - `proposal`: Raw proposal data
+  - `displayData`: Transformed data for UI
+  - `isLoading`: Loading states
+  - `proposalStatus`: Proposal lifecycle state
+
+### 2. ProposalData Component
+- **Primary Role**: Data management and API interface
+- **Key Responsibilities**:
+  - Loads proposal data from database
+  - Manages data updates
+  - Provides data transformation methods
+  - Handles API communication
+- **Data Flow**:
+  ```
+  Database → ProposalData → handleDataChange → page.tsx → displayData → UI Components
+  ```
+
+### 3. ProposalStructures Component
+- **Primary Role**: Structure and space management
+- **Key Responsibilities**:
+  - Manages building structures
+  - Handles level organization
+  - Controls space management
+  - Implements drag-and-drop
+- **Data Flow**:
+  ```
+  User Action → ProposalStructures → handleStructuresChange → 
+    → Update proposal state
+    → Update displayData
+    → UI Components
+  ```
+
+### 4. SpaceDialog Component
+- **Primary Role**: Space creation and editing
+- **Key Responsibilities**:
+  - Manages space details
+  - Handles space updates
+  - Controls space services
+  - Manages space fees
+- **Data Flow**:
+  ```
+  User Action → SpaceDialog → handleSpaceUpdate → 
+    → Update structure state
+    → Update proposal state
+    → Update displayData
+  ```
+
+### 5. EngineeringServicesManager Component
+- **Primary Role**: Service management per structure
+- **Key Responsibilities**:
+  - Manages engineering services
+  - Handles service inclusion/exclusion
+  - Controls service fees
+  - Implements service filtering
+- **Data Flow**:
+  ```
+  API → EngineeringServicesManager → 
+    → Track service changes
+    → Update service fees
+    → Notify parent of changes
+  ```
+
+### 6. FixedFees Component
+- **Primary Role**: Fixed fee calculations
+- **Key Responsibilities**:
+  - Calculates structure fees
+  - Manages fee scales
+  - Handles fee updates
+  - Provides fee summaries
+- **Data Flow**:
+  ```
+  User Action → FixedFees → onFeeUpdate → 
+    → Update proposal state
+    → Update displayData
+  ```
+
+### 7. FlexFees Component
+- **Primary Role**: Flexible fee management
+- **Key Responsibilities**:
+  - Manages hourly rates
+  - Handles fee categories
+  - Controls fee components
+  - Implements drag-and-drop
+- **Data Flow**:
+  ```
+  User Action → FlexFees → 
+    → Internal state management
+    → API calls for rates/roles
+    → UI updates
+  ```
+
+### 8. ProposalActions Component
+- **Primary Role**: Proposal lifecycle management
+- **Key Responsibilities**:
+  - Handles status changes
+  - Manages proposal actions
+  - Controls permissions
+  - Provides UI feedback
+- **Data Flow**:
+  ```
+  User Action → ProposalActions → 
+    → API calls
+    → Status updates
+    → UI feedback
+  ```
+
+## Complete Data Flow
+
+### 1. Initial Load
+```
+Database → ProposalData → page.tsx → displayData → UI Components
+```
+
+### 2. Structure Management
+```
+User Action → ProposalStructures → handleStructuresChange → 
+  → Update proposal state
+  → Update displayData
+  → Update UI
+```
+
+### 3. Space Management
+```
+User Action → SpaceDialog → handleSpaceUpdate → 
+  → Update structure
+  → Update proposal
+  → Update displayData
+  → Update UI
+```
+
+### 4. Service Management
+```
+User Action → EngineeringServicesManager → 
+  → Update services
+  → Update fees
+  → Update proposal
+  → Update displayData
+```
+
+### 5. Fee Management
+```
+Fixed Fees:
+User Action → FixedFees → onFeeUpdate → 
+  → Update proposal
+  → Update displayData
+
+Flexible Fees:
+User Action → FlexFees → 
+  → Update internal state
+  → Update API
+  → Update UI
+```
+
+### 6. Proposal Actions
+```
+User Action → ProposalActions → 
+  → Update status
+  → Update database
+  → Update UI
+```
+
+## State Management Patterns
+
+### 1. Shared State (page.tsx)
+- Proposal data
+- Display data
+- Loading states
+- Proposal status
+
+### 2. Component State
+- Local UI state
+- Form state
+- Drag-and-drop state
+- Filter states
+
+### 3. API State
+- Service data
+- Fee scales
+- User roles
+- Proposal status
+
+## Key Features
+
+### 1. Drag and Drop
+- Structure management
+- Service organization
+- Fee component arrangement
+- Level organization
+
+### 2. Data Transformation
+- Raw to display data
+- Fee calculations
+- Service tracking
+- Space management
+
+### 3. Fee Management
+- Fixed fee calculations
+- Flexible fee structures
+- Service-based fees
+- Space-based fees
+
+### 4. Service Management
+- Service inclusion/exclusion
+- Fee tracking
+- Phase management
+- Discipline filtering
+
+## Best Practices
+
+1. **Single Source of Truth**: ProposalData component
+2. **Clear Data Flow**: Unidirectional data flow
+3. **Component Independence**: Self-contained components
+4. **State Management**: Appropriate state patterns
+5. **Error Handling**: Comprehensive error management
+6. **Type Safety**: TypeScript interfaces
+7. **Performance**: Memoization and optimization
+8. **User Experience**: Consistent drag-and-drop
+9. **Code Organization**: Clear component responsibilities
+10. **API Integration**: Clean API communication
+
+## Component Dependencies
+
+```
+page.tsx
+├── ProposalData
+├── ProposalStructures
+│   └── SpaceDialog
+├── EngineeringServicesManager
+├── FixedFees
+├── FlexFees
+└── ProposalActions
+```
+
+## Data Update Flow
+
+1. **User Action** triggers component update
+2. **Component** processes update
+3. **State Update** propagates to parent
+4. **ProposalData** updates database
+5. **Page Component** transforms data
+6. **UI Components** reflect changes
+
+## Error Handling
+
+1. **API Errors**: Handled by ProposalData
+2. **Validation Errors**: Component-level handling
+3. **State Errors**: Error boundaries
+4. **User Feedback**: Toast notifications
+5. **Loading States**: Loading indicators
+
+## Performance Considerations
+
+1. **Memoization**: useMemo for expensive calculations
+2. **State Updates**: Batched updates
+3. **API Calls**: Cached responses
+4. **Component Rendering**: Optimized re-renders
+5. **Data Transformation**: Efficient algorithms
+```
+
+This architecture ensures:
+1. Clear data flow and component responsibilities
+2. Efficient state management
+3. Consistent user experience
+4. Maintainable codebase
+5. Scalable system
+
+Would you like me to expand on any particular aspect of this architecture?

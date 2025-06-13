@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // Get initial session
+    // Get initial session without trying to refresh it
     supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (!mounted) return;
       
@@ -114,42 +114,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         cookies
       });
 
-      if (error?.message?.includes('refresh_token_already_used')) {
-        console.log('Invalid refresh token detected, signing out...');
+      if (error?.message?.includes('refresh_token_already_used') || !session) {
+        console.log('No valid session detected, signing out...');
         await supabase.auth.signOut();
         setUser(null);
         setStoredUser(null);
-        router.push('/auth/login');
+        // Only redirect if we're not already on the login page
+        if (!window.location.pathname.startsWith('/auth/')) {
+          router.push('/auth/login');
+        }
         setLoading(false);
         return;
       }
 
-      if (session) {
-        // Try to refresh the session immediately
-        const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
-        
-        if (refreshError) {
-          console.error('Error refreshing session:', refreshError);
-          if (refreshError.message?.includes('refresh_token_already_used')) {
-            await supabase.auth.signOut();
-            setUser(null);
-            setStoredUser(null);
-            router.push('/auth/login');
-            setLoading(false);
-            return;
-          }
-        }
-
-        if (refreshedSession) {
-          processUserData(refreshedSession);
-        } else {
-          processUserData(session);
-        }
-      } else {
-        setUser(null);
-        setStoredUser(null);
-      }
-      
+      // Just process the session without trying to refresh it
+      processUserData(session);
       setLoading(false);
     });
 
@@ -169,14 +148,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       
       if (event === 'SIGNED_IN' && session) {
-        // Process the session immediately
         processUserData(session);
-      } else if (event === 'SIGNED_OUT') {
+      } else if (event === 'SIGNED_OUT' || !session) {
         setUser(null);
         setStoredUser(null);
-        router.push('/auth/login');
+        // Only redirect if we're not already on the login page
+        if (!window.location.pathname.startsWith('/auth/')) {
+          router.push('/auth/login');
+        }
       } else if (event === 'TOKEN_REFRESHED' && session) {
-        // Handle token refresh
+        // Handle token refresh from Supabase's auto refresh
         processUserData(session);
       } else if (session) {
         // For other events, only process if session changed

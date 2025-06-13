@@ -1,0 +1,154 @@
+{
+  "rules": [
+    {
+      "name": "Protected Level Management Functions",
+      "description": "These functions handle critical level management logic and should not be modified without careful review",
+      "paths": ["src/app/projects/[id]/proposals/[proposalId]/components/proposal-structures.tsx"],
+      "protected_functions": [
+        "handleAddUpperLevel",
+        "handleAddLowerLevel",
+        "handleAddFiveUpperLevels",
+        "handleDuplicateLevelUp",
+        "handleDuplicateLevelDown",
+        "createNewLevel"
+      ],
+      "protected_ranges": [
+        {
+          "start": "function createNewLevel",
+          "end": "function createNewStructure"
+        }
+      ],
+      "message": "⚠️ This function is protected. Modifying level management functions can cause data integrity issues. Please contact the team lead if changes are needed."
+    },
+    {
+      "name": "Protected Space Dialog",
+      "description": "The space dialog component contains critical space management and cost calculation logic that should not be modified without careful review",
+      "paths": ["src/app/projects/[id]/proposals/[proposalId]/components/space-dialog.tsx"],
+      "protected_functions": [
+        "SpaceDialog",
+        "handleBuildingTypeSelect",
+        "handleProjectConstructionTypeSelect",
+        "handleFloorAreaChange",
+        "handleDisciplineToggle",
+        "calculateDisciplineConstructionCosts",
+        "calculateCost"
+      ],
+      "protected_ranges": [
+        {
+          "start": "export function SpaceDialog",
+          "end": "return ("
+        }
+      ],
+      "message": "⚠️ This file is protected. The space dialog contains critical business logic for space management and cost calculations. Please contact the team lead if changes are needed."
+    },
+    {
+      "name": "Protected Proposal Structures",
+      "description": "The proposal structures component contains critical structure management, space management, and duplicate handling logic that should not be modified without careful review",
+      "paths": ["src/app/projects/[id]/proposals/[proposalId]/components/proposal-structures.tsx"],
+      "protected_functions": [
+        "handleAddSpace",
+        "handleUpdateSpace",
+        "handleDeleteSpace",
+        "handleStructureNameUpdate",
+        "handleEditStructure",
+        "handleDuplicateStructure",
+        "handleCopyStructure",
+        "handleServicesChange",
+        "createNewStructure",
+        "createNewLevel"
+      ],
+      "protected_ranges": [
+        {
+          "start": "function createNewStructure",
+          "end": "function createNewLevel"
+        },
+        {
+          "start": "export function ProposalStructures",
+          "end": "return ("
+        }
+      ],
+      "message": "⚠️ This file is protected. The proposal structures component contains critical business logic for structure management, space management, and duplicate handling. Please contact the team lead if changes are needed."
+    },
+    {
+      "name": "Protected Proposal Store Functions",
+      "description": "These store functions handle critical structure management, space management, and duplicate handling logic that should not be modified without careful review",
+      "paths": ["src/store/proposal.ts"],
+      "protected_functions": [
+        "updateStructure",
+        "updateSpace",
+        "addStructure",
+        "removeStructure",
+        "duplicateStructure",
+        "setStructures",
+        "setTrackedServices",
+        "updateTrackedService"
+      ],
+      "protected_ranges": [
+        {
+          "start": "updateStructure: (structureId: string, updates: Partial<Structure>) => set(state => {",
+          "end": "return {"
+        },
+        {
+          "start": "duplicateStructure: (structureId: string) => {",
+          "end": "set(state => ({"
+        }
+      ],
+      "message": "⚠️ This function is protected. Modifying store functions can cause data integrity issues and affect duplicate structure handling. Please contact the team lead if changes are needed."
+    },
+    {
+      "name": "Protected Proposal Data Types",
+      "description": "These type definitions define the core data structure for proposals and should not be modified without careful review as they affect data integrity and type safety across the application",
+      "paths": ["src/types/proposal/base.ts"],
+      "protected_types": [
+        "Structure",
+        "Level",
+        "Space",
+        "FeeCalculationState",
+        "ConstructionCostsForSpace",
+        "DisciplineEngineeringFees",
+        "EngineeringFee",
+        "FeeScale",
+        "FeeCalculationResult"
+      ],
+      "protected_ranges": [
+        {
+          "start": "export interface Structure {",
+          "end": "}"
+        },
+        {
+          "start": "export interface Level {",
+          "end": "}"
+        },
+        {
+          "start": "export interface Space {",
+          "end": "}"
+        },
+        {
+          "start": "export interface FeeCalculationState {",
+          "end": "}"
+        },
+        {
+          "start": "export interface ConstructionCostsForSpace {",
+          "end": "}"
+        },
+        {
+          "start": "export interface DisciplineEngineeringFees {",
+          "end": "}"
+        },
+        {
+          "start": "export interface EngineeringFee {",
+          "end": "}"
+        },
+        {
+          "start": "export interface FeeScale {",
+          "end": "}"
+        },
+        {
+          "start": "export interface FeeCalculationResult {",
+          "end": "}"
+        }
+      ],
+      "message": "⚠️ This type definition is protected. Modifying core data types can affect data integrity, type safety, and functionality across the entire application. Please contact the team lead if changes are needed."
+    }
+  ]
+} 

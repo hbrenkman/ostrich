@@ -1,100 +1,152 @@
-export interface Space {
-  id: string;
-  name: string;
-  description: string;
-  floorArea: number;
-  buildingType: string;
-  buildingTypeId: string;
-  spaceType: string;
-  discipline: string;
-  hvacSystem: string;
-  projectConstructionType: string;
-  projectConstructionTypeId: number;
-  structureId: string;
-  levelId: string;
-  totalConstructionCosts: Array<{
+/**
+ * Proposal Detail Page Types
+ * Page-specific types that extend the central types
+ */
+
+import type {
+  Proposal,
+  ProposalStatus,
+  ProposalContact,
+  EngineeringService,
+  Structure,
+  Level,
+  Space,
+  CalculationResult
+} from '@/types/proposal';
+
+import type {
+  fee_item,
+  fee_calculation_result,
+  fee_calculation_state,
+  engineering_standard_service,
+  manual_fee_override,
+  base_fee,
+  fee_scale,
+  fee_duplicate_structure,
+  nested_fee_item,
+  flex_fees_data,
+  service_fee_calculation,
+  fee_component,
+  fee_subcomponent,
+  base_proposal,
+  proposal_project_data,
+  proposal,
+  proposal_status,
+  proposal_status_code,
+  proposal_contact,
+  contact_role,
+  contact_status,
+  contact_role_string,
+  contact_role_object,
+  ui_construction_cost,
+  fixed_fees_structure,
+  fixed_fees_props
+} from '@/types/proposal/base';
+
+import type { tracked_service } from '@/types/proposal/service';
+
+// =============== Page Props Types ===============
+
+/**
+ * Props for the proposal detail page
+ */
+export interface ProposalDetailPageProps {
+  params: {
     id: string;
-    discipline: string;
-    totalConstructionCost: number;
-    isActive: boolean;
-    costPerSqft: number;
-  }>;
-  totalCost: number;
-  totalCostPerSqft: number;
-  splitConstructionCosts: boolean;
-  engineeringServices?: Array<{
-    id: string;
-    discipline: string;
-    service_name: string;
-    description: string;
-    estimated_fee: string | null;
-    isActive: boolean;
-  }>;
+    proposalId: string;
+  };
 }
 
-export interface Level {
-  id: string;
-  name: string;
-  floorArea: string;
-  description: string;
-  spaceType: string;
-  discipline: string;
-  hvacSystem: string;
-  spaces: Space[];
+/**
+ * Props for the proposal detail component
+ */
+export interface ProposalDetailProps {
+  proposal: Proposal;
+  projectId: string;
+  proposalId: string;
+  onProposalUpdate: (proposal: Proposal) => void;
 }
 
-export interface Structure {
-  id: string;
-  name: string;
-  constructionType: string;
-  floorArea: string;
-  description: string;
-  spaceType: string;
-  discipline: string;
-  hvacSystem: string;
-  levels: Level[];
-  parentId?: string;
-  designFeeRate?: number;
-  constructionSupportEnabled?: boolean;
-  designPercentage?: number;
-  isDuplicate?: boolean;
-  duplicateNumber?: number;
-  duplicateParentId?: string | null;
-  isDuplicateCollapsed?: boolean;
-  constructionCosts?: Array<{
-    id: string;
-    discipline: string;
-    totalConstructionCost: number;
-    isActive: boolean;
-    costPerSqft: number
-  }>;
+// =============== Component Props Types ===============
+
+/**
+ * Props for the proposal structures component
+ */
+export interface ProposalStructuresProps {
+  proposal: Proposal;
+  onStructureUpdate: (structures: Structure[]) => void;
+  onStructureAdd: (structure: Structure) => void;
+  onStructureDelete: (structureId: string) => void;
 }
 
-export interface ManualFeeOverride {
-  id: string;
-  structureId: string;
-  levelId: string;
-  discipline: string;
-  designFee?: number;
-  constructionSupportFee?: number;
-  spaceId?: string;
+/**
+ * Props for the proposal actions component
+ */
+export interface ProposalActionsProps {
+  proposal: Proposal;
+  onStatusChange: (status: ProposalStatus) => void;
+  onSave: () => Promise<void>;
+  onDelete: () => Promise<void>;
 }
 
-export interface EngineeringService {
-  id: string;
-  discipline: string;
-  service_name: string;
-  description: string;
-  isIncludedInFee: boolean;
-  isDefaultIncluded: boolean;
-  phase: 'design' | 'construction' | null;
-  min_fee: number | null;
-  rate: number | null;
-  fee_increment: number | null;
-  isConstructionAdmin: boolean;
+// =============== Form Types ===============
+
+/**
+ * Extended form data type for proposal detail page
+ */
+export interface ProposalDetailForm {
+  // Additional fields specific to detail page
+  isEditing: boolean;
+  lastSavedAt?: string;
+  validationErrors?: {
+    [key: string]: string;
+  };
 }
 
-export interface EngineeringServiceLink {
+// =============== State Types ===============
+
+/**
+ * State type for proposal detail page
+ */
+export interface ProposalDetailState {
+  proposal: Proposal;
+  form: ProposalDetailForm;
+  isLoading: boolean;
+  isSaving: boolean;
+  error: string | null;
+  lastSavedAt: string | null;
+}
+
+// =============== API Response Types ===============
+
+/**
+ * API response type for proposal detail
+ */
+export interface ProposalDetailResponse {
+  proposal: Proposal;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * API response type for proposal update
+ */
+export interface ProposalUpdateResponse {
+  success: boolean;
+  proposal?: Proposal;
+  error?: string;
+}
+
+// Re-export base types for convenience
+export type {
+  Structure,
+  Level,
+  Space,
+  engineering_standard_service,
+  tracked_service
+};
+
+export interface engineering_service_link {
   id: string;
   engineering_service_id: string;
   additional_item_id: string;
@@ -103,47 +155,14 @@ export interface EngineeringServiceLink {
   updated_at: string;
 }
 
-export interface FeeTableProps {
+export interface fee_table_props {
   structure: Structure;
-  manualOverrides: ManualFeeOverride[];
-  engineeringServices: EngineeringService[];
-  serviceLinks: EngineeringServiceLink[];
-  onFeeUpdate: (structureId: string, discipline: string, type: 'design' | 'construction', value: number | null, spaceId?: string) => void;
-  onDisciplineFeeToggle: (structureId: string, discipline: string, isActive: boolean) => void;
-  onResetFees: (structureId: string, discipline: string, spaceId?: string) => void;
-  onServiceToggle: (structureId: string, spaceId: string, serviceId: string, isActive: boolean) => void;
-  onServiceFeeUpdate: (structureId: string, spaceId: string, serviceId: string, fee: string | null) => void;
-}
-
-// TrackedService represents an engineering service associated with a structure
-// structureId: Foreign key referencing Structure.id
-// This is used to track which structure a service belongs to
-export interface TrackedService {
-  id: string;  // Primary key for the tracked service
-  serviceId: string;  // References the engineering service template
-  service_name: string;
-  name: string;
-  discipline: string;
-  isDefaultIncluded: boolean;
-  min_fee: number | null;
-  rate: number | null;
-  fee_increment: number | null;
-  phase: 'design' | 'construction' | null;
-  customFee?: number;
-  isConstructionAdmin: boolean;
-  fee: number;
-  structureId: string;  // Foreign key referencing Structure.id
-  levelId: string;  // Foreign key referencing Level.id
-  spaceId: string;  // Foreign key referencing Space.id
-  isIncluded: boolean;
-}
-
-export interface FeeScale {
-  id: number;
-  construction_cost: number;
-  prime_consultant_rate: number;
-  fraction_of_prime_rate_mechanical: number;
-  fraction_of_prime_rate_plumbing: number;
-  fraction_of_prime_rate_electrical: number;
-  fraction_of_prime_rate_structural: number;
+  manual_overrides: manual_fee_override[];
+  engineering_services: engineering_standard_service[];
+  service_links: engineering_service_link[];
+  on_fee_update: (structure_id: string, discipline: string, type: 'design' | 'construction', value: number | null, space_id?: string) => void;
+  on_discipline_fee_toggle: (structure_id: string, discipline: string, is_active: boolean) => void;
+  on_reset_fees: (structure_id: string, discipline: string, space_id?: string) => void;
+  on_service_toggle: (structure_id: string, space_id: string, service_id: string, is_active: boolean) => void;
+  on_service_fee_update: (structure_id: string, space_id: string, service_id: string, fee: string | null) => void;
 } 

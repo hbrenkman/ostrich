@@ -12,82 +12,36 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "react-hot-toast";
-import { Space } from '../types';
 import { useAuth } from '@/modules/auth/frontend/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
-
-interface BuildingType {
-  id: string;
-  name: string;
-  description: string | null;
-  space_type: string | null;
-  discipline: string | null;
-  hvac_system: string | null;
-  default_construction_cost: number | null;
-  default_area: number | null;
-}
-
-interface ProjectConstructionType {
-  id: number;
-  project_type: string;
-  definition: string;
-  description: string;
-  relative_cost_index: number;
-  created_at: string;
-}
-
-interface ConstructionCost {
-  id: string;
-  building_type_id: string;
-  cost_type: string;
-  year: number;
-  cost_per_sqft: number;
-  percentage: number | null;
-  discipline: string;
-}
-
-interface DisciplineConstructionCost {
-  id: string;
-  discipline: string;
-  isActive: boolean;
-  costPerSqft: number;
-  totalConstructionCost: number;
-}
-
-interface SpaceDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSave: (space: Omit<Space, 'id'>) => void;
-  defaultValues?: Partial<Space>;
-  costIndex: number | null;
-  initialSpace: Space | null;
-  structureId: string;
-  levelId: string;
-}
+import type { Space, ConstructionCostsForSpace, ConstructionCost } from '@/types/proposal/base';
+import type { 
+  BuildingType,
+  ProjectConstructionType,
+  SpaceDialogProps
+} from '@/types/proposal/shared';
 
 // NOTE: Engineering services are NOT handled in this dialog.
 // They are managed separately in a different component.
 // DO NOT add engineering services functionality here.
 
-export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costIndex, initialSpace, structureId, levelId }: SpaceDialogProps) {
+export function SpaceDialog({ 
+  open, 
+  onOpenChange, 
+  onSave, 
+  defaultValues, 
+  costIndex, 
+  initialSpace, 
+  structureId, 
+  levelId 
+}: SpaceDialogProps) {
   const { user } = useAuth();
   const [buildingTypes, setBuildingTypes] = useState<BuildingType[]>([]);
   const [projectConstructionTypes, setProjectConstructionTypes] = useState<ProjectConstructionType[]>([]);
   const [constructionCosts, setConstructionCosts] = useState<ConstructionCost[]>([]);
   const [selectedBuildingType, setSelectedBuildingType] = useState<BuildingType | null>(null);
-  const [selectedProjectConstructionType, setSelectedProjectConstructionType] = useState<ProjectConstructionType | null>(null);
-  const [disciplineConstructionCosts, setDisciplineConstructionCosts] = useState<DisciplineConstructionCost[]>(() => {
-    const disciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'];
-    return disciplines.map(discipline => ({
-      id: crypto.randomUUID(),
-      discipline,
-      isActive: discipline !== 'Civil' && discipline !== 'Structural',
-      costPerSqft: 0,
-      totalConstructionCost: 0
-    }));
-  });
-  const [isLoading, setIsLoading] = useState(true);
+  const [selected_project_construction_type, setSelectedProjectConstructionType] = useState<ProjectConstructionType | null>(null);
   const [openBuildingType, setOpenBuildingType] = useState(false);
   const [openProjectConstructionType, setOpenProjectConstructionType] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,34 +51,45 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   const isInitializing = useRef(true);
   const [hasValidSession, setHasValidSession] = useState(false);
 
+  const defaultSpace: Omit<Space, 'id'> = {
+    name: '',
+    description: '',
+    floor_area: 0,
+    building_type: '',
+    building_type_id: '',
+    space_type: '',
+    project_construction_type: 'New Construction',
+    project_construction_type_id: 1,
+    construction_costs: {},
+    discipline_engineering_services: [],
+    discipline_engineering_fees: [],
+    level_id: levelId || '',
+    structure_id: structureId || '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
   // Initialize space state with initialSpace or defaultValues
   const [space, setSpace] = useState<Omit<Space, 'id'>>(() => {
-    const defaultSpace = {
-      name: '',
-      description: '',
-      floorArea: 0,
-      buildingType: '',
-      buildingTypeId: '',
-      spaceType: '',
-      discipline: '',
-      hvacSystem: '',
-      projectConstructionType: 'New Construction',
-      projectConstructionTypeId: 1,
-      structureId: structureId,
-      levelId: levelId,
-      totalConstructionCosts: [],
-      totalCost: 0,
-      totalCostPerSqft: 0,
-      splitConstructionCosts: false,
-      engineeringServices: []
-    };
-
     if (initialSpace) {
       return {
         ...defaultSpace,
         ...initialSpace,
-        projectConstructionType: initialSpace.projectConstructionType || 'New Construction',
-        projectConstructionTypeId: initialSpace.projectConstructionTypeId || 1
+        name: initialSpace.name || '',
+        description: initialSpace.description || '',
+        floor_area: initialSpace.floor_area || 0,
+        building_type: initialSpace.building_type || '',
+        building_type_id: initialSpace.building_type_id || '',
+        space_type: initialSpace.space_type || '',
+        project_construction_type: initialSpace.project_construction_type || 'New Construction',
+        project_construction_type_id: initialSpace.project_construction_type_id || 1,
+        construction_costs: initialSpace.construction_costs || {},
+        discipline_engineering_services: initialSpace.discipline_engineering_services || [],
+        discipline_engineering_fees: initialSpace.discipline_engineering_fees || [],
+        level_id: initialSpace.level_id || '',
+        structure_id: initialSpace.structure_id || '',
+        created_at: initialSpace.created_at || new Date().toISOString(),
+        updated_at: initialSpace.updated_at || new Date().toISOString()
       };
     }
 
@@ -132,8 +97,21 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       return {
         ...defaultSpace,
         ...defaultValues,
-        projectConstructionType: defaultValues.projectConstructionType || 'New Construction',
-        projectConstructionTypeId: defaultValues.projectConstructionTypeId || 1
+        name: defaultValues.name || '',
+        description: defaultValues.description || '',
+        floor_area: defaultValues.floor_area || 0,
+        building_type: defaultValues.building_type || '',
+        building_type_id: defaultValues.building_type_id || '',
+        space_type: defaultValues.space_type || '',
+        project_construction_type: defaultValues.project_construction_type || 'New Construction',
+        project_construction_type_id: defaultValues.project_construction_type_id || 1,
+        construction_costs: defaultValues.construction_costs || {},
+        discipline_engineering_services: defaultValues.discipline_engineering_services || [],
+        discipline_engineering_fees: defaultValues.discipline_engineering_fees || [],
+        level_id: defaultValues.level_id || '',
+        structure_id: defaultValues.structure_id || '',
+        created_at: defaultValues.created_at || new Date().toISOString(),
+        updated_at: defaultValues.updated_at || new Date().toISOString()
       };
     }
 
@@ -144,23 +122,16 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
   useEffect(() => {
     const checkSession = async () => {
       try {
-        if (!user) {
-          console.error('No user found in auth context');
-          toast.error('Please sign in to continue');
-          onOpenChange(false);
-          return;
-        }
-
         const { data: { session }, error } = await supabase.auth.getSession();
-        console.log('Current session:', {
-          hasSession: !!session,
-          userId: session?.user?.id,
-          role: session?.user?.app_metadata?.role,
-          error: error?.message,
-          authUser: user
-        });
-
+        
         if (error) {
+          if (error.message.includes('refresh_token_already_used')) {
+            // Handle invalid refresh token by signing out and redirecting to login
+            await supabase.auth.signOut();
+            toast.error('Your session has expired. Please sign in again.');
+            onOpenChange(false);
+            return;
+          }
           console.error('Session error:', error);
           toast.error('Authentication error. Please try again.');
           onOpenChange(false);
@@ -174,6 +145,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           return;
         }
 
+        // Only set valid session if we have a session and no errors
         setHasValidSession(true);
       } catch (error) {
         console.error('Error checking session:', error);
@@ -182,425 +154,445 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       }
     };
 
-    if (open) {
+    // Only check session when dialog opens and we haven't already validated the session
+    if (open && !hasValidSession) {
       checkSession();
-    } else {
-      setHasValidSession(false);
     }
-  }, [open, onOpenChange, user]);
+  }, [open, onOpenChange, hasValidSession]);
 
-  // Fetch project construction types and building types on mount
+  // Remove the multiple initialization useEffects and replace with a single one
   useEffect(() => {
-    const fetchData = async () => {
+    if (!open || !hasValidSession) return;
+
+    const initializeSpace = async () => {
       try {
-        // Fetch project construction types
-        const response = await fetch('/api/project-construction-types');
-        if (!response.ok) {
-          throw new Error('Failed to fetch project construction types');
-        }
-        const data = await response.json();
-        setProjectConstructionTypes(data);
+        console.log('Starting space initialization...');
+        
+        // 1. Fetch all required data
+        const [buildingTypesResponse, constructionTypesResponse, constructionCostsResponse] = await Promise.all([
+          supabase.from('building_types').select('*').order('name'),
+          fetch('/api/project-construction-types'),
+          fetch('/api/construction-costs')
+        ]);
 
-        // Always set the default construction type first
-        const defaultType = data.find((type: ProjectConstructionType) => type.project_type === 'New Construction');
-        if (defaultType) {
-          console.log('Setting default construction type:', defaultType);
-          setSelectedProjectConstructionType(defaultType);
-          // Update space state with the default type
-          setSpace(prev => ({
-            ...prev,
-            projectConstructionType: defaultType.project_type,
-            projectConstructionTypeId: defaultType.id
-          }));
+        // Parse responses
+        const buildingTypes = buildingTypesResponse.data || [];
+        const constructionTypes = await constructionTypesResponse.json();
+        const constructionCostsData = await constructionCostsResponse.json();
+
+        if (!constructionTypesResponse.ok || !constructionCostsResponse.ok) {
+          throw new Error('Failed to fetch construction data');
         }
 
-        // If we are editing an existing space, find and set the matching construction type
+        // Filter construction costs to current year
+        const currentYearCosts = constructionCostsData.filter((cost: ConstructionCost) => cost.year === 2025);
+        
+        console.log('Fetched data:', {
+          buildingTypes: buildingTypes.length,
+          constructionTypes: constructionTypes.length,
+          constructionCosts: currentYearCosts.length
+        });
+
+        // Store fetched data
+        setBuildingTypes(buildingTypes);
+        setProjectConstructionTypes(constructionTypes);
+        setConstructionCosts(currentYearCosts);
+
+        // 2. Initialize space if we're editing
         if (initialSpace) {
-          const matchingType = data.find((type: ProjectConstructionType) => type.id === initialSpace.projectConstructionTypeId);
-          if (matchingType) {
-            console.log('Setting existing construction type:', matchingType);
-            setSelectedProjectConstructionType(matchingType);
-          }
-        }
+          console.log('Initializing space for editing:', initialSpace);
 
-        // Fetch building types
-        const buildingTypesResponse = await fetch('/api/construction-costs/building-types');
-        if (!buildingTypesResponse.ok) {
-          throw new Error('Failed to fetch building types');
-        }
-        const buildingTypesData = await buildingTypesResponse.json();
-        setBuildingTypes(buildingTypesData);
+          // Set base space state
+          setSpace({
+            ...defaultSpace,
+            ...initialSpace,
+            name: initialSpace.name || '',
+            description: initialSpace.description || '',
+            floor_area: initialSpace.floor_area || 0,
+            building_type: initialSpace.building_type || '',
+            building_type_id: initialSpace.building_type_id || '',
+            space_type: initialSpace.space_type || '',
+            project_construction_type: initialSpace.project_construction_type || 'New Construction',
+            project_construction_type_id: initialSpace.project_construction_type_id || 1,
+            construction_costs: initialSpace.construction_costs || {},
+            discipline_engineering_services: initialSpace.discipline_engineering_services || [],
+            discipline_engineering_fees: initialSpace.discipline_engineering_fees || [],
+            level_id: initialSpace.level_id || '',
+            structure_id: initialSpace.structure_id || '',
+            created_at: initialSpace.created_at || new Date().toISOString(),
+            updated_at: initialSpace.updated_at || new Date().toISOString()
+          });
 
-        // Set default building type for new spaces
-        if (!initialSpace) {
-          const defaultBuildingType = buildingTypesData.find((type: BuildingType) => type.space_type === 'Office');
-          if (defaultBuildingType) {
-            console.log('Setting default building type:', defaultBuildingType);
-            setSelectedBuildingType(defaultBuildingType);
-            // Update space state with the default building type
-            setSpace(prev => ({
-              ...prev,
-              buildingType: defaultBuildingType.space_type || '',
-              buildingTypeId: defaultBuildingType.id,
-              discipline: defaultBuildingType.discipline || '',
-              hvacSystem: defaultBuildingType.hvac_system || '',
-              defaultConstructionCost: defaultBuildingType.default_construction_cost || 0,
-              defaultArea: defaultBuildingType.default_area || 0
-            }));
-          }
-        } else {
-          // If we are editing an existing space, find and set the matching building type
-          const matchingBuildingType = buildingTypesData.find((type: BuildingType) => type.id === initialSpace.buildingTypeId);
+          // Set building type
+          const matchingBuildingType = buildingTypes.find(
+            (type: BuildingType) => type.id === initialSpace.building_type_id
+          );
           if (matchingBuildingType) {
             console.log('Setting existing building type:', matchingBuildingType);
             setSelectedBuildingType(matchingBuildingType);
+
+            if (initialSpace.construction_costs) {
+              // Use saved construction costs when editing
+              const savedCosts = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'] as const;
+              const mappedCosts = savedCosts.map(discipline => {
+                const savedCost = initialSpace.construction_costs[discipline as keyof ConstructionCostsForSpace] as ConstructionCost | undefined;
+                return {
+                  id: savedCost?.id || crypto.randomUUID(),
+                  discipline,
+                  cost_type: discipline,
+                  year: 2025,
+                  building_type_id: initialSpace.building_type_id,
+                  is_active: savedCost?.is_active ?? (discipline !== 'Civil' && discipline !== 'Structural'),
+                  cost_per_sqft: savedCost?.cost_per_sqft ?? 0
+                };
+              });
+
+              // Get the saved total cost
+              const savedTotalCost = initialSpace.construction_costs.Total as ConstructionCost | undefined;
+              if (savedTotalCost) {
+                setTotalCostPerSqFt(savedTotalCost.cost_per_sqft || 0);
+                setTotalConstructionCost(savedTotalCost.total_construction_cost || 0);
+              } else {
+                setTotalCostPerSqFt(0);
+                setTotalConstructionCost(0);
+              }
+
+              // Create construction costs object with discipline costs
+              const construction_costs = mappedCosts.reduce((acc, cost) => ({
+                ...acc,
+                [cost.discipline]: cost
+              }), {} as ConstructionCostsForSpace);
+
+              // Add the saved Total cost
+              if (savedTotalCost) {
+                construction_costs.Total = savedTotalCost;
+              }
+
+              console.log('Using saved construction costs:', mappedCosts);
+              setSpace(prev => ({
+                ...prev,
+                construction_costs
+              }));
+            } else {
+              // Calculate new costs for new space
+              const costs = calculateDisciplineConstructionCosts(
+                matchingBuildingType.id,
+                initialSpace.floor_area || 0
+              );
+              console.log('Calculated new discipline costs:', costs);
+              setSpace(prev => ({
+                ...prev,
+                construction_costs: {
+                  ...prev.construction_costs,
+                  ...costs.reduce((acc, cost) => ({
+                    ...acc,
+                    [cost.discipline]: {
+                      id: cost.id,
+                      discipline: cost.discipline,
+                      cost_type: cost.discipline,
+                      year: 2025,
+                      building_type_id: cost.building_type_id,
+                      is_active: cost.is_active,
+                      cost_per_sqft: cost.cost_per_sqft
+                    }
+                  }), {} as ConstructionCostsForSpace)
+                }
+              }));
+            }
+          }
+
+          // Set construction type
+          const matchingConstructionType = constructionTypes.find(
+            (type: ProjectConstructionType) => type.id === initialSpace.project_construction_type_id
+          );
+          if (matchingConstructionType) {
+            console.log('Setting existing construction type:', matchingConstructionType);
+            setSelectedProjectConstructionType(matchingConstructionType);
+          }
+        } else {
+          // 3. Set defaults for new space
+          console.log('Setting defaults for new space');
+          const defaultBuildingType = buildingTypes.find((type: BuildingType) => type.space_type === 'Office');
+          const defaultConstructionType = constructionTypes.find(
+            (type: ProjectConstructionType) => type.project_type === 'New Construction'
+          );
+
+          if (defaultBuildingType) {
+            console.log('Setting default building type:', defaultBuildingType);
+            setSelectedBuildingType(defaultBuildingType);
+            
+            // Calculate initial construction costs for the default building type
+            const costs = calculateDisciplineConstructionCosts(
+              defaultBuildingType.id,
+              defaultBuildingType.default_area || 0
+            );
+            
+            setSpace(prev => ({
+              ...prev,
+              building_type: defaultBuildingType.space_type || '',
+              building_type_id: defaultBuildingType.id,
+              space_type: defaultBuildingType.space_type || '',
+              floor_area: defaultBuildingType.default_area || 0,
+              construction_costs: costs.reduce((acc, cost) => ({
+                ...acc,
+                [cost.discipline]: {
+                  id: cost.id,
+                  discipline: cost.discipline,
+                  cost_type: cost.discipline,
+                  year: 2025,
+                  building_type_id: defaultBuildingType.id,
+                  is_active: cost.is_active,
+                  cost_per_sqft: cost.cost_per_sqft
+                }
+              }), {} as ConstructionCostsForSpace)
+            }));
+
+            // Set initial totals
+            const totalCostPerSqFt = costs.reduce((sum, cost) => 
+              sum + (cost.is_active ? cost.cost_per_sqft : 0), 0);
+            setTotalCostPerSqFt(totalCostPerSqFt);
+            setTotalConstructionCost(totalCostPerSqFt * (defaultBuildingType.default_area || 0));
+          }
+
+          if (defaultConstructionType) {
+            console.log('Setting default construction type:', defaultConstructionType);
+            setSelectedProjectConstructionType(defaultConstructionType);
+            setSpace(prev => ({
+              ...prev,
+              project_construction_type: defaultConstructionType.project_type,
+              project_construction_type_id: defaultConstructionType.id
+            }));
           }
         }
+
+        isInitializing.current = false;
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error initializing space:', error);
+        toast.error('Failed to initialize space data');
+        onOpenChange(false);
       }
     };
 
-    fetchData();
-  }, [initialSpace]); // Add initialSpace to dependencies
+    initializeSpace();
+  }, [open, hasValidSession, initialSpace, onOpenChange, supabase]);
 
-  // Add logging for construction types state changes
+  // Keep the reset effect for when dialog closes
   useEffect(() => {
-    console.log('Project construction types updated:', projectConstructionTypes);
-    console.log('Selected project construction type:', selectedProjectConstructionType);
-  }, [projectConstructionTypes, selectedProjectConstructionType]);
-
-  // Update the useEffect that handles initial space
-  useEffect(() => {
-    if (open) {
-      if (initialSpace) {
-        console.log('Dialog opened with initial space:', initialSpace);
-        // Update the space state with the latest data from initialSpace
-        setSpace({
-          ...initialSpace,
-          totalConstructionCosts: initialSpace.totalConstructionCosts.map(cost => ({
-            ...cost,
-            isActive: cost.discipline === 'Civil' || cost.discipline === 'Structural' ? false : cost.isActive
-          }))
-        });
-
-        // Find and set the selected building type
-        const matchingBuildingType = buildingTypes.find(
-          type => type.id === initialSpace.buildingTypeId
-        );
-        if (matchingBuildingType) {
-          setSelectedBuildingType(matchingBuildingType);
-        }
-
-        // Find and set the selected construction type
-        const matchingConstructionType = projectConstructionTypes.find(
-          type => type.id === initialSpace.projectConstructionTypeId
-        );
-        if (matchingConstructionType) {
-          setSelectedProjectConstructionType(matchingConstructionType);
-        }
-      } else {
-        // For new spaces, always set the default construction type
-        const defaultType = projectConstructionTypes.find(
-          (type: ProjectConstructionType) => type.project_type === 'New Construction'
-        );
-        if (defaultType) {
-          console.log('Setting default construction type for new space:', defaultType);
-          setSelectedProjectConstructionType(defaultType);
-          setSpace(prev => ({
-            ...prev,
-            projectConstructionType: defaultType.project_type,
-            projectConstructionTypeId: defaultType.id
-          }));
-        }
-
-        // Also set default building type for new spaces
-        const defaultBuildingType = buildingTypes.find(
-          (type: BuildingType) => type.space_type === 'Office'
-        );
-        if (defaultBuildingType) {
-          console.log('Setting default building type for new space:', defaultBuildingType);
-          setSelectedBuildingType(defaultBuildingType);
-          setSpace(prev => ({
-            ...prev,
-            buildingType: defaultBuildingType.space_type || '',
-            buildingTypeId: defaultBuildingType.id,
-            discipline: defaultBuildingType.discipline || '',
-            hvacSystem: defaultBuildingType.hvac_system || '',
-            defaultConstructionCost: defaultBuildingType.default_construction_cost || 0,
-            defaultArea: defaultBuildingType.default_area || 0
-          }));
-        }
-      }
-
-      // Set initializing to false after a short delay to allow state updates
-      setTimeout(() => {
-        isInitializing.current = false;
-      }, 100);
-    } else {
-      // Reset initializing when dialog closes
+    if (!open) {
+      // Reset all state to initial values
+      setSelectedBuildingType(null);
+      setSelectedProjectConstructionType(null);
+      setSearchQuery('');
+      setConstructionTypeSearchQuery('');
+      setTotalConstructionCost(0);
+      setTotalCostPerSqFt(0);
+      setSpace({...defaultSpace});
       isInitializing.current = true;
     }
-  }, [open, initialSpace, buildingTypes, projectConstructionTypes]);
+  }, [open]);
 
-  // Remove project construction types fetching from the main data fetching effect
-  useEffect(() => {
-    if (!hasValidSession) return;
-
-    const fetchData = async () => {
-      try {
-        console.log('Starting to fetch data...');
-        const [buildingTypesResponse, constructionCostsResponse] = await Promise.all([
-          supabase.from('building_types').select('*').order('name'),
-          supabase.from('construction_costs').select('*').order('year', { ascending: false })
-        ]);
-
-        if (buildingTypesResponse.error) {
-          console.error('Error fetching building types:', buildingTypesResponse.error);
-          toast.error('Failed to load building types');
-          return;
-        }
-
-        if (constructionCostsResponse.error) {
-          console.error('Error fetching construction costs:', constructionCostsResponse.error);
-          toast.error('Failed to load construction costs');
-          return;
-        }
-
-        console.log('Building types fetch response:', { count: buildingTypesResponse.data?.length, firstItem: buildingTypesResponse.data?.[0] });
-        console.log('Construction costs fetch response:', { count: constructionCostsResponse.data?.length, firstItem: constructionCostsResponse.data?.[0] });
-
-        setBuildingTypes(buildingTypesResponse.data || []);
-        setConstructionCosts(constructionCostsResponse.data || []);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      }
-    };
-
-    if (open) {
-      fetchData();
+  // Single function to calculate cost using the same math for both total and discipline costs
+  const calculateCost = (costPerSqft: number, floorArea: number) => {
+    let adjustedCostPerSqft = costPerSqft;
+    
+    // Apply cost index
+    if (costIndex !== null) {
+      adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
     }
-  }, [open, hasValidSession, supabase]);
+    
+    // Apply project type index
+    const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+    adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+    
+    // Calculate total cost
+    return adjustedCostPerSqft * floorArea;
+  };
 
   // Calculate discipline construction costs
   const calculateDisciplineConstructionCosts = (buildingTypeId: string, floorArea: number) => {
-    console.log('Calculating costs for:', { buildingTypeId, floorArea });
-    
     // Get all construction costs for this building type
     const buildingTypeCosts = constructionCosts.filter(cost => 
       cost.building_type_id === buildingTypeId
     );
-    console.log('All construction costs for building type:', buildingTypeCosts.map(cost => ({
-      id: cost.id,
-      cost_type: cost.cost_type,
-      cost_per_sqft: cost.cost_per_sqft,
-      year: cost.year
-    })));
+
+    // Find the total cost first - case insensitive comparison
+    const totalCost = buildingTypeCosts.find(cost => 
+      cost.cost_type.toLowerCase() === 'total'
+    );
     
-    // Filter to include all disciplines
-    const disciplineCosts = buildingTypeCosts.filter(cost => {
-      const costType = cost.cost_type.toLowerCase();
-      const isDiscipline = ['mechanical', 'plumbing', 'electrical', 'civil', 'structural'].includes(costType);
-      console.log('Checking cost type:', { costType, isDiscipline });
-      return isDiscipline;
-    });
-
-    // If no discipline costs found, try to map available cost types
-    if (disciplineCosts.length === 0) {
-      console.log('No discipline construction costs found for building type');
-      const availableCostTypes = Array.from(new Set(buildingTypeCosts.map(cost => cost.cost_type)));
-      console.log('Available cost types:', availableCostTypes);
-      
-      // Map the available cost types to disciplines if they match
-      const mappedCosts = buildingTypeCosts.map(cost => {
-        const costType = cost.cost_type.toLowerCase();
-        let mappedDiscipline: string | null = null;
-        
-        if (costType.includes('mech')) mappedDiscipline = 'Mechanical';
-        else if (costType.includes('plumb')) mappedDiscipline = 'Plumbing';
-        else if (costType.includes('elec')) mappedDiscipline = 'Electrical';
-        else if (costType.includes('civ')) mappedDiscipline = 'Civil';
-        else if (costType.includes('struc')) mappedDiscipline = 'Structural';
-        
-        if (mappedDiscipline) {
-          console.log('Mapped cost type to discipline:', { costType, mappedDiscipline });
-          return {
-            ...cost,
-            discipline: mappedDiscipline
-          };
-        }
-        return null;
-      }).filter((cost): cost is NonNullable<typeof cost> => cost !== null);
-
-      if (mappedCosts.length > 0) {
-        console.log('Mapped construction costs:', mappedCosts);
-        const mostRecentYear = Math.max(...mappedCosts.map(cost => cost.year));
-        const recentCosts = mappedCosts.filter(cost => cost.year === mostRecentYear);
-        
-        return ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].map(discipline => {
-          const matchingCost = recentCosts.find(c => c.discipline === discipline);
-          let costPerSqft = matchingCost?.cost_per_sqft || 0;
-          
-          if (costIndex !== null) {
-            costPerSqft = costPerSqft * (costIndex / 100);
-          }
-          
-          const projectTypeIndex = (selectedProjectConstructionType?.relative_cost_index ?? 100) / 100;
-          costPerSqft = costPerSqft * projectTypeIndex;
-          
-          const totalConstructionCost = costPerSqft * floorArea;
-          
-          return {
-            id: crypto.randomUUID(),
-            discipline,
-            isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
-            costPerSqft,
-            totalConstructionCost
-          };
-        });
-      }
-      
-      return disciplineConstructionCosts.map(cost => ({
-        ...cost,
-        costPerSqft: 0,
-        totalConstructionCost: 0
-      }));
-    }
-
-    // Get the most recent year's costs
-    const mostRecentYear = Math.max(...disciplineCosts.map(cost => cost.year));
-    const recentCosts = disciplineCosts.filter(cost => cost.year === mostRecentYear);
-    console.log('Most recent discipline costs:', { year: mostRecentYear, costs: recentCosts });
-
-    // Get project type index
-    const projectTypeIndex = (selectedProjectConstructionType?.relative_cost_index ?? 100) / 100;
-    console.log('Project type index:', projectTypeIndex);
-
-    // Calculate costs for each discipline
-    const calculatedCosts = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].map(discipline => {
-      const cost = recentCosts.find(c => c.cost_type.toLowerCase() === discipline.toLowerCase());
-      let costPerSqft = cost?.cost_per_sqft || 0;
-      
-      // Apply cost index adjustment
+    if (totalCost) {
+      // Always calculate cost per sqft, even if floor area is 0
+      let adjustedCostPerSqft = totalCost.cost_per_sqft;
       if (costIndex !== null) {
-        costPerSqft = costPerSqft * (costIndex / 100);
+        adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
       }
-
-      // Apply project type index
-      costPerSqft = costPerSqft * projectTypeIndex;
+      const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+      adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
       
-      const totalConstructionCost = costPerSqft * floorArea;
-
-      console.log('Cost calculation for discipline:', {
-        discipline,
-        baseCostPerSqft: cost?.cost_per_sqft,
-        costIndex,
-        projectTypeIndex,
-        adjustedCostPerSqft: costPerSqft,
-        floorArea,
-        totalConstructionCost
-      });
-
-      return {
-        id: crypto.randomUUID(),
-        discipline,
-        isActive: discipline === 'Civil' || discipline === 'Structural' ? false : true,
-        costPerSqft,
-        totalConstructionCost
-      };
-    });
-
-    console.log('Final calculated costs:', calculatedCosts);
-    return calculatedCosts;
-  };
-
-  // Update the useEffect that handles total cost calculations
-  useEffect(() => {
-    if (!selectedBuildingType) {
-      setTotalConstructionCost(0);
-      setTotalCostPerSqFt(0);
-      return;
-    }
-
-    const calculateTotalCost = () => {
-      const totalCost = constructionCosts.find(cost => 
-        cost.building_type_id === selectedBuildingType.id && 
-        cost.cost_type.toLowerCase() === 'total'
-      );
-
-      if (totalCost) {
-        let adjustedCostPerSqft = totalCost.cost_per_sqft;
-        
-        // Apply cost index adjustment
-        if (costIndex !== null) {
-          adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
-        }
-        
-        // Apply project type index
-        const projectTypeIndex = (selectedProjectConstructionType?.relative_cost_index ?? 100) / 100;
-        adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
-        
-        // Always set the cost per sq ft, even if floor area is 0
-        setTotalCostPerSqFt(adjustedCostPerSqft);
-        
-        // Calculate total cost (will be 0 if floor area is 0)
-        const totalCostValue = adjustedCostPerSqft * (space.floorArea || 0);
-        console.log('Total construction cost calculation:', {
-          baseCostPerSqft: totalCost.cost_per_sqft,
-          costIndex,
-          projectTypeIndex,
-          adjustedCostPerSqft,
-          floorArea: space.floorArea || 0,
-          totalCostValue
-        });
+      setTotalCostPerSqFt(adjustedCostPerSqft);
+      
+      // Only calculate total cost if we have a floor area
+      if (floorArea) {
+        const totalCostValue = calculateCost(totalCost.cost_per_sqft, floorArea);
         setTotalConstructionCost(totalCostValue);
       } else {
-        console.log('No total cost found in construction costs');
-        setTotalCostPerSqFt(0);
         setTotalConstructionCost(0);
       }
-    };
-
-    calculateTotalCost();
-  }, [selectedBuildingType, space.floorArea, constructionCosts, costIndex, selectedProjectConstructionType]);
-
-  // Update costs when building type or floor area changes
-  useEffect(() => {
-    if (!isInitializing.current && selectedBuildingType && space.floorArea) {
-      const calculatedCosts = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
-      setDisciplineConstructionCosts(calculatedCosts);
-      
-      // Calculate total cost
-      const totalCost = calculatedCosts.reduce((sum, cost) => sum + cost.totalConstructionCost, 0);
-      const totalCostPerSqft = totalCost / space.floorArea;
-      
-      setTotalConstructionCost(totalCost);
-      setTotalCostPerSqFt(totalCostPerSqft);
+    } else {
+      setTotalCostPerSqFt(0);
+      setTotalConstructionCost(0);
     }
-  }, [selectedBuildingType, space.floorArea, constructionCosts, costIndex, selectedProjectConstructionType]);
+    
+    // Get the most recent year's costs
+    const mostRecentYear = Math.max(...buildingTypeCosts.map(cost => cost.year));
+    const recentCosts = buildingTypeCosts.filter(cost => cost.year === mostRecentYear);
+
+    // Calculate costs for each discipline - case insensitive comparison
+    return ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].map(discipline => {
+      const cost = recentCosts.find(c => 
+        c.cost_type.toLowerCase() === discipline.toLowerCase()
+      );
+      
+      // Use the actual cost from the database, or 0 if not found
+      const costPerSqft = cost ? cost.cost_per_sqft : 0;
+      
+      // Apply cost index and project type adjustments
+      let adjustedCostPerSqft = costPerSqft;
+      if (costIndex !== null) {
+        adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
+      }
+      const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+      adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+      
+      const totalConstructionCost = calculateCost(adjustedCostPerSqft, floorArea);
+
+      return {
+        id: cost?.id || crypto.randomUUID(),
+        discipline: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural',
+        cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+        year: 2025,
+        building_type_id: buildingTypeId,
+        is_active: discipline !== 'Civil' && discipline !== 'Structural',
+        cost_per_sqft: adjustedCostPerSqft,
+        total_construction_cost: totalConstructionCost
+      } as ConstructionCost;
+    });
+  };
 
   // Handle building type selection
   const handleBuildingTypeSelect = (type: BuildingType) => {
-    console.log('Building type selected:', type);
+    console.log('Building type selected:', {
+      type,
+      space_type: type.space_type,
+      currentSpace: space,
+      currentCosts: constructionCosts
+    });
     setSelectedBuildingType(type);
     setOpenBuildingType(false);
     setSearchQuery('');
     
-    // Calculate construction costs immediately when building type is selected
-    const floorArea = space.floorArea || (type.default_area || 0);
+    let totalCostPerSqFt = 0;
     
-    setSpace(prev => ({
-      ...prev,
-      buildingTypeId: type.id,
-      buildingType: type.name || '',
+    // Get all construction costs for this building type
+    const buildingTypeCosts = constructionCosts.filter(cost => 
+      cost.building_type_id === type.id
+    );
+
+    // Find the total cost first - case insensitive comparison
+    const totalCost = buildingTypeCosts.find(cost => 
+      cost.cost_type.toLowerCase() === 'total'
+    );
+
+    if (totalCost) {
+      // Calculate adjusted total cost per sqft
+      let adjustedCostPerSqft = totalCost.cost_per_sqft;
+      if (costIndex !== null) {
+        adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
+      }
+      const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+      adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+      totalCostPerSqFt = adjustedCostPerSqft;
+    }
+
+    // Add discipline costs
+    const disciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'] as const;
+    const disciplineCosts = disciplines.map(discipline => {
+      const cost = buildingTypeCosts.find(c => 
+        c.cost_type.toLowerCase() === discipline.toLowerCase()
+      );
+      
+      if (!cost) {
+        return {
+          id: crypto.randomUUID(),
+          discipline: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural',
+          cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+          year: 2025,
+          building_type_id: type.id,
+          is_active: discipline !== 'Civil' && discipline !== 'Structural',
+          cost_per_sqft: 0,
+          total_construction_cost: 0
+        } as ConstructionCost;
+      }
+
+      let adjustedCostPerSqft = cost.cost_per_sqft;
+      if (costIndex !== null) {
+        adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
+      }
+      const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+      adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+
+      console.log(`Final adjusted cost for ${discipline}:`, {
+        original: cost.cost_per_sqft,
+        adjusted: adjustedCostPerSqft
+      });
+
+      return {
+        id: cost.id,
+        discipline: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural',
+        cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+        year: 2025,
+        building_type_id: type.id,
+        is_active: discipline !== 'Civil' && discipline !== 'Structural',
+        cost_per_sqft: adjustedCostPerSqft,
+        total_construction_cost: adjustedCostPerSqft * (space.floor_area || 0)
+      } as ConstructionCost;
+    });
+
+    // Create construction costs object
+    const construction_costs = disciplineCosts.reduce((acc, cost) => ({
+      ...acc,
+      [cost.cost_type]: cost
+    }), {} as ConstructionCostsForSpace);
+
+    // Add Total cost using the actual total from the building type
+    construction_costs.Total = {
+      id: crypto.randomUUID(),
+      discipline: 'Total',
+      cost_type: 'Total',
+      year: 2025,
+      building_type_id: type.id,
+      is_active: true,
+      cost_per_sqft: totalCostPerSqFt,
+      total_construction_cost: totalCostPerSqFt * (space.floor_area || 0)
+    } as ConstructionCost;
+
+    // Update total costs
+    setTotalCostPerSqFt(totalCostPerSqFt);
+    setTotalConstructionCost(totalCostPerSqFt * (space.floor_area || 0));
+    
+    const updatedSpace = {
+      ...space,
+      building_type_id: type.id,
+      building_type: type.name || '',
       name: type.name || '',
       description: type.description || '',
-      spaceType: type.space_type || '',
-      discipline: type.discipline || '',
-      hvacSystem: type.hvac_system || '',
-      floorArea: floorArea,
-      splitConstructionCosts: prev.splitConstructionCosts
-    }));
+      space_type: type.space_type || '',
+      project_construction_type: 'New Construction',
+      project_construction_type_id: 1,
+      construction_costs
+    };
+    console.log('Updating space with:', updatedSpace);
+    setSpace(updatedSpace);
   };
 
   // Filter construction types based on search
@@ -617,41 +609,71 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
 
   // Handle project construction type selection
   const handleProjectConstructionTypeSelect = (type: ProjectConstructionType) => {
+    console.log('Construction type selected:', {
+      selectedType: type,
+      previousSelected: selected_project_construction_type,
+      previousSpace: space
+    });
+
     setSelectedProjectConstructionType(type);
     setOpenProjectConstructionType(false);
     setConstructionTypeSearchQuery('');
     
+    // Recalculate costs with new construction type
+    if (selectedBuildingType) {
+      const costs = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floor_area || 0);
+      setSpace(prev => ({
+        ...prev,
+        construction_costs: {
+          ...prev.construction_costs,
+          ...costs.reduce((acc, cost) => ({
+            ...acc,
+            [cost.discipline]: cost
+          }), {} as ConstructionCostsForSpace)
+        }
+      }));
+    }
+    
     setSpace(prev => ({
       ...prev,
-      projectConstructionType: type.project_type,
-      projectConstructionTypeId: type.id
+      project_construction_type: type.project_type,
+      project_construction_type_id: type.id
     }));
   };
 
   // Handle save
   const handleSave = () => {
-    if (!selectedBuildingType || !selectedProjectConstructionType) {
-      toast.error('Please select both building type and construction type');
+    if (!selectedBuildingType) {
+      toast.error('Please select a building type');
       return;
     }
 
-    if (!space.floorArea || space.floorArea <= 0) {
+    if (!selected_project_construction_type) {
+      toast.error('Please select a project construction type');
+      return;
+    }
+
+    if (!space.floor_area || space.floor_area <= 0) {
       toast.error('Please enter a valid floor area');
       return;
     }
 
     const spaceToSave: Omit<Space, 'id'> = {
-      ...space,
-      buildingType: selectedBuildingType.name,
-      buildingTypeId: selectedBuildingType.id,
-      projectConstructionType: selectedProjectConstructionType.project_type,
-      projectConstructionTypeId: selectedProjectConstructionType.id,
-      totalConstructionCosts: disciplineConstructionCosts,
-      totalCostPerSqft: totalCostPerSqFt,
-      totalCost: totalConstructionCost,
-      engineeringServices: [], // Engineering services are handled separately
-      structureId: structureId,
-      levelId: levelId
+      name: space.name || '',
+      description: space.description || '',
+      floor_area: space.floor_area,
+      building_type: selectedBuildingType.name,
+      building_type_id: selectedBuildingType.id,
+      space_type: selectedBuildingType.space_type || '',
+      project_construction_type: selected_project_construction_type.project_type,
+      project_construction_type_id: selected_project_construction_type.id,
+      construction_costs: space.construction_costs,
+      discipline_engineering_services: [],
+      discipline_engineering_fees: [],
+      level_id: levelId || '',
+      structure_id: structureId || '',
+      created_at: space.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
     onSave(spaceToSave);
@@ -676,49 +698,162 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     return nameMatch || descriptionMatch;
   });
 
-  // Handle floor area changes
+  // Update getDisplayConstructionCosts to use proper types
+  type DisplayConstructionCost = ConstructionCost & {
+    total_construction_cost: number;
+  };
+
+  const getDisplayConstructionCosts = (): DisplayConstructionCost[] => {
+    const disciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'] as const;
+    const costs = disciplines.map(discipline => {
+      const cost = space.construction_costs[discipline];
+      
+      // If no cost exists or cost_per_sqft is invalid, create a default cost
+      if (!cost || typeof cost.cost_per_sqft !== 'number' || isNaN(cost.cost_per_sqft)) {
+        const defaultCost: DisplayConstructionCost = {
+          id: crypto.randomUUID(),
+          discipline: discipline,
+          cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+          cost_per_sqft: 0,
+          year: new Date().getFullYear(),
+          building_type_id: selectedBuildingType?.id || '',
+          is_active: discipline !== 'Civil' && discipline !== 'Structural',
+          total_construction_cost: 0
+        };
+        return defaultCost;
+      }
+      
+      // Calculate total cost using the valid cost_per_sqft
+      const total_construction_cost = calculateCost(cost.cost_per_sqft, space.floor_area || 0);
+      
+      const displayCost: DisplayConstructionCost = {
+        ...cost,
+        total_construction_cost
+      };
+      return displayCost;
+    });
+
+    return costs;
+  };
+
+  // Update handleFloorAreaChange to use proper types
   const handleFloorAreaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number(e.target.value);
-    setSpace(prev => ({ ...prev, floorArea: value }));
-  };
-
-  // Get display construction costs
-  const getDisplayConstructionCosts = () => {
-    if (!selectedBuildingType || !space.floorArea) {
-      return disciplineConstructionCosts;
-    }
+    const newFloorArea = Number(e.target.value);
     
-    const calculatedCosts = calculateDisciplineConstructionCosts(selectedBuildingType.id, space.floorArea);
-    const existingDisciplines = calculatedCosts.map(cost => cost.discipline);
-    const missingDisciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].filter(
-      discipline => !existingDisciplines.includes(discipline)
-    );
-    
-    return [
-      ...calculatedCosts,
-      ...missingDisciplines.map(discipline => ({
-        id: crypto.randomUUID(),
-        discipline,
-        isActive: true,
-        costPerSqft: 0,
-        totalConstructionCost: 0
-      }))
-    ];
-  };
+    if (selectedBuildingType) {
+      const buildingTypeCosts = constructionCosts.filter(cost => 
+        cost.building_type_id === selectedBuildingType.id
+      );
 
-  const handleDisciplineToggle = (type: string) => {
-    setDisciplineConstructionCosts(prev => 
-      prev.map(d => {
-        if (d.discipline === type) {
-          // Don't allow toggling for Civil and Structural
-          if (type === 'Civil' || type === 'Structural') {
-            return d;
-          }
-          return { ...d, isActive: !d.isActive };
+      // Find the original total cost first
+      const totalCost = buildingTypeCosts.find(cost => 
+        cost.cost_type.toLowerCase() === 'total'
+      );
+
+      if (!totalCost) {
+        console.error('No total cost found for building type:', selectedBuildingType.id);
+        return;
+      }
+
+      // Calculate the original total cost per sqft
+      let originalTotalCostPerSqFt = totalCost.cost_per_sqft;
+      if (costIndex !== null) {
+        originalTotalCostPerSqFt = originalTotalCostPerSqFt * (costIndex / 100);
+      }
+      const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+      originalTotalCostPerSqFt = originalTotalCostPerSqFt * projectTypeIndex;
+
+      const disciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'] as const;
+      const disciplineCosts = disciplines.map(discipline => {
+        const cost = buildingTypeCosts.find(c => 
+          c.cost_type.toLowerCase() === discipline.toLowerCase()
+        );
+        
+        if (!cost) {
+          const defaultCost: ConstructionCost = {
+            id: crypto.randomUUID(),
+            discipline: discipline,
+            cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+            cost_per_sqft: 0,
+            year: new Date().getFullYear(),
+            building_type_id: selectedBuildingType.id,
+            is_active: discipline !== 'Civil' && discipline !== 'Structural',
+            total_construction_cost: 0
+          };
+          return defaultCost;
         }
-        return d;
-      })
-    );
+
+        let adjustedCostPerSqft = cost.cost_per_sqft;
+        if (costIndex !== null) {
+          adjustedCostPerSqft = adjustedCostPerSqft * (costIndex / 100);
+        }
+        const projectTypeIndex = (selected_project_construction_type?.relative_cost_index ?? 100) / 100;
+        adjustedCostPerSqft = adjustedCostPerSqft * projectTypeIndex;
+
+        const updatedCost: ConstructionCost = {
+          id: cost.id,
+          discipline: discipline,
+          cost_type: discipline as 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural' | 'Total',
+          year: new Date().getFullYear(),
+          building_type_id: selectedBuildingType.id,
+          is_active: discipline !== 'Civil' && discipline !== 'Structural',
+          cost_per_sqft: adjustedCostPerSqft,
+          total_construction_cost: adjustedCostPerSqft * newFloorArea
+        };
+        return updatedCost;
+      });
+
+      const construction_costs = disciplineCosts.reduce((acc: ConstructionCostsForSpace, cost: ConstructionCost) => ({
+        ...acc,
+        [cost.cost_type]: cost
+      }), {} as ConstructionCostsForSpace);
+
+      // Use the original total cost instead of recalculating
+      construction_costs.Total = {
+        id: crypto.randomUUID(),
+        discipline: 'Total',
+        cost_type: 'Total',
+        year: new Date().getFullYear(),
+        building_type_id: selectedBuildingType.id,
+        is_active: true,
+        cost_per_sqft: originalTotalCostPerSqFt,
+        total_construction_cost: originalTotalCostPerSqFt * newFloorArea
+      } as ConstructionCost;
+
+      setSpace((prev: Omit<Space, "id">) => ({
+        ...prev,
+        floor_area: newFloorArea,
+        construction_costs
+      }));
+
+      setTotalCostPerSqFt(originalTotalCostPerSqFt);
+      setTotalConstructionCost(originalTotalCostPerSqFt * newFloorArea);
+    } else {
+      setSpace((prev: Omit<Space, "id">) => ({ 
+        ...prev, 
+        floor_area: newFloorArea
+      }));
+    }
+  };
+
+  const handleDisciplineToggle = (discipline: string) => {
+    if (discipline === 'Civil' || discipline === 'Structural') return;
+    
+    setSpace(prev => {
+      const cost = prev.construction_costs[discipline as keyof ConstructionCostsForSpace];
+      if (!cost) return prev;
+
+      return {
+        ...prev,
+        construction_costs: {
+          ...prev.construction_costs,
+          [discipline]: {
+            ...cost,
+            is_active: !cost.is_active
+          }
+        }
+      };
+    });
   };
 
   // Update the space state when project construction type changes
@@ -728,8 +863,8 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
     setSelectedProjectConstructionType(type);
       setSpace(prev => ({
         ...prev,
-        projectConstructionType: type.project_type,
-        projectConstructionTypeId: type.id  // This is now a number
+        project_construction_type: type.project_type,
+        project_construction_type_id: type.id  // This is now a number
       }));
     }
   };
@@ -741,58 +876,33 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
       setSelectedBuildingType(type);
       setSpace(prev => ({
         ...prev,
-        buildingType: type.name,
-        buildingTypeId: type.id,
-        spaceType: type.space_type || '',
-        discipline: type.discipline || '',
-        hvacSystem: type.hvac_system || '',
-        floorArea: type.default_area || 0
+        building_type: type.name,
+        building_type_id: type.id,
+        space_type: type.space_type || '',
+        project_construction_type: 'New Construction',
+        project_construction_type_id: 1,
+        floor_area: type.default_area || 0
       }));
     }
   };
 
-  // Reset all state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      // Reset all state to initial values
-      setSelectedBuildingType(null);
-      setSelectedProjectConstructionType(null);
-      setSearchQuery('');
-      setConstructionTypeSearchQuery('');
-      setTotalConstructionCost(0);
-      setTotalCostPerSqFt(0);
-      setDisciplineConstructionCosts(() => {
-        const disciplines = ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'];
-        return disciplines.map(discipline => ({
-          id: crypto.randomUUID(),
-          discipline,
-          isActive: discipline !== 'Civil' && discipline !== 'Structural',
-          costPerSqft: 0,
-          totalConstructionCost: 0
-        }));
-      });
-      setSpace({
-        name: '',
-        description: '',
-        floorArea: 0,
-        buildingType: '',
-        buildingTypeId: '',
-        spaceType: '',
-        discipline: '',
-        hvacSystem: '',
-        projectConstructionType: 'New Construction',
-        projectConstructionTypeId: 1,
-        structureId: structureId,
-        levelId: levelId,
-        totalConstructionCosts: [],
-        totalCost: 0,
-        totalCostPerSqft: 0,
-        splitConstructionCosts: false,
-        engineeringServices: []
-      });
-      isInitializing.current = true;
-    }
-  }, [open, structureId, levelId]);
+  // Update the JSX where costs are displayed
+  const renderConstructionCosts = () => {
+    const displayCosts = getDisplayConstructionCosts();
+    return displayCosts.map(cost => (
+      <div key={cost.id} className="grid grid-cols-3 gap-4 py-1">
+        <div className="text-sm font-medium">
+          {cost.cost_type}
+        </div>
+        <div className="text-right text-sm text-muted-foreground">
+          ${cost.cost_per_sqft.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+        <div className="text-right text-sm font-medium">
+          ${(cost.total_construction_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+      </div>
+    ));
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -890,8 +1000,8 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                     aria-expanded={openProjectConstructionType}
                     className="w-full justify-between"
                   >
-                  {selectedProjectConstructionType
-                    ? selectedProjectConstructionType.project_type
+                  {selected_project_construction_type
+                    ? selected_project_construction_type.project_type
                     : "Select a construction type..."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -929,7 +1039,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                           <Check
                             className={cn(
                                   "h-4 w-4",
-                              selectedProjectConstructionType?.id === type.id ? "opacity-100" : "opacity-0"
+                              selected_project_construction_type?.id === type.id ? "opacity-100" : "opacity-0"
                             )}
                           />
                               <span className="font-medium">{type.project_type}</span>
@@ -955,7 +1065,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
               type="number"
               min="0"
               step="1"
-              value={space.floorArea}
+              value={space.floor_area}
               onChange={handleFloorAreaChange}
               className="w-full"
             />
@@ -971,15 +1081,23 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
                 <div className="font-medium text-right text-muted-foreground">Total Cost</div>
               </div>
               <div className="space-y-1">
-                {getDisplayConstructionCosts()
-                  .filter(cost => ['Mechanical', 'Plumbing', 'Electrical', 'Civil', 'Structural'].includes(cost.discipline))
-                  .map((cost) => (
+                {(() => {
+                  const displayCosts = getDisplayConstructionCosts();
+                  console.log('Rendering display costs:', displayCosts);
+                  return displayCosts.map(cost => (
                     <div key={cost.id} className="grid grid-cols-3 gap-4 py-1">
-                      <div className="font-medium">{cost.discipline}</div>
-                      <div className="text-right">{formatCurrency(cost.costPerSqft)}</div>
-                      <div className="text-right">{formatCurrency(cost.totalConstructionCost)}</div>
-            </div>
-                  ))}
+                      <div className="text-sm font-medium">
+                        {cost.cost_type}
+                      </div>
+                      <div className="text-right text-sm text-muted-foreground">
+                        ${cost.cost_per_sqft.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-right text-sm font-medium">
+                        ${(cost.total_construction_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
               <div className="border-t mt-2 pt-2">
                 <div className="grid grid-cols-3 gap-4">
@@ -997,7 +1115,7 @@ export function SpaceDialog({ open, onOpenChange, onSave, defaultValues, costInd
           </Button>
           <Button 
             onClick={handleSave} 
-            disabled={!selectedBuildingType || !selectedProjectConstructionType || space.floorArea <= 0}
+            disabled={!selectedBuildingType || !selected_project_construction_type || space.floor_area <= 0}
           >
             {initialSpace ? 'Update Space' : 'Add Space'}
           </Button>
