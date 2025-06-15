@@ -14,7 +14,8 @@ import type {
   fee_item,
   engineering_standard_service,
   ConstructionCost,
-  ConstructionCostsForSpace
+  ConstructionCostsForSpace,
+  FeeScale
 } from '@/types/proposal/base';
 import type { tracked_service } from '@/types/proposal/service';
 
@@ -83,6 +84,7 @@ export interface ProposalState {
     services: boolean;
     calculations: boolean;
   };
+  currentProposalId: string | null;
   setProposal: (proposal: proposal) => void;
   updateStatus: (newStatus: proposal_status_code) => Promise<void>;
   fetchStatuses: () => Promise<void>;
@@ -105,6 +107,7 @@ export interface ProposalState {
     created_at: string;
     updated_at: string;
   }) => void;
+  updateCostIndex: (costIndex: number) => void;
 }
 
 type ProposalStore = StateCreator<ProposalState>;
@@ -131,6 +134,39 @@ const defaultProjectData = {
   disciplines: [],
   services: [],
   tracked_services: []
+};
+
+// Helper function to get the appropriate fee scale based on construction cost
+const getFeeScale = async (constructionCost: number): Promise<FeeScale | null> => {
+  try {
+    const response = await fetch('/api/design-fee-scale');
+    if (!response.ok) {
+      console.error('Failed to fetch fee scales');
+      return null;
+    }
+    const feeScales: FeeScale[] = await response.json();
+    
+    // Sort by construction cost and find the first scale that's greater than or equal to the cost
+    const sortedScales = feeScales.sort((a, b) => a.construction_cost - b.construction_cost);
+    const appropriateScale = sortedScales.find(scale => scale.construction_cost >= constructionCost);
+    
+    // If no scale is found that's greater than the cost, use the highest scale
+    return appropriateScale || sortedScales[sortedScales.length - 1] || null;
+  } catch (error) {
+    console.error('Error fetching fee scale:', error);
+    return null;
+  }
+};
+
+// Helper function to calculate total construction cost for a structure
+const calculateStructureTotal = (structure: Structure): number => {
+  return structure.levels.reduce((total, level) => 
+    total + level.spaces.reduce((levelTotal, space) => {
+      const totalCost = space.construction_costs.Total;
+      return levelTotal + (totalCost && totalCost.is_active && typeof totalCost.cost_per_sqft === 'number'
+        ? totalCost.cost_per_sqft * (space.floor_area || 0)
+        : 0);
+    }, 0), 0);
 };
 
 export const useProposalStore = create<ProposalState>((set, get) => ({
@@ -190,6 +226,7 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
     services: false,
     calculations: false
   },
+  currentProposalId: null,
   setProposal: (proposal: proposal) => {
     set(state => ({ 
       loadingStates: {
@@ -205,7 +242,7 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
       const projectData = proposal.project_data || defaultProjectData;
 
       const structures = Array.isArray(projectData.structures) 
-        ? projectData.structures.map(structure => ({
+        ? projectData.structures.map((structure: Structure) => ({
             ...structure,
             levels: Array.isArray(structure.levels) ? structure.levels : [],
             is_duplicate: !!structure.is_duplicate,
@@ -343,62 +380,108 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
     } : null
   })),
   
-  updateStructure: (structureId: string, updates: Partial<Structure>) => set(state => {
-    // First update the parent structure
-    const updatedStructures = state.structures.map(structure => {
-      if (structure.id === structureId) {
-        return { ...structure, ...updates };
-      }
-      // If this is a duplicate of the updated structure, update it too
-      if (structure.duplicate_parent_id === structureId) {
-        // Only update specific fields that should be synced with parent
-        const duplicateUpdates = {
-          ...updates,
-          // Preserve duplicate-specific fields
-          id: structure.id,
-          // Update name to match parent but keep duplicate number
-          name: updates.name ? `${updates.name} (Duplicate ${structure.duplicate_number})` : structure.name,
-          parent_id: structure.parent_id,
-          is_duplicate: structure.is_duplicate,
-          duplicate_number: structure.duplicate_number,
-          duplicate_parent_id: structure.duplicate_parent_id,
-          duplicate_rate: structure.duplicate_rate,
-          // Update levels to match parent's structure but keep duplicate's IDs
-          levels: updates.levels ? updates.levels.map((parentLevel, index) => {
-            const duplicateLevel = structure.levels[index];
-            if (!duplicateLevel) return parentLevel;
-            return {
-              ...parentLevel,
-              id: duplicateLevel.id,
-              spaces: parentLevel.spaces.map((parentSpace, spaceIndex) => {
-                const duplicateSpace = duplicateLevel.spaces[spaceIndex];
-                if (!duplicateSpace) return parentSpace;
-                return {
-                  ...parentSpace,
-                  id: duplicateSpace.id,
-                  // Preserve construction costs but update other fields
-                  construction_costs: duplicateSpace.construction_costs
-                };
-              })
-            };
-          }) : structure.levels
-        };
-        return { ...structure, ...duplicateUpdates };
-      }
-      return structure;
+  updateStructure: async (structureId: string, updates: Partial<Structure>) => {
+    console.log('Store: updateStructure called', {
+      structureId,
+      updates,
+      currentStructuresCount: get().structures.length,
+      willUpdateFixedFees: true
     });
 
-    return {
-      structures: updatedStructures,
-      proposal: state.proposal ? {
-        ...state.proposal,
-        project_data: {
-          ...state.proposal.project_data,
-          structures: updatedStructures
+    // Get current state
+    const state = get();
+    const currentStructure = state.structures.find(s => s.id === structureId);
+    if (!currentStructure) {
+      console.error('Structure not found:', structureId);
+      return;
+    }
+
+    // Calculate new total construction cost if it's not in updates
+    const newTotalCost = updates.total_construction_cost ?? 
+      calculateStructureTotal({ ...currentStructure, ...updates });
+
+    // Get new fee scale if total cost changed
+    let newFeeScale = currentStructure.fee_scale;
+    if (newTotalCost !== currentStructure.total_construction_cost) {
+      newFeeScale = await getFeeScale(newTotalCost) || currentStructure.fee_scale;
+      console.log('Store: Updating structure fee scale', {
+        structureId,
+        oldTotalCost: currentStructure.total_construction_cost,
+        newTotalCost,
+        oldFeeScale: currentStructure.fee_scale,
+        newFeeScale
+      });
+    }
+
+    set(state => {
+      // First update the parent structure
+      const updatedStructures = state.structures.map(structure => {
+        if (structure.id === structureId) {
+          return { 
+            ...structure, 
+            ...updates,
+            total_construction_cost: newTotalCost,
+            fee_scale: newFeeScale
+          };
         }
-      } : null
-    };
-  }),
+        // If this is a duplicate of the updated structure, update it too
+        if (structure.duplicate_parent_id === structureId) {
+          // Only update specific fields that should be synced with parent
+          const duplicateUpdates = {
+            ...updates,
+            // Preserve duplicate-specific fields
+            id: structure.id,
+            // Update name to match parent but keep duplicate number
+            name: updates.name ? `${updates.name} (Duplicate ${structure.duplicate_number})` : structure.name,
+            parent_id: structure.parent_id,
+            is_duplicate: structure.is_duplicate,
+            duplicate_number: structure.duplicate_number,
+            duplicate_parent_id: structure.duplicate_parent_id,
+            duplicate_rate: structure.duplicate_rate,
+            // Update fee scale to match parent
+            fee_scale: newFeeScale,
+            // Update levels to match parent's structure but keep duplicate's IDs
+            levels: updates.levels ? updates.levels.map((parentLevel, index) => {
+              const duplicateLevel = structure.levels[index];
+              if (!duplicateLevel) return parentLevel;
+              return {
+                ...parentLevel,
+                id: duplicateLevel.id,
+                spaces: parentLevel.spaces.map((parentSpace, spaceIndex) => {
+                  const duplicateSpace = duplicateLevel.spaces[spaceIndex];
+                  if (!duplicateSpace) return parentSpace;
+                  return {
+                    ...parentSpace,
+                    id: duplicateSpace.id,
+                    // Preserve construction costs but update other fields
+                    construction_costs: duplicateSpace.construction_costs
+                  };
+                })
+              };
+            }) : structure.levels
+          };
+          return { ...structure, ...duplicateUpdates };
+        }
+        return structure;
+      });
+
+      console.log('Store: updateStructure completed', {
+        newStructuresCount: updatedStructures.length,
+        shouldTriggerFixedFeesRender: true
+      });
+
+      return {
+        structures: updatedStructures,
+        proposal: state.proposal ? {
+          ...state.proposal,
+          project_data: {
+            ...state.proposal.project_data,
+            structures: updatedStructures
+          }
+        } : null
+      };
+    });
+  },
   
   updateSpace: (structureId: string, levelId: string, spaceId: string, updates: Partial<Space>) => set(state => {
     console.log('=== proposalStore.updateSpace called ===');
@@ -822,12 +905,32 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
   
   loadProposal: async (proposalId: string) => {
     const state = get();
+    console.log('loadProposal: Starting to load proposal...', { 
+      proposalId, 
+      currentProposalId: state.currentProposalId,
+      currentState: { 
+        hasProposal: !!state.proposal,
+        proposalId: state.proposal?.id,
+        hasStructures: !!state.structures.length,
+        isLoading: state.isLoading,
+        loadingStates: state.loadingStates
+      } 
+    });
+    
+    // If we're already loading this proposal, don't start another load
+    if (state.loadingStates.proposal && state.currentProposalId === proposalId) {
+      console.log('loadProposal: Already loading this proposal, skipping');
+      return;
+    }
+
+    // Set loading state
     set(state => ({ 
       loadingStates: {
         ...state.loadingStates,
         proposal: true
       },
-      error: null 
+      error: null,
+      currentProposalId: proposalId
     }));
 
     try {
@@ -845,17 +948,101 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
       }
       
       const proposal = await response.json();
+      console.log('loadProposal: Received proposal data:', { 
+        proposalId: proposal.id,
+        hasProjectData: !!proposal.project_data,
+        hasStructures: !!proposal.project_data?.structures,
+        structureCount: proposal.project_data?.structures?.length
+      });
+
+      // Initialize project_data if it doesn't exist
+      const projectData = proposal.project_data || defaultProjectData;
       
-      get().setProposal(proposal);
-      
+      // Initialize structures from project data
+      const structures = Array.isArray(projectData.structures) 
+        ? projectData.structures.map((structure: Structure) => ({
+            ...structure,
+            levels: Array.isArray(structure.levels) ? structure.levels : [],
+            is_duplicate: !!structure.is_duplicate,
+            duplicate_number: structure.duplicate_number || null,
+            duplicate_parent_id: structure.duplicate_parent_id || null,
+            duplicate_rate: structure.duplicate_rate || 1
+          }))
+        : [];
+
+      // Initialize tracked services
+      const trackedServices = (projectData.tracked_services || []).reduce((acc: Record<string, tracked_service[]>, service: tracked_service) => {
+        const structureId = service.structure_id || 'unassigned';
+        if (!acc[structureId]) {
+          acc[structureId] = [];
+        }
+        acc[structureId].push({
+          ...service,
+          is_included: service.is_included ?? service.is_default_included ?? false,
+          custom_fee: service.custom_fee ?? null,
+          estimated_fee: service.estimated_fee ?? null,
+          is_active: service.is_active ?? true
+        });
+        return acc;
+      }, {});
+
+      console.log('loadProposal: Setting final state:', {
+        hasProposal: true,
+        proposalId: proposal.id,
+        hasStructures: structures.length > 0,
+        structureCount: structures.length,
+        hasProjectData: true,
+        hasCalculations: true,
+        costIndex: projectData.cost_index
+      });
+
+      // Update state
+      set({
+        proposal: {
+          ...proposal,
+          project_data: {
+            ...projectData,
+            structures,
+            cost_index: projectData.cost_index ?? null,
+            calculations: {
+              ...projectData.calculations,
+              design: {
+                ...projectData.calculations?.design,
+                parameters: {
+                  ...projectData.calculations?.design?.parameters,
+                  cost_index: projectData.cost_index ?? null
+                }
+              },
+              construction: {
+                ...projectData.calculations?.construction,
+                parameters: {
+                  ...projectData.calculations?.construction?.parameters,
+                  cost_index: projectData.cost_index ?? null
+                }
+              }
+            }
+          }
+        },
+        structures,
+        trackedServices,
+        currentProposalId: proposalId,
+        loadingStates: {
+          proposal: false,
+          structures: false,
+          services: false,
+          calculations: false
+        },
+        error: null
+      });
     } catch (error) {
-      console.error('Error loading proposal:', error);
+      console.error('loadProposal: Error loading proposal:', error);
       set(state => ({
         loadingStates: {
           ...state.loadingStates,
           proposal: false
         },
-        error: error instanceof Error ? error.message : 'Failed to load proposal'
+        error: error instanceof Error ? error.message : 'Failed to load proposal',
+        currentProposalId: null
       }));
     }
   },
@@ -953,7 +1140,8 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
       structures: false,
       services: false,
       calculations: false
-    }
+    },
+    currentProposalId: null
   }),
   
   setTrackedServices: (structureId: string, services: tracked_service[]) => set(state => ({
@@ -1002,4 +1190,56 @@ export const useProposalStore = create<ProposalState>((set, get) => ({
       client_contacts: state.project?.client_contacts || []
     }
   })),
+
+  // Add new function to update just the cost index
+  updateCostIndex: (costIndex: number) => set(state => {
+    if (!state.proposal) return state;
+
+    // Update both project_data and calculations in a single state update
+    const updatedProjectData = {
+      ...state.proposal.project_data,
+      cost_index: costIndex,
+      calculations: {
+        ...state.proposal.project_data.calculations,
+        design: {
+          ...state.proposal.project_data.calculations.design,
+          parameters: {
+            ...state.proposal.project_data.calculations.design.parameters,
+            cost_index: costIndex
+          }
+        },
+        construction: {
+          ...state.proposal.project_data.calculations.construction,
+          parameters: {
+            ...state.proposal.project_data.calculations.construction.parameters,
+            cost_index: costIndex
+          }
+        }
+      }
+    };
+
+    return {
+      proposal: {
+        ...state.proposal,
+        project_data: updatedProjectData
+      },
+      calculations: {
+        ...state.calculations,
+        design: {
+          ...state.calculations.design,
+          parameters: {
+            ...state.calculations.design.parameters,
+            cost_index: costIndex
+          }
+        },
+        construction: {
+          ...state.calculations.construction,
+          parameters: {
+            ...state.calculations.construction.parameters,
+            cost_index: costIndex
+          }
+        }
+      }
+    };
+  }),
 })); 

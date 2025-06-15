@@ -1,529 +1,396 @@
 "use client";
 
-import { FC, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Building2, Layers, Home, ChevronDown, ChevronRight, Check, RotateCcw, ChevronUp, ChevronDown as ChevronDownIcon, Copy, Printer, X, Plus, Trash2, Settings2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import { formatCurrency as formatCurrencyUtil } from '@/lib/formatters';
-import type { tracked_service as TrackedService } from '@/types/proposal/service';
-import type { 
-  Structure,
-  Level,
-  Space,
-  ConstructionCost,
-  base_fee as Fee,
-  FeeScale,
-  DisciplineEngineeringFees,
-  EngineeringFee,
-  ConstructionCostsForSpace
-} from '@/types/proposal/base';
-import type { ProjectSummary, TrackedServices } from '@/types/proposal/shared';
-import { useProposalStore } from "@/store/proposal";
-import type { ProposalState } from '@/store/proposal';
+import React, { useEffect, useState } from 'react';
+import { Building2, Layers, Home } from 'lucide-react';
+import { useProposalStore } from '@/store/proposal';
+import type { Structure, Level, Space, FeeScale, base_fee } from '@/types/proposal/base';
+import { DISCIPLINES, type DisciplineKey } from '@/types/proposal/base';
+import type { tracked_service } from '@/types/proposal/service';
 
-// Define the fee scale result type
-type FeeScaleResult = {
-  type: 'success';
-  adjusted_rate: number;
-} | {
-  type: 'error';
-};
+// Define TrackedServices type
+type TrackedServices = Record<string, tracked_service[]>;
 
-interface ManualFeesState {
-  [key: string]: boolean;
+// Define FeeDuplicateStructure type
+interface FeeDuplicateStructure {
+  structure_id: string;
+  duplicate_number: number;
+  rate: number;
 }
 
-interface EditingFeesState {
-  [key: string]: EditingFee;
-}
-
-type TrackedServicesMap = Record<string, TrackedService[]>;
-
-// Update EditingFee interface
-interface EditingFee {
-  original: number;
-  current: number;
-  is_manual: boolean;
-  original_fee: ConstructionCost | EngineeringFee;
-}
-
-// Define service_fee_calculation type
-type ServiceFeeCalculation = {
-  calculated_fee: number;
-  custom_fee?: number;
-  final_fee: number;
-};
-
-// Update FixedFeesProps to only include what's needed from props
 interface FixedFeesProps {
-  cost_index: number | null;
+  structures: Structure[];
+  phase: 'design' | 'construction';
+  on_structures_change: (structures: Structure[]) => void;
+  tracked_services: TrackedServices;
+  has_construction_admin_services: boolean;
+  duplicate_structure_rates: FeeDuplicateStructure[];
+  construction_costs: Record<string, Record<string, number>>;
+  on_fee_update: (structure_id: string, level_id: string, space_id: string, fee_id: string, updates: Partial<base_fee>, phase: 'design' | 'construction') => void;
+  on_service_fee_update?: (service_id: string, discipline: string, fee: number, phase: 'design' | 'construction') => void;
+  on_discipline_fee_toggle?: (structure_id: string, level_id: string, space_id: string, discipline: string, is_active: boolean) => void;
 }
 
-export function FixedFees({ cost_index }: { cost_index?: number }) {
-  const store = useProposalStore();
-  const structures = store.structures;
-  const trackedServices = store.trackedServices;
-  const { updateStructure, setTrackedServices } = store;
+export function FixedFees({ phase, on_structures_change, tracked_services, has_construction_admin_services, duplicate_structure_rates, construction_costs, on_fee_update, on_service_fee_update, on_discipline_fee_toggle }: Omit<FixedFeesProps, 'structures'>) {
+  console.log('FixedFees: Component mounted');
+  const { structures } = useProposalStore();
+  const [visibleDisciplines, setVisibleDisciplines] = useState<DisciplineKey[]>(['Architectural', 'Mechanical', 'Plumbing', 'Electrical', 'Structural']);
+  const [feeScales, setFeeScales] = useState<FeeScale[]>([]);
+  const [isLoadingFeeScales, setIsLoadingFeeScales] = useState(false);
+  const [feeScaleError, setFeeScaleError] = useState<string | null>(null);
 
-  console.log('FixedFees: Component rendered with props:', {
-    structuresCount: structures?.length,
-    structures: structures?.map(s => ({
-      id: s.id,
-      name: s.name,
-      levels: s.levels?.map(l => ({
-        id: l.id,
-        name: l.name,
-        spacesCount: l.spaces?.length,
-        spaces: l.spaces?.map(sp => ({
-          id: sp.id,
-          name: sp.name,
-          floor_area: sp.floor_area,
-          feesCount: sp.discipline_engineering_fees?.length,
-          fees: sp.discipline_engineering_fees?.map(f => ({
-            discipline: f.discipline,
-            engineering_fees: f.engineering_fees?.length
-          }))
-        }))
-      }))
-    })),
-    tracked_services: trackedServices
-  });
-
-  const [is_summary_open, setIsSummaryOpen] = useState(true);
-  const [fee_scale, setFeeScale] = useState<FeeScale[]>([]);
-  const is_initializing = useRef(true);
-  const [manual_fees, setManualFees] = useState<ManualFeesState>({});
-  const [editing_fees, setEditingFees] = useState<EditingFeesState>({});
-  const [service_input_values, setServiceInputValues] = useState<Record<string, string>>({});
-
-  // Helper function to check if a fee is a construction cost
-  const isConstructionCost = useCallback((fee: ConstructionCost | EngineeringFee): fee is ConstructionCost => {
-    return 'cost_per_sqft' in fee;
-  }, []);
-
-  // Helper function to check if a fee is an engineering fee
-  const isEngineeringFee = useCallback((fee: ConstructionCost | EngineeringFee): fee is EngineeringFee => {
-    return 'fee_amount' in fee;
-  }, []);
-
-  // Update the component to use DisciplineEngineeringFees
-  const getTotalConstructionCostForDiscipline = useCallback((structure: Structure, discipline: string): number => {
-    return structure.levels.reduce((total, level) => {
-      return total + level.spaces.reduce((spaceTotal, space) => {
-        const disciplineCost = space.construction_costs[discipline as keyof ConstructionCostsForSpace];
-        if (!disciplineCost) return spaceTotal;
-        return spaceTotal + (disciplineCost.is_active ? disciplineCost.cost_per_sqft * space.floor_area : 0);
-      }, 0);
-    }, 0);
-  }, []);
-
-  // Update the component to use EngineeringFee
-  const getTotalDesignFeeForDiscipline = useCallback((structure: Structure, discipline: string): number => {
-    return structure.levels.reduce((total, level) => {
-      return total + level.spaces.reduce((spaceTotal, space) => {
-        const disciplineFees = space.discipline_engineering_fees.find(
-          (f) => f.discipline === discipline && f.is_active
-        );
-        if (!disciplineFees) return spaceTotal;
-
-        return spaceTotal + disciplineFees.engineering_fees.reduce((feeTotal, fee) => {
-          return feeTotal + (fee.is_active ? fee.fee_amount : 0);
-        }, 0);
-      }, 0);
-    }, 0);
-  }, []);
-
-  // Update handleFeeUpdate to use updateStructure
-  const handleFeeUpdate = useCallback((structure: Structure, discipline: string, fee: EngineeringFee | ConstructionCost) => {
-    console.log('FixedFees: handleFeeUpdate called:', {
-      structureId: structure.id,
-      discipline,
-      fee
+  // Log component render and props
+  useEffect(() => {
+    console.log('FixedFees: Component mounted/updated', {
+      structuresCount: structures?.length ?? 0,
+      visibleDisciplines,
+      hasStructures: !!structures,
+      isArray: Array.isArray(structures),
+      phase
     });
+  }, [structures, visibleDisciplines, phase]);
 
-    // Create a deep copy of the structure to update
-    const updatedStructure = {
-      ...structure,
-      levels: structure.levels.map(level => ({
-        ...level,
-        spaces: level.spaces.map(space => {
-          if (isConstructionCost(fee)) {
-            // Update construction cost
-            return {
-              ...space,
-              construction_costs: {
-                ...space.construction_costs,
-                [discipline]: {
-                  ...space.construction_costs[discipline as keyof ConstructionCostsForSpace],
-                  ...fee
-                }
-              }
-            };
-          } else {
-            // Update engineering fee
-            return {
-              ...space,
-              discipline_engineering_fees: space.discipline_engineering_fees.map(fees => {
-                if (fees.discipline !== discipline) return fees;
-                return {
-                  ...fees,
-                  engineering_fees: fees.engineering_fees.map(f => 
-                    f.id === fee.id ? { ...f, ...fee } : f
-                  )
-                };
-              })
-            };
-          }
-        })
-      }))
-    };
-
-    // Use updateStructure instead of setStructures
-    updateStructure(structure.id, updatedStructure);
-  }, [updateStructure]); // Only depend on updateStructure
-
-  // Then declare handleFeeChange which uses handleFeeUpdate
-  const handleFeeChange = useCallback((structureId: string, levelId: string, spaceId: string, feeId: string, discipline: string, value: string) => {
-    console.log('FixedFees: handleFeeChange called:', {
-      structureId,
-      levelId,
-      spaceId,
-      feeId,
-      discipline,
-      value
-    });
-
-    const numValue = parseFloat(value);
-    if (isNaN(numValue)) return;
-
-    const structure = structures.find(s => s.id === structureId);
-    if (!structure) {
-      console.log('FixedFees: Structure not found:', structureId);
-      return;
-    }
-
-    const level = structure.levels.find(l => l.id === levelId);
-    if (!level) {
-      console.log('FixedFees: Level not found:', levelId);
-      return;
-    }
-
-    const space = level.spaces.find(s => s.id === spaceId);
-    if (!space) {
-      console.log('FixedFees: Space not found:', spaceId);
-      return;
-    }
-
-    // Check if this is a construction cost
-    const disciplineCost = space.construction_costs[discipline as keyof ConstructionCostsForSpace];
-    if (disciplineCost && disciplineCost.id === feeId) {
-      handleFeeUpdate(structure, discipline, {
-        ...disciplineCost,
-        cost_per_sqft: numValue
-      });
-      return;
-    }
-
-    // Check if this is an engineering fee
-    const disciplineFees = space.discipline_engineering_fees.find(f => f.discipline === discipline);
-    if (!disciplineFees) {
-      console.log('FixedFees: Discipline fees not found:', discipline);
-      return;
-    }
-
-    const fee = disciplineFees.engineering_fees.find(f => f.id === feeId);
-    if (!fee) {
-      console.log('FixedFees: Fee not found:', feeId);
-      return;
-    }
-
-    handleFeeUpdate(structure, discipline, {
-      ...fee,
-      fee_amount: numValue
-    });
-  }, [structures, handleFeeUpdate]);
-
-  // Update handleDisciplineFeeToggle to use updateStructure
-  const handleDisciplineFeeToggle = useCallback((structure: Structure, discipline: string, isActive: boolean) => {
-    console.log('FixedFees: handleDisciplineFeeToggle called:', {
-      structureId: structure.id,
-      discipline,
-      isActive
-    });
-
-    // Create a deep copy of the structure to update
-    const updatedStructure = {
-      ...structure,
-      levels: structure.levels.map(level => ({
-        ...level,
-        spaces: level.spaces.map(space => {
-          // Update discipline engineering fees
-          const updatedDisciplineFees = space.discipline_engineering_fees.map(df => {
-            if (df.discipline !== discipline) return df;
-            return {
-              ...df,
-              is_active: isActive,
-              engineering_fees: df.engineering_fees.map(fee => ({
-                ...fee,
-                is_active: isActive
-              }))
-            };
-          });
-
-          // Update construction costs
-          const updatedConstructionCosts = {
-            ...space.construction_costs,
-            [discipline]: space.construction_costs[discipline as keyof ConstructionCostsForSpace] ? {
-              ...space.construction_costs[discipline as keyof ConstructionCostsForSpace],
-              is_active: isActive
-            } : undefined
-          };
-
-          return {
-            ...space,
-            discipline_engineering_fees: updatedDisciplineFees,
-            construction_costs: updatedConstructionCosts
-          };
-        })
-      }))
-    };
-
-    // Use updateStructure instead of setStructures
-    updateStructure(structure.id, updatedStructure);
-  }, [updateStructure]); // Only depend on updateStructure
-
-  // Update the useEffect for fee scales to only run once
+  // Fetch fee scales on component mount
   useEffect(() => {
     const fetchFeeScales = async () => {
       try {
-        const response = await fetch('/api/design-fee-scale');
+        setIsLoadingFeeScales(true);
+        const response = await fetch('/api/design-fee-scale', {
+          method: 'GET',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
+        
         if (!response.ok) {
-          throw new Error('Failed to fetch fee scale data');
+          throw new Error('Failed to fetch design fee scales');
         }
-        const feeScales: FeeScale[] = await response.json();
-        setFeeScale(feeScales);
-        is_initializing.current = false;
-      } catch (error) {
-        console.error('Error fetching fee scales:', error);
+
+        const data = await response.json();
+        console.log('FixedFees: Fetched fee scales:', data);
+        setFeeScales(data);
+      } catch (err) {
+        console.error('FixedFees: Error fetching fee scales:', err);
+        setFeeScaleError(err instanceof Error ? err.message : 'Failed to load fee scales');
+      } finally {
+        setIsLoadingFeeScales(false);
       }
     };
 
     fetchFeeScales();
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
-  // Add logging to renderStructure
-  const renderStructure = (structure: Structure) => {
-    console.log('FixedFees: Rendering structure with summary state:', {
-      id: structure.id,
-      name: structure.name,
-      is_summary_open,
-      levelsCount: structure.levels?.length
-    });
-
-    if (!structure.levels?.length) {
-      console.log('FixedFees: Structure has no levels:', structure.id);
-      return null;
-    }
-
-    return (
-      <div key={structure.id} className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-lg font-semibold">{structure.name}</h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              console.log('FixedFees: Toggling structure visibility:', {
-                structureId: structure.id,
-                currentState: is_summary_open,
-                levelsCount: structure.levels?.length
-              });
-              setIsSummaryOpen(!is_summary_open);
-            }}
-          >
-            {is_summary_open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </Button>
-        </div>
-        {is_summary_open && structure.levels && (
-          <div className="pl-4 space-y-4">
-            {structure.levels.map(level => {
-              console.log('FixedFees: Attempting to render level:', {
-                structureId: structure.id,
-                levelId: level.id,
-                spacesCount: level.spaces?.length
-              });
-              return renderLevel(structure, level);
-            })}
-          </div>
-        )}
-      </div>
-    );
+  // Add helper function
+  const calculateSpaceTotalCost = (space: Space): number => {
+    const totalCost = space.construction_costs.Total;
+    return totalCost && totalCost.is_active && typeof totalCost.cost_per_sqft === 'number'
+      ? totalCost.cost_per_sqft * (space.floor_area || 0)
+      : 0;
   };
 
-  // Add logging to renderLevel
-  const renderLevel = (structure: Structure, level: Level) => {
-    console.log('FixedFees: Rendering level:', {
+  // Helper function to calculate fees for a discipline in a space
+  const calculateDisciplineFees = (space: Space, discipline: DisciplineKey): number => {
+    console.log('Starting fee calculation for discipline:', {
+      discipline,
+      spaceId: space.id,
+      structureId: space.structure_id
+    });
+
+    // Find the structure this space belongs to
+    const structure = structures.find(s => s.id === space.structure_id);
+    if (!structure) {
+      console.warn('FixedFees: Structure not found for space', {
+        spaceId: space.id,
+        structureId: space.structure_id,
+        availableStructureIds: structures.map(s => s.id)
+      });
+      return 0;
+    }
+
+    // Verify we have a valid fee scale
+    if (!structure.fee_scale || !structure.fee_scale.id) {
+      console.warn('FixedFees: No valid fee scale found for structure', {
+        structureId: structure.id,
+        structureName: structure.name,
+        totalCost: structure.total_construction_cost,
+        hasFeeScale: !!structure.fee_scale,
+        feeScaleId: structure.fee_scale?.id
+      });
+      return 0;
+    }
+
+    console.log('Found structure with valid fee scale:', {
       structureId: structure.id,
-      levelId: level.id,
-      name: level.name,
-      spacesCount: level.spaces?.length,
-      spaces: level.spaces?.map(s => ({
+      structureName: structure.name,
+      feeScaleId: structure.fee_scale.id,
+      totalCost: structure.total_construction_cost
+    });
+
+    // Get or initialize discipline fees
+    let disciplineFees = space.discipline_engineering_fees.find(df => df.discipline === discipline);
+    if (!disciplineFees) {
+      console.log('Creating new discipline fees entry for:', discipline);
+      disciplineFees = {
+        discipline,
+        fees: []
+      };
+      space.discipline_engineering_fees.push(disciplineFees);
+    }
+
+    // Calculate fees based on the structure's fee scale
+    const totalCost = calculateSpaceTotalCost(space);
+    const floorArea = space.floor_area || 0;
+
+    // Get the appropriate rate from the fee scale
+    let rate = 0;
+    switch (discipline.toLowerCase()) {
+      case 'mechanical':
+        rate = structure.fee_scale.fraction_of_prime_rate_mechanical;
+        break;
+      case 'plumbing':
+        rate = structure.fee_scale.fraction_of_prime_rate_plumbing;
+        break;
+      case 'electrical':
+        rate = structure.fee_scale.fraction_of_prime_rate_electrical;
+        break;
+      case 'structural':
+        rate = structure.fee_scale.fraction_of_prime_rate_structural;
+        break;
+      default:
+        console.warn('FixedFees: Unknown discipline for fee calculation:', discipline);
+        return 0;
+    }
+
+    console.log('Calculating fees with fee scale:', {
+      discipline,
+      spaceId: space.id,
+      totalCost,
+      floorArea,
+      rate,
+      feeScaleId: structure.fee_scale.id
+    });
+
+    // Calculate the fee based on the discipline's rate from the fee scale
+    const fee = totalCost * (rate / 100);
+    return fee;
+  };
+
+  // Helper function to get discipline rate from fee scale
+  const getDisciplineRate = (discipline: DisciplineKey, feeScale: FeeScale): number => {
+    switch (discipline) {
+      case 'Architectural':
+        return feeScale.prime_consultant_rate;
+      case 'Mechanical':
+        return feeScale.prime_consultant_rate * feeScale.fraction_of_prime_rate_mechanical;
+      case 'Plumbing':
+        return feeScale.prime_consultant_rate * feeScale.fraction_of_prime_rate_plumbing;
+      case 'Electrical':
+        return feeScale.prime_consultant_rate * feeScale.fraction_of_prime_rate_electrical;
+      case 'Structural':
+        return feeScale.prime_consultant_rate * feeScale.fraction_of_prime_rate_structural;
+      default:
+        return 0;
+    }
+  };
+
+  // Add logging for component renders and structure data
+  useEffect(() => {
+    console.log('FixedFees: Component rendered', {
+      structuresCount: structures.length,
+      visibleDisciplines: visibleDisciplines.map(d => ({
+        key: d,
+        name: DISCIPLINES[d].name,
+        is_active: DISCIPLINES[d].is_active
+      })),
+      structures: structures.map(s => ({
         id: s.id,
         name: s.name,
-        feesCount: s.discipline_engineering_fees?.length
+        levelsCount: s.levels.length,
+        levels: s.levels.map(l => ({
+          id: l.id,
+          number: l.level_number,
+          spacesCount: l.spaces.length
+        }))
       }))
     });
+  }, [structures, visibleDisciplines]);
 
-    if (!level.spaces?.length) {
-      console.log('FixedFees: Level has no spaces:', {
-        structureId: structure.id,
-        levelId: level.id
-      });
-      return null;
+  // Add logging for fee scales - only when we have valid structures
+  useEffect(() => {
+    // Skip logging if structures is not yet available
+    if (!structures || !Array.isArray(structures) || structures.length === 0) {
+      return;
     }
 
-    return (
-      <div key={level.id} className="mb-4">
-        <h4 className="text-md font-medium mb-2">{level.name}</h4>
-        <div className="pl-4 space-y-4">
-          {level.spaces.map(space => {
-            console.log('FixedFees: Attempting to render space:', {
-              structureId: structure.id,
-              levelId: level.id,
-              spaceId: space.id,
-              name: space.name,
-              feesCount: space.discipline_engineering_fees?.length
-            });
-            return renderSpace(structure, level, space);
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const renderSpace = (structure: Structure, level: Level, space: Space) => {
-    console.log('FixedFees: Rendering space:', {
-      structureId: structure.id,
-      levelId: level.id,
-      spaceId: space.id,
-      name: space.name,
-      
+    console.group('Fee Scale Verification');
+    console.log('Verifying fee scales for structures:', {
+      totalStructures: structures.length,
+      timestamp: new Date().toISOString()
     });
 
-    return (
-      <div key={space.id} className="mb-4">
-        <h5 className="text-sm font-medium mb-2">{space.name}</h5>
-        <div className="pl-4 space-y-4">
-          {space.discipline_engineering_fees.map(fees => renderDisciplineFees(structure, level, space, fees))}
-        </div>
-      </div>
-    );
-  };
+    structures.forEach((structure, index) => {
+      if (!structure) {
+        console.warn(`Fee Scale Verification: Structure at index ${index} is undefined`);
+        return;
+      }
 
-  const renderDisciplineFees = (structure: Structure, level: Level, space: Space, disciplineFees: DisciplineEngineeringFees) => {
-    const disciplineCost = space.construction_costs[disciplineFees.discipline as keyof ConstructionCostsForSpace];
-    
-    return (
-      <div key={disciplineFees.discipline} className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <h6 className="text-sm font-medium">{disciplineFees.discipline}</h6>
-          <Switch
-            checked={disciplineFees.is_active && (!disciplineCost || disciplineCost.is_active)}
-            onCheckedChange={(checked) => handleDisciplineFeeToggle(structure, disciplineFees.discipline, checked)}
-          />
+      const hasFeeScale = !!structure.fee_scale;
+      console.log(`Structure ${index + 1}/${structures.length}: ${structure.name} (${structure.id})`, {
+        hasFeeScale,
+        fee_scale: hasFeeScale ? {
+          id: structure.fee_scale.id,
+          construction_cost: structure.fee_scale.construction_cost,
+          prime_consultant_rate: structure.fee_scale.prime_consultant_rate,
+          mechanical_rate: structure.fee_scale.fraction_of_prime_rate_mechanical,
+          plumbing_rate: structure.fee_scale.fraction_of_prime_rate_plumbing,
+          electrical_rate: structure.fee_scale.fraction_of_prime_rate_electrical,
+          structural_rate: structure.fee_scale.fraction_of_prime_rate_structural,
+          last_updated: structure.fee_scale.updated_at
+        } : 'No fee scale set',
+        total_construction_cost: structure.total_construction_cost,
+        is_duplicate: structure.is_duplicate,
+        duplicate_number: structure.duplicate_number,
+        duplicate_rate: structure.duplicate_rate
+      });
+    });
+    console.groupEnd();
+  }, [structures]);
+
+  // Render discipline header
+  const renderDisciplineHeader = () => (
+    <div className="grid grid-cols-[300px_repeat(auto-fit,minmax(150px,1fr))] gap-4 p-2 bg-gray-50 dark:bg-gray-800/50">
+      <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">Structure / Level / Space</div>
+      {visibleDisciplines.map(discipline => (
+        <div 
+          key={discipline}
+          className={`font-medium text-center ${
+            DISCIPLINES[discipline].is_active 
+              ? 'text-gray-900 dark:text-[#E5E7EB]' 
+              : 'text-gray-400 dark:text-gray-500 italic'
+          }`}
+          title={DISCIPLINES[discipline].is_active ? undefined : 'Inactive discipline'}
+        >
+          {DISCIPLINES[discipline].name}
         </div>
-        {(disciplineFees.is_active || (disciplineCost && disciplineCost.is_active)) && (
-          <div className="pl-4 space-y-2">
-            {disciplineFees.engineering_fees.map(engineeringFee => (
-              <div key={engineeringFee.id} className="flex items-center justify-between">
-                <span className="text-sm">{engineeringFee.name}</span>
-                <div className="flex items-center space-x-2">
-                  <Input
-                    type="number"
-                    value={engineeringFee.fee_amount}
-                    onChange={(e) => handleFeeChange(structure.id, level.id, space.id, engineeringFee.id, disciplineFees.discipline, e.target.value)}
-                    className="w-24"
-                  />
-                  <Switch
-                    checked={engineeringFee.is_active}
-                    onCheckedChange={(checked) => handleFeeUpdate(structure, disciplineFees.discipline, { ...engineeringFee, is_active: checked })}
-                  />
-                </div>
-              </div>
-            ))}
-            
-            {disciplineCost && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Construction Cost</span>
-                <div className="flex items-center space-x-2">
-                  <Input
-                    type="number"
-                    value={disciplineCost.cost_per_sqft}
-                    onChange={(e) => handleFeeChange(structure.id, level.id, space.id, disciplineCost.id, disciplineFees.discipline, e.target.value)}
-                    className="w-24"
-                  />
-                  <Switch
-                    checked={disciplineCost.is_active}
-                    onCheckedChange={(checked) => handleFeeUpdate(structure, disciplineFees.discipline, { ...disciplineCost, is_active: checked })}
-                  />
-                </div>
-              </div>
+      ))}
+    </div>
+  );
+
+  // Render a single space
+  const renderSpace = (space: Space) => {
+    console.log('FixedFees: Rendering space', { 
+      spaceId: space.id, 
+      spaceName: space.name,
+      disciplineFees: space.discipline_engineering_fees,
+      floorArea: space.floor_area,
+      constructionCosts: space.construction_costs
+    });
+
+    // Calculate total construction cost using cost_per_sqft from Total construction cost
+    const costPerSqft = space.construction_costs?.Total?.cost_per_sqft ?? 0;
+    const totalCost = costPerSqft * space.floor_area;
+
+    return (
+      <div key={space.id} className="grid grid-cols-[300px_repeat(auto-fit,minmax(150px,1fr))] gap-4 p-2">
+        <div className="pl-12 flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-primary/5 rounded-md">
+              <Home className="w-4 h-4 text-primary/70" />
+            </div>
+            <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">
+              {space.name}
+            </div>
+          </div>
+          <div className="pl-8 text-xs font-medium text-[#4DB6AC]">
+            {space.floor_area > 0 ? (
+              <>
+                <div>Floor Area: <span className="font-bold">{space.floor_area.toLocaleString()} sq ft</span></div>
+                <div>Total Cost: <span className="font-bold">${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+              </>
+            ) : (
+              <div>No floor area specified</div>
             )}
           </div>
-        )}
+        </div>
+        {visibleDisciplines.map(discipline => {
+          const fee = calculateDisciplineFees(space, discipline);
+          console.log('FixedFees: Rendering discipline fee', {
+            spaceId: space.id,
+            discipline: discipline,
+            fee,
+            isActive: DISCIPLINES[discipline].is_active
+          });
+          return (
+            <div 
+              key={discipline}
+              className={`text-center ${
+                DISCIPLINES[discipline].is_active 
+                  ? 'text-gray-900 dark:text-[#E5E7EB]' 
+                  : 'text-gray-400 dark:text-gray-500 italic'
+              }`}
+            >
+              <span>${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          );
+        })}
       </div>
     );
   };
 
-  // Update calculateEngineeringFees to use updateStructure
-  async function calculateEngineeringFees(structure: Structure) {
-    try {
-      // Fetch fee scale data
-      const response = await fetch('/api/design-fee-scale');
-      if (!response.ok) {
-        throw new Error('Failed to fetch fee scale data');
-      }
-      const feeScales: FeeScale[] = await response.json();
+  // Render a single level
+  const renderLevel = (level: Level) => {
+    console.log('FixedFees: Rendering level', { levelId: level.id, levelNumber: level.level_number });
+    return (
+      <div key={level.id}>
+        <div className="grid grid-cols-[300px] gap-4 p-2 bg-gray-50/50 dark:bg-gray-800/50">
+          <div className="pl-8 flex items-center gap-2">
+            <div className="p-1.5 bg-primary/5 rounded-md">
+              <Layers className="w-4 h-4 text-primary/70" />
+            </div>
+            <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">
+              Level {level.level_number}
+            </div>
+          </div>
+        </div>
+        {level.spaces.map(renderSpace)}
+      </div>
+    );
+  };
 
-      // Sort fee scales by construction cost to ensure we find the correct bracket
-      const sortedFeeScales = [...feeScales].sort((a, b) => a.construction_cost - b.construction_cost);
+  // Render a single structure
+  const renderStructure = (structure: Structure) => {
+    console.log('FixedFees: Rendering structure', { structureId: structure.id, structureName: structure.name });
+    return (
+      <div key={structure.id} className="mb-4">
+        <div className="grid grid-cols-[300px] gap-4 p-3 bg-gray-50/50">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-[#4DB6AC]/10 rounded">
+              <Building2 className="w-5 h-5 text-[#4DB6AC]" />
+            </div>
+            <div className="font-medium text-gray-900 dark:text-[#E5E7EB]">
+              {structure.name}
+            </div>
+          </div>
+        </div>
+        {structure.levels.map(renderLevel)}
+      </div>
+    );
+  };
 
-      // Find the appropriate fee scale based on the structure's total construction cost
-      const appropriateFeeScale = sortedFeeScales.find((scale, index) => {
-        const nextScaleInRange = sortedFeeScales[index + 1];
-        if (!nextScaleInRange) return true; // This is the highest bracket
-        return structure.total_construction_cost >= scale.construction_cost && 
-               structure.total_construction_cost < nextScaleInRange.construction_cost;
-      }) || sortedFeeScales[sortedFeeScales.length - 1]; // Use highest bracket if no match found
-
-      if (!appropriateFeeScale) {
-        throw new Error('No appropriate fee scale found');
-      }
-
-      // Log the found fee scale for debugging
-      console.log('Found appropriate fee scale:', {
-        structureCost: structure.total_construction_cost,
-        feeScale: appropriateFeeScale
-      });
-
-      // Update the structure's fee_scale parameter using updateStructure
-      updateStructure(structure.id, {
-        ...structure,
-        fee_scale: appropriateFeeScale
-      });
-
-      return appropriateFeeScale;
-    } catch (error) {
-      console.error('Error calculating engineering fees:', error);
-      throw error;
-    }
-  }
+  console.log('FixedFees: About to render component', { structuresCount: structures.length });
 
   return (
     <div className="space-y-4">
-      {structures.map(structure => renderStructure(structure))}
+      {structures.length === 0 ? (
+        <div className="text-center p-8 text-gray-500">
+          No structures available
+        </div>
+      ) : (
+        <>
+          {renderDisciplineHeader()}
+          {structures.map(renderStructure)}
+        </>
+      )}
     </div>
   );
 }

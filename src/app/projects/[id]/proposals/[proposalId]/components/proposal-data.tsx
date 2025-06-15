@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, forwardRef, useImperativeHandle, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,12 +29,17 @@ import type {
 import type { tracked_service } from '@/types/proposal/service';
 
 // Component props type
-interface ProposalDataProps {
-  proposalId: string;
-  projectId: string;
-  isNewProposal?: boolean;
-  onDataChange?: (data: proposal) => void;
-}
+type ProposalDataProps = {
+  onDataChange: (data: { hasCompleteData: boolean }) => void;
+  proposal: proposal;
+  structures: Structure[];
+  project: project | null;
+  isLoading: boolean;
+  isSaving: boolean;
+  error: Error | null;
+  onSave: () => Promise<void>;
+  trackedServices: Record<string, tracked_service[]>;
+};
 
 interface ProposalDataRef {
   save: () => Promise<void>;
@@ -72,175 +77,85 @@ const createCalculationResult = (
  * ProposalData Component
  * Manages proposal data and calculations
  */
-export const ProposalData = forwardRef<ProposalDataRef, ProposalDataProps>(({ 
-  proposalId, 
-  projectId, 
-  isNewProposal = false, 
-  onDataChange
+export const ProposalData = forwardRef<ProposalDataRef, ProposalDataProps>(({
+  onDataChange,
+  proposal,
+  structures,
+  project,
+  isLoading,
+  isSaving,
+  error,
+  onSave,
+  trackedServices
 }, ref): JSX.Element => {
   const router = useRouter();
   const isInitialized = useRef(false);
-  const saveRef = useRef<(() => Promise<void>) | null>(null);
-  
-  // Get state and actions from the store
-  const {
-    proposal,
-    isLoading,
-    isSaving,
-    error,
-    loadProposal,
-    setProposal
-  } = useProposalStore();
+  const saveRef = useRef(onSave);
 
-  // Single loading effect to handle all loading cases
+  // Update saveRef when onSave changes
   useEffect(() => {
-    const loadData = async () => {
-      // Skip if we don't have required IDs
-      if (!proposalId || !projectId) {
-        console.log('ProposalData: Missing required IDs:', {
-          hasProposalId: !!proposalId,
-          hasProjectId: !!projectId
-        });
-        return;
-      }
+    saveRef.current = onSave;
+  }, [onSave]);
 
-      // Skip if already loading
-      if (isLoading) {
-        console.log('ProposalData: Already loading, skipping');
-        return;
-      }
-
-      // Skip if we already have the proposal
-      if (proposal?.id === proposalId) {
-        console.log('ProposalData: Already have proposal data:', {
-          proposalId,
-          hasStructures: !!proposal.project_data?.structures,
-          structureCount: proposal.project_data?.structures?.length
-        });
-        return;
-      }
-
-      try {
-        if (isNewProposal) {
-          console.log('Initializing new proposal data');
-          // Initialize new proposal data using store action
-          const newProposal: proposal = {
-            id: 'new',
-            project_id: projectId,
-            proposal_number: 0,
-            revision_number: 1,
-            is_temporary_revision: true,
-            status_id: '',
-            contacts: [],
-            created_by: '',
-            updated_by: '',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            description: null,
-            status: {
-              id: '',
-              code: 'edit',
-              name: 'Edit',
-              description: '',
-              icon: null,
-              color: null,
-              is_initial: true,
-              is_final: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            project_data: {
-              structures: [],
-              calculations: {
-                design: { structures: [], levels: [], spaces: [], total: 0, parameters: {} },
-                construction: { structures: [], levels: [], spaces: [], total: 0, parameters: {} },
-                total: 0
-              },
-              disciplines: [],
-              services: [],
-              tracked_services: []
-            }
-          };
-          setProposal(newProposal);
-        } else {
-          console.log('ProposalData: Loading proposal data...');
-          await loadProposal(proposalId);
-          console.log('ProposalData: Proposal data loaded successfully');
-        }
-      } catch (error) {
-        console.error('ProposalData: Error loading proposal:', error);
-        toast.error('Failed to load proposal data');
-      }
+  // Add logging for initial mount
+  useEffect(() => {
+    console.log('ProposalData: Component mounted', {
+      proposalId: proposal?.id,
+      hasProposal: !!proposal,
+      isLoading,
+      hasStructures: !!structures?.length,
+      structureCount: structures?.length,
+      hasError: !!error
+    });
+    return () => {
+      console.log('ProposalData: Component unmounting');
     };
+  }, []);
 
-    loadData();
-  }, [proposalId, projectId, isLoading, loadProposal, proposal?.id, isNewProposal, setProposal]);
+  // Track prop changes
+  useEffect(() => {
+    console.log('ProposalData: Props changed', {
+      proposalId: proposal?.id,
+      hasProposal: !!proposal,
+      isLoading,
+      hasStructures: !!structures?.length,
+      structureCount: structures?.length,
+      hasProject: !!project,
+      hasError: !!error
+    });
+
+    if (!isLoading && proposal && project) {
+      const data = {
+        hasProjectData: !!project,
+        hasStructures: structures.length > 0,
+        hasCalculations: !!proposal.calculations,
+        hasDisciplines: !!project?.disciplines,
+        hasServices: !!project?.services,
+        hasTrackedServices: Object.keys(trackedServices).length > 0
+      };
+      
+      console.log('ProposalData: Checking data completeness', data);
+      onDataChange({ hasCompleteData: data.hasProjectData });
+    }
+  }, [proposal, project, structures, trackedServices, isLoading, onDataChange]);
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
     save: async () => {
-      if (!proposal) {
-        console.log('ProposalData: No proposal to save');
-        return;
-      }
-
-      try {
-        console.log('ProposalData: Saving proposal...');
-        const response = await fetch(`/api/proposals/${proposalId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(proposal)
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to save proposal: ${response.statusText}`);
-        }
-
-        const updatedProposal = await response.json();
-        console.log('ProposalData: Proposal saved successfully:', updatedProposal);
-        setProposal(updatedProposal);
-        toast.success('Proposal saved successfully');
-      } catch (error) {
-        console.error('ProposalData: Error saving proposal:', error);
-        toast.error('Failed to save proposal');
-        throw error;
-      }
-    },
-    load: async () => {
-      // Skip if we already have the proposal
-      if (proposal?.id === proposalId) {
-        console.log('ProposalData: Already have proposal data, skipping load');
-        return;
-      }
-
-      try {
-        console.log('ProposalData: Loading proposal via ref...');
-        await loadProposal(proposalId);
-        console.log('ProposalData: Proposal loaded successfully via ref');
-      } catch (error) {
-        console.error('ProposalData: Error loading proposal via ref:', error);
-        toast.error('Failed to load proposal');
-        throw error;
+      if (saveRef.current) {
+        await saveRef.current();
       }
     },
     getData: () => proposal
-  }), [proposal, proposalId, setProposal, loadProposal]);
-
-  // Notify parent of data changes - only when proposal ID changes
-  useEffect(() => {
-    if (onDataChange && proposal) {
-      console.log('ProposalData: Calling onDataChange with proposal ID:', proposal.id);
-      onDataChange(proposal);
-    }
-  }, [proposal?.id, onDataChange]); // Only depend on proposal ID
+  }), [proposal]);
 
   // Handle loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center p-8">
+      <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading proposal data...</p>
+          <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-400 mx-auto mb-2"></div>
+          <p>Loading proposal...</p>
         </div>
       </div>
     );
@@ -251,13 +166,7 @@ export const ProposalData = forwardRef<ProposalDataRef, ProposalDataProps>(({
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-md">
         <h3 className="text-lg font-medium text-red-800">Error Loading Proposal</h3>
-        <p className="mt-2 text-red-700">{error}</p>
-        <button
-          onClick={() => loadProposal(proposalId)}
-          className="mt-4 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
-        >
-          Retry Loading
-        </button>
+        <p className="mt-2 text-sm text-red-700">{error.message}</p>
       </div>
     );
   }

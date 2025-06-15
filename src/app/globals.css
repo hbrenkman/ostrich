@@ -589,7 +589,7 @@ textarea {
   }
 
   .search-input {
-    @apply flex h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply flex h-10 w-full rounded-md border border-input bg-white px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .search-input-icon {
@@ -664,5 +664,36 @@ textarea {
 
   .dark .dropdown-separator {
     @apply bg-muted;
+  }
+
+  /* Draggable button styling */
+  .draggable-button {
+    @apply inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors cursor-grab active:cursor-grabbing;
+  }
+
+  .draggable-button:hover {
+    @apply shadow-md;
+  }
+
+  .draggable-button:active {
+    @apply transform scale-95;
+  }
+
+  /* Custom tab styling */
+  .custom-tab {
+    @apply inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors;
+  }
+
+  .custom-tab[data-state="active"] {
+    @apply bg-primary/20 text-primary font-medium;
+  }
+
+  /* Override default Radix tab styling */
+  .custom-tab[role="tab"] {
+    @apply inline-flex items-center gap-2 px-3 py-2 text-sm text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 rounded-md transition-colors !important;
+  }
+
+  .custom-tab[role="tab"][data-state="active"] {
+    @apply bg-primary/20 text-primary font-medium !important;
   }
 }

@@ -12,7 +12,7 @@ interface Role {
   name: string;
 }
 
-interface CompanyContact {
+export interface CompanyContact {
   id: string;
   first_name: string;
   last_name: string;

@@ -12,7 +12,6 @@ import type {
   Structure, 
   Level, 
   ConstructionCost,
-  FeeDuplicateStructure,
   FeeCalculationState,
   FeeScale,
   ConstructionCostsForSpace
@@ -617,6 +616,14 @@ export function ProposalStructures({ costIndex, onAddProposal }: ProposalStructu
         levelTotal + calculateSpaceTotalCost(space), 0), 0);
   };
 
+  const calculateStructureTotalFloorArea = (structure: Structure): number => {
+    return structure.levels.reduce((total, level) => {
+      return total + level.spaces.reduce((levelTotal, space) => {
+        return levelTotal + (space.floor_area || 0);
+      }, 0);
+    }, 0);
+  };
+
   type Discipline = 'Mechanical' | 'Plumbing' | 'Electrical' | 'Civil' | 'Structural';
 
   const handleDisciplineToggle = (space: Space, discipline: Discipline) => {
@@ -701,6 +708,11 @@ export function ProposalStructures({ costIndex, onAddProposal }: ProposalStructu
       ...prev,
       [newStructure.id]: true
     }));
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'structure' }));
+    e.dataTransfer.effectAllowed = 'copy';
   };
 
   const renderSpace = (space: Space, structure: Structure, level: Level) => {
@@ -844,7 +856,7 @@ export function ProposalStructures({ costIndex, onAddProposal }: ProposalStructu
               )}
             </div>
             <div className="mt-1 font-medium text-[#4DB6AC]">
-              Construction Cost: {formatCurrency(totalCost)}
+              Total Floor Area: <span className="font-bold">{calculateStructureTotalFloorArea(structure).toLocaleString()} sq ft</span> • Construction Cost: <span className="font-bold">{formatCurrency(totalCost)}</span>
             </div>
           </div>
           <div className="flex items-start gap-1.5 pt-0.5">
@@ -1051,22 +1063,16 @@ export function ProposalStructures({ costIndex, onAddProposal }: ProposalStructu
     <div className="space-y-4">
       <div className="flex items-center justify-end mb-4">
         <div className="flex items-center gap-2">
-            <div
-              draggable
-              onDragStart={(e) => {
-                const drag_data = {
-                  type: 'structure',
-                  id: crypto.randomUUID()
-                };
-                e.dataTransfer.setData('application/json', JSON.stringify(drag_data));
-                e.dataTransfer.effectAllowed = 'copy';
-              }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm text-[#4DB6AC] hover:text-[#4DB6AC]/90 bg-[#4DB6AC]/10 hover:bg-[#4DB6AC]/20 rounded transition-colors cursor-move"
+            <button 
+              type="button"
+              draggable="true" 
+              onDragStart={handleDragStart}
+              className="draggable-button"
               title="Drag to add structure"
             >
-              <Building2 className="w-3.5 h-3.5" />
+              <Building2 className="w-4 h-4" />
               <span>Add Structure</span>
-            </div>
+            </button>
         </div>
       </div>
 
@@ -1075,14 +1081,7 @@ export function ProposalStructures({ costIndex, onAddProposal }: ProposalStructu
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        {is_adding_space ? (
-          <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-400 mx-auto mb-2"></div>
-              <p>Loading project data...</p>
-            </div>
-          </div>
-        ) : structures.length === 0 ? (
+        {structures.length === 0 ? (
           <div className="flex items-center justify-center h-[200px] text-gray-400 border-2 border-dashed border-gray-200 rounded">
             <div className="text-center">
               <Building2 className="w-7 h-7 mx-auto mb-2 text-gray-400" />

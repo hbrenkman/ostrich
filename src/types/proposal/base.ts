@@ -4,6 +4,7 @@
  */
 
 import type { tracked_service } from './service';
+import type { EngineeringService } from './shared';
 
 // =============== Status Types ===============
 export type proposal_status_code = 
@@ -107,17 +108,37 @@ export interface EngineeringFee extends BaseCostOrFee {
   fraction_of_prime_rate_discipline?: number; 
 }
 
-// Combined type for discipline-specific costs and fees
-export interface DisciplineEngineeringFees {
-  discipline: string;
-  engineering_fees: EngineeringFee[];
+// =============== Discipline Types ===============
+export type DisciplineKey = 
+  | 'Architectural'
+  | 'Civil'
+  | 'Electrical'
+  | 'Mechanical'
+  | 'Plumbing'
+  | 'Structural'
+  | 'Other';
+
+export interface Discipline {
+  key: DisciplineKey;
+  name: string;
   is_active: boolean;
+  is_visible: boolean;  // Controls whether the discipline should be shown in the UI
 }
+
+export const DISCIPLINES: Record<DisciplineKey, Discipline> = {
+  'Architectural': { key: 'Architectural', name: 'Architectural', is_active: false, is_visible: false },
+  'Civil': { key: 'Civil', name: 'Civil', is_active: false, is_visible: true },
+  'Electrical': { key: 'Electrical', name: 'Electrical', is_active: true, is_visible: true },
+  'Mechanical': { key: 'Mechanical', name: 'Mechanical', is_active: true, is_visible: true },
+  'Plumbing': { key: 'Plumbing', name: 'Plumbing', is_active: true, is_visible: true },
+  'Structural': { key: 'Structural', name: 'Structural', is_active: false, is_visible: true },
+  'Other': { key: 'Other', name: 'Other', is_active: false, is_visible: false }
+};
 
 // =============== Service Types ===============
 export interface DisciplineEngineeringService {
   id: string;
-  discipline: string;
+  discipline: DisciplineKey;
   service_name: string;
   description: string | null;
   is_included_in_fee: boolean;
@@ -339,4 +360,15 @@ export interface Space {
   discipline_engineering_fees: DisciplineEngineeringFees[];  // Now properly separated costs and fees
   created_at: string;
   updated_at: string;
-} 
+}
+
+// Update existing interfaces to use the DisciplineKey type
+export interface DisciplineEngineeringFees {
+  discipline: DisciplineKey;
+  fees: EngineeringFee[];
+}
+
+export interface DisciplineEngineeringService {
+  discipline: DisciplineKey;
+  services: EngineeringService[];
+}

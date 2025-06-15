@@ -2,35 +2,29 @@
   "node": {
     "c88478fb5bd8fba10c9aee8886468ee3e1636192": {
       "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!",
         "app/projects/[id]/proposals/[proposalId]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
-        "app/projects/[id]/page": "action-browser",
         "app/projects/[id]/proposals/[proposalId]/page": "action-browser"
       }
     },
     "ebeef5f3b74ab0b516db9a073417813c7e6c94b3": {
       "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!",
         "app/projects/[id]/proposals/[proposalId]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
-        "app/projects/[id]/page": "action-browser",
         "app/projects/[id]/proposals/[proposalId]/page": "action-browser"
       }
     },
     "eefdfcb711ef92978d403f83517c0c75ab9b64fc": {
       "workers": {
-        "app/projects/[id]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!",
         "app/projects/[id]/proposals/[proposalId]/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CSynologyDrive%5C%5COstrich%20Software%5C%5CDevelopment%5C%5Costrich%5C%5Csrc%5C%5Clib%5C%5Cactions%5C%5Clocations.ts%22%2C%5B%22deleteLocation%22%2C%22createLocation%22%2C%22updateLocation%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
-        "app/projects/[id]/page": "action-browser",
         "app/projects/[id]/proposals/[proposalId]/page": "action-browser"
       }
     }
   },
   "edge": {},
-  "encryptionKey": "NX5HXs9HFFiobeIiNoVUokyDlRDLdEJfMY/xlSQYF3E="
+  "encryptionKey": "i7soWku1fAQ9/FutRZpAFKXDnH6JKDReOJ2RruBSsfs="
 }
